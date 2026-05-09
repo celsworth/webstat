@@ -1,0 +1,11 @@
+---
+site_name: Shalazam
+log_glob: logs/access.log*
+database: "./webstat.db"
+output_dir: output
+geoip_db: "GeoLite2-Country.mmdb"
+file_workers: 8
+vacuum_after_prune: true
+enable_pruner: true
+bot_filter: false
+checkpoint_minutes: 1

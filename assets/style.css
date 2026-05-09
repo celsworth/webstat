@@ -1,0 +1,688 @@
+/* ============================================================
+   Webstat — stylesheet
+   Webalizer-inspired, modernised, dark-mode aware, responsive
+   ============================================================ */
+
+/* ---------- Custom properties ---------- */
+:root {
+    --bg: #eef1f5;
+    --surface: #ffffff;
+    --surface-alt: #f4f6fa;
+    --border: #d7dce5;
+    --text: #1f2532;
+    --text-muted: #60697a;
+    --accent: #2f61d4;
+    --accent-h: #244ca7;
+    --success: #2a9d5c;
+    --warning: #e07b00;
+    --danger: #d63b3b;
+    --radius: 6px;
+    --shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+
+    --gap-sm: 0.5rem;  /* tight gaps: month grid, small component spacing */
+    --gap: 1rem;       /* standard gaps: chart grids, flex containers */
+    --gap-lg: 1.5rem;  /* major section spacing: main page flow */
+
+    --metric-hits: #52c493;
+    --metric-files: #7090ff;
+    --metric-pages: #66ddff;
+    --metric-visits: #bfa800;
+    --metric-sites: #ffc055;
+    --metric-bandwidth: #ff7a7a;
+    --status-2xx-bg: rgba(82, 196, 147, 0.14);
+    --status-3xx-bg: rgba(112, 144, 255, 0.14);
+    --status-4xx-bg: rgba(255, 192, 85, 0.18);
+    --status-5xx-bg: rgba(255, 122, 122, 0.16);
+    --status-other-bg: rgba(160, 160, 160, 0.12);
+    --daily-weekend-bg: rgba(47, 97, 212, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0f1117;
+        --surface: #1a1d27;
+        --surface-alt: #22263a;
+        --border: #2e3347;
+        --text: #e2e6f0;
+        --text-muted: #8891a8;
+        --accent: #5b8def;
+        --accent-h: #4a7ae0;
+        --success: #3dbf72;
+        --warning: #f5a623;
+        --danger: #e85555;
+        --shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+        --status-2xx-bg: rgba(82, 196, 147, 0.18);
+        --status-3xx-bg: rgba(112, 144, 255, 0.18);
+        --status-4xx-bg: rgba(255, 192, 85, 0.22);
+        --status-5xx-bg: rgba(255, 122, 122, 0.2);
+        --status-other-bg: rgba(160, 160, 160, 0.16);
+        --daily-weekend-bg: rgba(91, 141, 239, 0.14);
+    }
+}
+
+/* ---------- Reset ---------- */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+}
+
+a {
+    color: var(--accent);
+    text-decoration: none;
+}
+a:hover {
+    color: var(--accent-h);
+    text-decoration: underline;
+}
+
+/* ---------- Layout ---------- */
+.container {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 1.25rem;
+}
+
+/* ---------- Header ---------- */
+.site-header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0.75rem 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow);
+}
+
+.site-header .container {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-lg);
+}
+
+.site-header h1 {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+}
+
+.site-header nav a {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+.site-header nav a:hover {
+    color: var(--accent);
+}
+
+/* ---------- Main ---------- */
+main.container {
+    padding-top: var(--gap-lg);
+    padding-bottom: 3rem;
+    display: grid;
+    row-gap: var(--gap-lg);
+    align-content: start;
+}
+
+/* ---------- Page header ---------- */
+.page-header {
+    align-self: start;
+}
+
+.page-header h1,
+.page-header h2 {
+    font-size: 1.6rem;
+    font-weight: 700;
+}
+
+/* ---------- Summary bar ---------- */
+.summary-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--gap);
+}
+
+.summary-bar > * {
+    flex: 1 1 calc(16.667% - 1rem);
+}
+
+.stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.4rem;
+    min-width: 130px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow);
+    border-top-width: 3px;
+}
+
+.stat-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1.2;
+}
+
+.stat-label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+.stat-card--hits {
+    border-top-color: var(--metric-hits);
+}
+
+.stat-card--pages {
+    border-top-color: var(--metric-pages);
+}
+
+.stat-card--files {
+    border-top-color: var(--metric-files);
+}
+
+.stat-card--visits {
+    border-top-color: var(--metric-visits);
+}
+
+.stat-card--sites {
+    border-top-color: var(--metric-sites);
+}
+
+.stat-card--bandwidth {
+    border-top-color: var(--metric-bandwidth);
+}
+
+/* ---------- Charts ---------- */
+
+.chart-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    box-shadow: var(--shadow);
+    position: relative; /* required for Chart.js ResizeObserver to fire on expand */
+}
+
+/* Bar charts (daily / hourly / monthly overview) */
+.chart-box--bar {
+    height: 280px;
+}
+
+/* Round charts (doughnut / pie) */
+.chart-box--round {
+    height: 380px;
+}
+
+.chart-box--round canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* ---- New vertical chart layouts ---- */
+/* Full-width stacked charts */
+.charts-col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap);
+}
+
+/* 60/40 split for primary + secondary bar chart */
+.charts-split {
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+    gap: var(--gap);
+}
+
+:is(.charts-triple, .charts-split) > .chart-box {
+    min-width: 0;
+}
+
+/* 3-up: doughnut | bar (wider) | doughnut */
+.charts-triple {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: var(--gap);
+}
+
+/* ---------- Data sections ---------- */
+.data-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    box-shadow: var(--shadow);
+}
+
+.data-section h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: var(--gap-sm);
+    padding-bottom: var(--gap-sm);
+    border-bottom: 1px solid var(--border);
+}
+
+.paired-tables-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--gap);
+}
+
+/* ---------- Tables ---------- */
+.table-wrap {
+    overflow-x: auto;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.data-table th,
+.data-table td {
+    padding: 0.1rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.data-table thead th {
+    background: var(--surface-alt);
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    user-select: none;
+}
+
+.data-table.sortable thead th[data-sort] {
+    cursor: pointer;
+}
+
+.data-table thead th.metric-hits {
+    background: var(--surface-alt);
+    color: #2f8f75;
+}
+
+.data-table thead th.metric-files {
+    background: var(--surface-alt);
+    color: #3f67cf;
+}
+
+.data-table thead th.metric-pages {
+    background: var(--surface-alt);
+    color: #3a9dbd;
+}
+
+.data-table thead th.metric-visits {
+    background: var(--surface-alt);
+    color: #9f8f28;
+}
+
+.data-table thead th.metric-sites {
+    background: var(--surface-alt);
+    color: #c07f35;
+}
+
+.data-table thead th.metric-bandwidth {
+    background: var(--surface-alt);
+    color: #cf6a6a;
+}
+
+.data-table.sortable thead th[data-sort]:hover {
+    color: var(--accent);
+}
+.data-table thead th.sort-asc::after {
+    content: " ↑";
+}
+.data-table thead th.sort-desc::after {
+    content: " ↓";
+}
+
+.data-table tbody tr:hover {
+    background: var(--surface-alt);
+}
+.data-table tbody tr.status-row--2xx > td {
+    background: var(--status-2xx-bg);
+}
+.data-table tbody tr.status-row--3xx > td {
+    background: var(--status-3xx-bg);
+}
+.data-table tbody tr.status-row--4xx > td {
+    background: var(--status-4xx-bg);
+}
+.data-table tbody tr.status-row--5xx > td {
+    background: var(--status-5xx-bg);
+}
+.data-table tbody tr.status-row--other > td {
+    background: var(--status-other-bg);
+}
+.data-table tbody tr.status-row--2xx:hover > td {
+    background: color-mix(in srgb, var(--status-2xx-bg) 70%, var(--surface-alt));
+}
+.data-table tbody tr.status-row--3xx:hover > td {
+    background: color-mix(in srgb, var(--status-3xx-bg) 70%, var(--surface-alt));
+}
+.data-table tbody tr.status-row--4xx:hover > td {
+    background: color-mix(in srgb, var(--status-4xx-bg) 70%, var(--surface-alt));
+}
+.data-table tbody tr.status-row--5xx:hover > td {
+    background: color-mix(in srgb, var(--status-5xx-bg) 70%, var(--surface-alt));
+}
+.data-table tbody tr.status-row--other:hover > td {
+    background: color-mix(in srgb, var(--status-other-bg) 70%, var(--surface-alt));
+}
+.data-table tbody tr.daily-row--weekend > td {
+    background: var(--daily-weekend-bg);
+}
+.data-table tbody tr.daily-row--weekend:hover > td {
+    background: color-mix(in srgb, var(--daily-weekend-bg) 70%, var(--surface-alt));
+}
+.data-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.data-table .url-cell {
+    white-space: normal;
+    word-break: break-all;
+    max-width: 420px;
+}
+
+.data-table .num-col {
+    text-align: right;
+    white-space: nowrap;
+}
+
+/* ---------- Table search ---------- */
+.table-search-wrap {
+    margin-bottom: var(--gap-sm);
+}
+
+.table-search {
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-alt);
+    color: var(--text);
+    font-size: 0.88rem;
+    width: 100%;
+    max-width: 320px;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.table-search:focus {
+    border-color: var(--accent);
+}
+
+/* ---------- Month grid (index page) ---------- */
+.year-section {
+    display: grid;
+    row-gap: var(--gap-sm);
+}
+
+.year-section h2 {
+    font-size: 1.3rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+}
+
+.month-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: var(--gap-sm);
+}
+
+.month-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.7rem 1.1rem;
+    min-width: 90px;
+    transition:
+        border-color 0.15s,
+        box-shadow 0.15s;
+    text-decoration: none;
+    box-shadow: var(--shadow);
+}
+
+.month-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px rgba(59, 111, 212, 0.2);
+}
+
+.month-card .month-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text);
+}
+
+.month-card .month-year {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+/* ---------- Misc ---------- */
+.btn-link {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    font-size: 0.82rem;
+    color: var(--accent);
+    transition: background 0.15s;
+}
+
+.btn-link:hover {
+    background: var(--accent);
+    color: #fff;
+    text-decoration: none;
+}
+
+.empty-notice {
+    font-size: 1rem;
+    color: var(--text-muted);
+    padding: 2rem 0;
+}
+
+code {
+    font-family: var(--mono);
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+    font-size: 0.9em;
+}
+
+/* ---------- Monthly statistics table ---------- */
+
+/* Transparent grid — gap shows page background, each child is its own panel */
+.monthly-stats-section {
+    display: grid;
+    row-gap: var(--gap-sm);
+}
+
+/* Card styling for each monthly stats panel */
+.mst-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+}
+
+.monthly-stats-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.monthly-stats-table td,
+.monthly-stats-table th {
+    padding: 0.25rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Remove bottom border on very last row */
+.monthly-stats-table tbody tr:last-child td,
+.monthly-stats-table tbody tr:last-child th {
+    border-bottom: none;
+}
+
+/* --- 3-column tables (avg/max, response codes) --- */
+.mst-3col td:first-child {
+    width: 58%;
+}
+
+.mst-3col td:nth-child(2) {
+    text-align: right;
+    color: var(--text-muted);
+    white-space: nowrap;
+    width: 21%;
+}
+
+.mst-3col td:last-child {
+    text-align: right;
+    white-space: nowrap;
+    width: 21%;
+}
+
+.mst-pct {
+    text-align: right;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* Full-width section header band (used in every panel) */
+.mst-section-header {
+    background: var(--surface-alt);
+    font-weight: 700;
+    font-size: 0.77rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 0.35rem 0.7rem;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Column-label subheader row (Avg / Max) */
+.mst-col-header th {
+    background: var(--surface-alt);
+    font-size: 0.73rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    padding: 0.22rem 0.7rem;
+    border-bottom: 2px solid var(--border);
+    text-align: right;
+}
+
+.mst-col-header th:first-child {
+    text-align: left;
+}
+
+/* Zebra striping */
+.monthly-stats-table tbody tr:nth-child(even) {
+    background: var(--surface-alt);
+}
+
+.monthly-stats-table tbody tr:hover {
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+/* ---------- Footer ---------- */
+.site-footer {
+    border-top: 1px solid var(--border);
+    padding: 1rem 0;
+    margin-top: 2rem;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 640px) {
+    .month-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .summary-bar {
+        gap: var(--gap-sm);
+    }
+    /* 2 per row */
+    .summary-bar > * {
+        flex: 1 1 calc(50% - 1rem);
+    }
+    .stat-card {
+        min-width: 100px;
+        padding: 0.75rem 1rem;
+    }
+    .stat-value {
+        font-size: 1.3rem;
+    }
+    .chart-box--bar {
+        height: 220px;
+    }
+    .chart-box--round {
+        height: 320px;
+        padding: 0.75rem;
+    }
+}
+
+@media (max-width: 720px) {
+    .charts-triple {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 800px) {
+    .month-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 900px) {
+    .charts-split {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 1024px) {
+    .paired-tables-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 1280px) {
+    /* 3 per row */
+    .summary-bar > * {
+        flex: 1 1 calc(33.333% - 1rem);
+    }
+    .month-grid {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+}

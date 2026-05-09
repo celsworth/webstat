@@ -1,0 +1,63 @@
+# Webstat configuration example
+# Copy to webstat.yml and adjust for your environment.
+
+# Display name shown in the HTML reports
+site_name: "My Site"
+
+# Comma-separated log file/glob patterns
+# Each entry can be a single file or a wildcard glob.
+log_glob: /var/log/nginx/access.log,/dump/logs/access*
+
+# SQLite database path (will be created if absent)
+database: /var/lib/webstat/webstat.db
+
+# Directory where static HTML reports are written
+output_dir: /var/www/webstat
+
+# Path to the MaxMind GeoLite2-Country .mmdb file (optional)
+# Leave blank to disable GeoIP lookup
+geoip_db: /etc/webstat/GeoLite2-Country.mmdb
+
+# Number of files to process in parallel (Rust importer only)
+# Start with 2-4 and benchmark; 1 keeps single-thread behavior
+file_workers: 1
+
+# Periodic checkpoint interval in minutes.
+# 0 disables intermediate checkpoints (flush only at end of run).
+checkpoint_minutes: 0
+
+# Number of rows in top-N tables
+top_n: 30
+
+# Space-Saving algorithm capacity (k) for approximate top tables
+# (URLs, hosts, referrers, user-agents).
+# Higher values improve accuracy of top-N approximations at the cost of more memory.
+# Set to 0 (or omit) to auto-derive from top_n × 100 (default: 2000 at top_n=20).
+topn_k: 0
+
+# Run SQLite VACUUM after pruning (can be expensive on large DBs)
+vacuum_after_prune: false
+
+# Enable top-N pruning after imports (default: true; set false to disable for initial out-of-order backfills)
+# Warning: disabling pruning can significantly increase SQLite database size.
+enable_pruner: true
+
+# Exclude known bots/crawlers from main statistics
+bot_filter: true
+
+# Track top URLs/hosts/referrers (disable to reduce processing CPU/memory if unused)
+enable_top_urls: true
+enable_top_hosts: true
+enable_top_refs: true
+
+# Your site's hostname (used to filter self-referrals from the referrers table)
+# site_host: example.com
+
+# HyperLogLog precision for unique-visitor (Sites) counting (valid: 4–16, default: 14).
+# Higher values give better accuracy at the cost of more RAM (~16 KiB/period at 14).
+#
+# WARNING: This value is embedded in the HLL register blobs stored in SQLite.
+# Do NOT change this on an existing database — it will corrupt unique-visitor counts.
+# Only set this before the first `process` run, or after wiping the database.
+# hll_precision: 14
+

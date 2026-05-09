@@ -1,0 +1,105 @@
+<div class="page-header">
+  <h1>{{ site_name | default(value="Webstat") }} - Web Statistics</h1>
+</div>
+
+{% if years | length == 0 %}
+<p class="empty-notice">No data yet. Run <code>webstat process</code> to parse your log file.</p>
+{% else %}
+<section class="summary-bar">
+  <div class="stat-card stat-card--hits">
+    <span class="stat-value" title="{{ totals.hits_exact_fmt }}">{{ totals.hits_fmt }}</span>
+    <span class="stat-label">Total Hits</span>
+  </div>
+  <div class="stat-card stat-card--pages">
+    <span class="stat-value" title="{{ totals.pages_exact_fmt }}">{{ totals.pages_fmt }}</span>
+    <span class="stat-label">Total Pages</span>
+  </div>
+  <div class="stat-card stat-card--files">
+    <span class="stat-value" title="{{ totals.files_exact_fmt }}">{{ totals.files_fmt }}</span>
+    <span class="stat-label">Total Files</span>
+  </div>
+  <div class="stat-card stat-card--visits">
+    <span class="stat-value" title="{{ totals.visits_exact_fmt }}">{{ totals.visits_fmt }}</span>
+    <span class="stat-label">Total Visits</span>
+  </div>
+  <div class="stat-card stat-card--sites">
+    <span class="stat-value" title="{{ totals.sites_exact_fmt }}">{{ totals.sites_fmt }}</span>
+    <span class="stat-label">Unique Sites</span>
+  </div>
+  <div class="stat-card stat-card--bandwidth">
+    <span class="stat-value">{{ totals.bandwidth_fmt }}</span>
+    <span class="stat-label">Bandwidth</span>
+  </div>
+</section>
+
+<section class="charts-col">
+  <div class="charts-split">
+    <div class="chart-box chart-box--bar">
+      <canvas id="overviewChart"></canvas>
+    </div>
+    <div class="chart-box chart-box--bar">
+      <canvas id="overviewVisitsChart"></canvas>
+    </div>
+  </div>
+</section>
+
+{% if status_codes | length > 0 or top_countries | length > 0 or top_agents | length > 0 %}
+<section class="charts-col">
+  <div class="charts-triple">
+    {% if status_codes | length > 0 %}
+    <div class="chart-box">
+      <canvas id="statusChart"></canvas>
+    </div>
+    {% endif %}
+    {% if top_countries | length > 0 %}
+    <div class="chart-box">
+      <canvas id="countriesChart"></canvas>
+    </div>
+    {% endif %}
+    {% if top_agents | length > 0 %}
+    <div class="chart-box">
+      <canvas id="agentsChart"></canvas>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% for yr in years %}
+<section class="year-section">
+  <h2>
+    {{ yr }}
+    <a href="{{ yr }}/index.html" class="btn-link">Annual report -></a>
+  </h2>
+  <div class="month-grid">
+    {% for m in months %}
+    {% if m.year == yr %}
+    <a href="{{ m.period }}/index.html" class="month-card">
+      <span class="month-name">{{ m.month_name }}</span>
+      <span class="month-year">{{ yr }}</span>
+    </a>
+    {% endif %}
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+
+<script>
+(function() {
+  new Chart(document.getElementById('overviewChart'), {{ overview_chart | safe }});
+  new Chart(document.getElementById('overviewVisitsChart'), {{ overview_visits_chart | safe }});
+  var statusCanvas = document.getElementById('statusChart');
+  if (statusCanvas) {
+    new Chart(statusCanvas, {{ status_chart | safe }});
+  }
+  var countriesCanvas = document.getElementById('countriesChart');
+  if (countriesCanvas) {
+    new Chart(countriesCanvas, {{ country_chart | safe }});
+  }
+  var agentsCanvas = document.getElementById('agentsChart');
+  if (agentsCanvas) {
+    new Chart(agentsCanvas, {{ agents_chart | safe }});
+  }
+})();
+</script>
+{% endif %}
