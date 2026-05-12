@@ -7,7 +7,7 @@ mod tests {
         METHOD_COUNT, METHOD_GET, METHOD_OTHER, METHOD_POST, PROTO_1_1, PROTO_2_0, PROTO_COUNT,
         PROTO_OTHER,
     };
-    use crate::topn::{HourlyAcc, TopNCount, TopNHitsBw, TopNHosts};
+    use crate::topn::{HourlyAcc, TopNCount, TopNHosts, TopNUrls};
 
     fn arc(s: &str) -> Arc<str> {
         Arc::from(s)
@@ -144,11 +144,11 @@ mod tests {
             .insert(10, right_hour);
 
         // Top URLs / refs / agents / countries.
-        let mut left_urls = TopNHitsBw::new(10);
+        let mut left_urls = TopNUrls::new(10);
         left_urls.add_hits_bw("/a", 1, 100);
         left.top_urls.insert(Arc::clone(&period), left_urls);
 
-        let mut right_urls = TopNHitsBw::new(10);
+        let mut right_urls = TopNUrls::new(10);
         right_urls.add_hits_bw("/a", 2, 50);
         right.top_urls.insert(Arc::clone(&period), right_urls);
 

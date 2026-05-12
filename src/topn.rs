@@ -27,8 +27,9 @@ pub struct HourlyAcc {
 /// single atomic ref-count increment rather than a heap allocation.
 pub type HourlyMap = AHashMap<Arc<str>, AHashMap<u8, HourlyAcc>>;
 /// period → url → (hits, bandwidth) — bounded by Space-Saving TopN
-pub type TopUrlsByHits = AHashMap<Arc<str>, TopNHitsBw>;
-/// missing - TopUrlsByBandwidth - to add
+pub type TopUrlsByHits = AHashMap<Arc<str>, TopNUrls>;
+/// period → url → (hits, bandwidth) — bounded by Space-Saving TopN (bandwidth-ranked)
+pub type TopUrlsByBandwidth = AHashMap<Arc<str>, TopNUrlsByBandwidth>;
 /// period → host → (hits, bandwidth, country_code, country_name) — bounded by Space-Saving TopN
 pub type TopHostsByHits = AHashMap<Arc<str>, TopNHosts>;
 /// period → host → (hits, bandwidth, country_code, country_name) — bounded by Space-Saving TopN (bandwidth-ranked)
@@ -126,17 +127,129 @@ impl TopNCount {
     }
 }
 
-// ── TopNHitsBw ────────────────────────────────────────────────────────────────
+// ── TopNUrls ────────────────────────────────────────────────────────────────
 
-// this is badly named, it just means it stores hits and bandwidth, but the eviction is based on hits, not bandwidth.
-// we need another one, TopNHitsByBandwidth, that evicts based on bandwidth instead of hits.
-pub struct TopNHitsBw {
+/// Top-N tracker for URL metrics (stores hits, bandwidth).
+pub struct TopNUrls {
     map: AHashMap<String, (u64, u64)>,
     capacity: usize,
     cached_min_hits: Option<(u64, String)>,
 }
 
-impl TopNHitsBw {
+/// Top-N tracker for URL metrics ranked by bandwidth (not hits).
+pub struct TopNUrlsByBandwidth {
+    map: AHashMap<String, (u64, u64)>,
+    capacity: usize,
+    cached_min_bw: Option<(u64, String)>,
+}
+
+impl TopNUrlsByBandwidth {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            map: AHashMap::with_capacity(capacity),
+            capacity,
+            cached_min_bw: None,
+        }
+    }
+
+    #[inline]
+    pub fn add(&mut self, url: &str, bw: u64) {
+        self.add_hits_bw(url, 1, bw);
+    }
+
+    #[inline]
+    pub fn add_hits_bw(&mut self, url: &str, hits: u64, bw: u64) {
+        if self.capacity == 0 {
+            return;
+        }
+        if let Some(v) = self.map.get_mut(url) {
+            v.0 += hits;
+            v.1 += bw;
+            return;
+        }
+
+        if self.map.len() < self.capacity {
+            if self
+                .cached_min_bw
+                .as_ref()
+                .map_or(true, |(min_bw, _)| bw < *min_bw)
+            {
+                self.cached_min_bw = Some((bw, url.to_string()));
+            }
+            self.map.insert(url.to_string(), (hits, bw));
+            return;
+        }
+
+        let (min_key, min_bw) = self.resolve_min_entry();
+
+        self.map.remove(&min_key);
+        let new_bw = min_bw + bw;
+        self.map.insert(url.to_string(), (hits, new_bw));
+        self.cached_min_bw = None;
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn resolve_min_entry(&mut self) -> (String, u64) {
+        if let Some((min_bw, min_key)) = self.cached_min_bw.take() {
+            if self.map.get(min_key.as_str()).map(|(_, bw)| *bw) == Some(min_bw) {
+                return (min_key, min_bw);
+            }
+        }
+
+        self.map
+            .iter()
+            .min_by_key(|(_, (_, bw))| *bw)
+            .map(|(k, (_, bw))| {
+                self.cached_min_bw = Some((*bw, k.clone()));
+                (k.clone(), *bw)
+            })
+            .unwrap()
+    }
+
+    pub fn merge_from(&mut self, other: TopNUrlsByBandwidth) {
+        for (url, (hits, bw)) in other.map {
+            if let Some(existing) = self.map.get_mut(&url) {
+                existing.0 += hits;
+                existing.1 += bw;
+            } else {
+                self.map.insert(url, (hits, bw));
+            }
+        }
+        self.trim_to_capacity();
+        self.cached_min_bw = None;
+    }
+
+    fn trim_to_capacity(&mut self) {
+        if self.capacity == 0 {
+            self.map.clear();
+            return;
+        }
+        if self.map.len() <= self.capacity {
+            return;
+        }
+        let mut entries: Vec<_> = self.map.drain().collect();
+        entries.select_nth_unstable_by(
+            self.capacity - 1,
+            |(url_a, (hits_a, bw_a)), (url_b, (hits_b, bw_b))| {
+                bw_b
+                    .cmp(bw_a)
+                    .then_with(|| hits_b.cmp(hits_a))
+                    .then_with(|| url_a.cmp(url_b))
+            },
+        );
+        entries.truncate(self.capacity);
+        self.map = entries.into_iter().collect();
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, u64, u64)> + '_ {
+        self.map
+            .iter()
+            .map(|(k, (hits, bw))| (k.as_str(), *hits, *bw))
+    }
+}
+
+impl TopNUrls {
     pub fn new(capacity: usize) -> Self {
         Self {
             map: AHashMap::with_capacity(capacity),

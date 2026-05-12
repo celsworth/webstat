@@ -27,7 +27,7 @@ file_workers: 1
 checkpoint_minutes: 0
 
 # Number of rows in top-N tables
-top_n: 30
+top_n: 20
 
 # Space-Saving algorithm capacity (k) for approximate top tables
 # (URLs, hosts, referrers, user-agents).
@@ -45,7 +45,7 @@ enable_pruner: true
 # Exclude known bots/crawlers from main statistics
 bot_filter: true
 
-# Track top URLs/hosts/referrers (disable to reduce processing CPU/memory if unused)
+# Track top URLs/hosts/referrers (disable to go faster and reduce processing CPU/memory if not required)
 enable_top_urls: true
 enable_top_hosts: true
 enable_top_refs: true

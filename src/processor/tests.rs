@@ -1863,14 +1863,14 @@ mod tests {
 
         let mut top_urls: TopUrlsByHits = AHashMap::new();
 
-        let mut old_period = TopNHitsBw::new(5);
+        let mut old_period = TopNUrls::new(5);
         old_period.add_hits_bw("/a", 100, 1);
         old_period.add_hits_bw("/b", 90, 2);
         old_period.add_hits_bw("/c", 5, 1_000);
         old_period.add_hits_bw("/d", 4, 900);
         old_period.add_hits_bw("/e", 50, 50);
 
-        let mut current_period = TopNHitsBw::new(5);
+        let mut current_period = TopNUrls::new(5);
         current_period.add_hits_bw("/n1", 10, 10);
         current_period.add_hits_bw("/n2", 9, 9);
         current_period.add_hits_bw("/n3", 8, 8);
@@ -1942,7 +1942,7 @@ mod tests {
             )
             .expect("process");
 
-        let mut old_period = TopNHitsBw::new(5);
+        let mut old_period = TopNUrls::new(5);
         old_period.add_hits_bw("/a", 100, 1);
         old_period.add_hits_bw("/b", 90, 2);
         old_period.add_hits_bw("/c", 5, 1_000);

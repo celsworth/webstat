@@ -26,6 +26,7 @@ mod tests {
             &AHashMap::new(),
             &AHashMap::new(),
             &AHashMap::new(),
+            &AHashMap::new(),
             None,
             &[],
             &[],

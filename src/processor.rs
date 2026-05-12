@@ -23,7 +23,7 @@ use crate::progress::{flush_shared_progress, print_dir_progress, SharedProgress}
 use crate::run_accumulators::RunAccumulators;
 use crate::topn::{
     CountryHitsMap, HourlyMap, PeriodCountMap, StatusHitsMap, TopHostsByBandwidth, TopHostsByHits,
-    TopNCount, TopNHitsBw, TopNHosts, TopNHostsByBandwidth, TopUrlsByHits,
+    TopNCount, TopNHosts, TopNHostsByBandwidth, TopNUrls, TopNUrlsByBandwidth, TopUrlsByHits, TopUrlsByBandwidth
 };
 use crate::ua::UaParser;
 use crate::util::{
@@ -579,6 +579,7 @@ impl Processor {
                         entry,
                         &mut run_acc.hourly,
                         &mut run_acc.top_urls,
+                        &mut run_acc.top_urls_bw,
                         &mut run_acc.top_hosts,
                         &mut run_acc.top_hosts_bw,
                         &mut run_acc.top_refs,
@@ -635,6 +636,7 @@ impl Processor {
                         entry,
                         &mut run_acc.hourly,
                         &mut run_acc.top_urls,
+                        &mut run_acc.top_urls_bw,
                         &mut run_acc.top_hosts,
                         &mut run_acc.top_hosts_bw,
                         &mut run_acc.top_refs,

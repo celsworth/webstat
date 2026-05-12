@@ -72,11 +72,11 @@ mod tests {
         assert_eq!(pairs, vec![("x".to_string(), 3), ("y".to_string(), 7)]);
     }
 
-    // ── TopNHitsBw ────────────────────────────────────────────────────────────
+    // ── TopNUrls ────────────────────────────────────────────────────────────
 
     #[test]
-    fn topn_hitsbw_add_accumulates_hits_and_bandwidth() {
-        let mut t = TopNHitsBw::new(3);
+    fn topn_urls_add_accumulates_hits_and_bandwidth() {
+        let mut t = TopNUrls::new(3);
         t.add("/foo", 1000);
         t.add("/foo", 500);
         t.add("/bar", 200);
@@ -86,8 +86,8 @@ mod tests {
     }
 
     #[test]
-    fn topn_hitsbw_evicts_lowest_hits_on_overflow() {
-        let mut t = TopNHitsBw::new(2);
+    fn topn_urls_evicts_lowest_hits_on_overflow() {
+        let mut t = TopNUrls::new(2);
         t.add_hits_bw("/a", 10, 100);
         t.add_hits_bw("/b", 1, 50);
         // "/c" should evict "/b" (min_hits=1), inserting at 1+3=4
@@ -98,8 +98,8 @@ mod tests {
     }
 
     #[test]
-    fn topn_hitsbw_cached_min_invalidated_on_existing_increment() {
-        let mut t = TopNHitsBw::new(2);
+    fn topn_urls_cached_min_invalidated_on_existing_increment() {
+        let mut t = TopNUrls::new(2);
         t.add_hits_bw("/a", 1, 0);
         t.add_hits_bw("/b", 1, 0);
         // Raise /a — invalidates cached min.
@@ -110,8 +110,8 @@ mod tests {
     }
 
     #[test]
-    fn topn_hitsbw_second_overflow_after_tied_min_keeps_correct_minimum() {
-        let mut t = TopNHitsBw::new(2);
+    fn topn_urls_second_overflow_after_tied_min_keeps_correct_minimum() {
+        let mut t = TopNUrls::new(2);
         t.add_hits_bw("/a", 1, 0);
         t.add_hits_bw("/b", 1, 0);
         t.add_hits_bw("/c", 1, 0);

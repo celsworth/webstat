@@ -6,12 +6,14 @@ use crate::hll::HyperLogLog;
 use crate::method_proto::{MethodCountsMap, ProtoCountsMap, METHOD_COUNT, PROTO_COUNT};
 use crate::topn::{
     CountryHitsMap, HourlyMap, PeriodCountMap, StatusHitsMap, TopHostsByBandwidth, TopHostsByHits,
-    TopNCount, TopNHitsBw, TopNHosts, TopNHostsByBandwidth, TopUrlsByHits,
+    TopNCount, TopNHosts, TopNHostsByBandwidth, TopNUrls, TopNUrlsByBandwidth, TopUrlsByBandwidth,
+    TopUrlsByHits,
 };
 
 pub(crate) struct RunAccumulators {
     pub(crate) hourly: HourlyMap,
     pub(crate) top_urls: TopUrlsByHits,
+    pub(crate) top_urls_bw: TopUrlsByBandwidth,
     pub(crate) top_hosts: TopHostsByHits,
     pub(crate) top_hosts_bw: TopHostsByBandwidth,
     pub(crate) top_refs: PeriodCountMap,
@@ -35,6 +37,7 @@ impl RunAccumulators {
         Self {
             hourly: AHashMap::with_capacity(base_capacity),
             top_urls: AHashMap::with_capacity(if enable_top_urls { base_capacity } else { 0 }),
+            top_urls_bw: AHashMap::with_capacity(if enable_top_urls { base_capacity } else { 0 }),
             top_hosts: AHashMap::with_capacity(if enable_top_hosts { base_capacity } else { 0 }),
             top_hosts_bw: AHashMap::with_capacity(if enable_top_hosts { base_capacity } else { 0 }),
             top_refs: AHashMap::with_capacity(if enable_top_refs { base_capacity } else { 0 }),
@@ -51,6 +54,7 @@ impl RunAccumulators {
     pub(crate) fn is_empty(&self) -> bool {
         self.hourly.is_empty()
             && self.top_urls.is_empty()
+            && self.top_urls_bw.is_empty()
             && self.top_hosts.is_empty()
             && self.top_hosts_bw.is_empty()
             && self.top_refs.is_empty()
@@ -84,10 +88,18 @@ impl RunAccumulators {
             let dst = self
                 .top_urls
                 .entry(period)
-                .or_insert_with(|| TopNHitsBw::new(topn_k));
+                .or_insert_with(|| TopNUrls::new(topn_k));
             for (url, hits, bw) in urls.iter() {
                 dst.add_hits_bw(url, hits, bw);
             }
+        }
+
+        for (period, urls) in other.top_urls_bw {
+            let dst = self
+                .top_urls_bw
+                .entry(period)
+                .or_insert_with(|| TopNUrlsByBandwidth::new(topn_k));
+            dst.merge_from(urls);
         }
 
         for (period, hosts) in other.top_hosts {

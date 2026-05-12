@@ -12,7 +12,7 @@ use crate::method_proto::{MethodCountsMap, ProtoCountsMap};
 use crate::topn::TopNHosts;
 use crate::topn::{
     CountryHitsMap, HourlyMap, PeriodCountMap, StatusHitsMap, TopHostsByBandwidth, TopHostsByHits,
-    TopUrlsByHits,
+    TopUrlsByBandwidth, TopUrlsByHits,
 };
 
 mod maintenance;

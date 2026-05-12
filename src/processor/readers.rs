@@ -122,6 +122,8 @@ impl Processor {
         let mut hourly: HourlyMap = AHashMap::with_capacity(32);
         let mut top_urls: TopUrlsByHits =
             AHashMap::with_capacity(if self.enable_top_urls { 32 } else { 0 });
+        let mut top_urls_bw: TopUrlsByBandwidth =
+            AHashMap::with_capacity(if self.enable_top_urls { 32 } else { 0 });
         let mut top_hosts: TopHostsByHits =
             AHashMap::with_capacity(if self.enable_top_hosts { 32 } else { 0 });
         let mut top_hosts_bw: TopHostsByBandwidth =
@@ -152,6 +154,7 @@ impl Processor {
                     entry,
                     &mut hourly,
                     &mut top_urls,
+                    &mut top_urls_bw,
                     &mut top_hosts,
                     &mut top_hosts_bw,
                     &mut top_refs,
@@ -174,6 +177,7 @@ impl Processor {
         let run_acc = RunAccumulators {
             hourly,
             top_urls,
+            top_urls_bw,
             top_hosts,
             top_hosts_bw,
             top_refs,

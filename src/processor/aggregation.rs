@@ -45,6 +45,7 @@ impl Processor {
         status_codes: &mut StatusHitsMap,
     ) {
         let mut hll_site_counts = AHashMap::new();
+        let mut top_urls_bw: TopUrlsByBandwidth = AHashMap::new();
         let mut top_hosts_bw: TopHostsByBandwidth = AHashMap::new();
         let mut method_counts = AHashMap::new();
         let mut proto_counts = AHashMap::new();
@@ -52,6 +53,7 @@ impl Processor {
             entry,
             hourly,
             top_urls,
+            &mut top_urls_bw,
             top_hosts,
             &mut top_hosts_bw,
             top_refs,
@@ -71,6 +73,7 @@ impl Processor {
         entry: parser::LogEntry<'_>,
         hourly: &mut HourlyMap,
         top_urls: &mut TopUrlsByHits,
+        top_urls_bw: &mut TopUrlsByBandwidth,
         top_hosts: &mut TopHostsByHits,
         top_hosts_bw: &mut TopHostsByBandwidth,
         top_refs: &mut PeriodCountMap,
@@ -179,7 +182,12 @@ impl Processor {
         if self.enable_top_urls {
             top_urls
                 .entry(Arc::clone(&month_period))
-                .or_insert_with(|| TopNHitsBw::new(topn_k))
+                .or_insert_with(|| TopNUrls::new(topn_k))
+                .add(clean_path, bytes);
+
+            top_urls_bw
+                .entry(Arc::clone(&month_period))
+                .or_insert_with(|| TopNUrlsByBandwidth::new(topn_k))
                 .add(clean_path, bytes);
         }
 
@@ -210,7 +218,12 @@ impl Processor {
         if self.enable_top_urls {
             top_urls
                 .entry(Arc::clone(&year_period))
-                .or_insert_with(|| TopNHitsBw::new(topn_k))
+                .or_insert_with(|| TopNUrls::new(topn_k))
+                .add(clean_path, bytes);
+
+            top_urls_bw
+                .entry(Arc::clone(&year_period))
+                .or_insert_with(|| TopNUrlsByBandwidth::new(topn_k))
                 .add(clean_path, bytes);
         }
 

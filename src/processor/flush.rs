@@ -3,6 +3,7 @@ use ahash::AHashSet;
 
 struct PreFlushTopMaps {
     top_urls: TopUrlsByHits,
+    top_urls_bw: TopUrlsByBandwidth,
     top_hosts: TopHostsByHits,
     top_hosts_bw: TopHostsByBandwidth,
     top_refs: PeriodCountMap,
@@ -33,10 +34,11 @@ impl Processor {
             None
         };
 
-        let (top_urls, top_hosts, top_hosts_bw, top_refs, top_agents, top_countries) =
+        let (top_urls, top_urls_bw, top_hosts, top_hosts_bw, top_refs, top_agents, top_countries) =
             if let Some(maps) = prefiltered.as_ref() {
                 (
                     &maps.top_urls,
+                    &maps.top_urls_bw,
                     &maps.top_hosts,
                     &maps.top_hosts_bw,
                     &maps.top_refs,
@@ -46,6 +48,7 @@ impl Processor {
             } else {
                 (
                     &run_acc.top_urls,
+                    &run_acc.top_urls_bw,
                     &run_acc.top_hosts,
                     &run_acc.top_hosts_bw,
                     &run_acc.top_refs,
@@ -59,6 +62,7 @@ impl Processor {
         self.db.flush_all_with_parse_states_split(
             &run_acc.hourly,
             top_urls,
+            top_urls_bw,
             top_hosts,
             top_hosts_bw,
             top_refs,
@@ -86,6 +90,7 @@ impl Processor {
     fn prefilter_top_maps_for_flush(&self, run_acc: &RunAccumulators) -> PreFlushTopMaps {
         PreFlushTopMaps {
             top_urls: self.filter_top_urls_for_flush(&run_acc.top_urls),
+            top_urls_bw: self.filter_top_urls_bw_for_flush(&run_acc.top_urls_bw),
             top_hosts: self.filter_top_hosts_for_flush(&run_acc.top_hosts),
             top_hosts_bw: self.filter_top_hosts_bw_for_flush(&run_acc.top_hosts_bw),
             top_refs: self.filter_top_count_map_for_flush(&run_acc.top_refs),
@@ -163,11 +168,44 @@ impl Processor {
                 selected.insert((*url).to_string());
             }
 
-            let mut out = TopNHitsBw::new(selected.len());
+            let mut out = TopNUrls::new(selected.len());
             for (url, hits, bw) in entries {
                 if selected.contains(url) {
                     out.add_hits_bw(url, hits, bw);
                 }
+            }
+            filtered.insert(Arc::clone(period), out);
+        }
+
+        filtered
+    }
+
+    fn filter_top_urls_bw_for_flush(
+        &self,
+        top_urls_bw: &TopUrlsByBandwidth,
+    ) -> TopUrlsByBandwidth {
+        let (latest_month, latest_year) = self.latest_periods(top_urls_bw.keys());
+        let mut filtered = TopUrlsByBandwidth::with_capacity(top_urls_bw.len());
+
+        for (period, urls) in top_urls_bw {
+            if !self.should_pretrim_period(period.as_ref(), latest_month, latest_year) {
+                filtered.insert(Arc::clone(period), self.clone_top_urls_bw(urls));
+                continue;
+            }
+
+            let mut entries: Vec<_> = urls.iter().collect();
+            if entries.len() > self.top_n {
+                entries.sort_unstable_by(|(url_a, hits_a, bw_a), (url_b, hits_b, bw_b)| {
+                    bw_b.cmp(bw_a)
+                        .then_with(|| hits_b.cmp(hits_a))
+                        .then_with(|| url_a.cmp(url_b))
+                });
+                entries.truncate(self.top_n);
+            }
+
+            let mut out = TopNUrlsByBandwidth::new(entries.len());
+            for (url, hits, bw) in entries {
+                out.add_hits_bw(url, hits, bw);
             }
             filtered.insert(Arc::clone(period), out);
         }
@@ -298,8 +336,16 @@ impl Processor {
         filtered
     }
 
-    fn clone_top_hits_bw(&self, src: &TopNHitsBw) -> TopNHitsBw {
-        let mut out = TopNHitsBw::new(src.iter().count());
+    fn clone_top_hits_bw(&self, src: &TopNUrls) -> TopNUrls {
+        let mut out = TopNUrls::new(src.iter().count());
+        for (key, hits, bw) in src.iter() {
+            out.add_hits_bw(key, hits, bw);
+        }
+        out
+    }
+
+    fn clone_top_urls_bw(&self, src: &TopNUrlsByBandwidth) -> TopNUrlsByBandwidth {
+        let mut out = TopNUrlsByBandwidth::new(src.iter().count());
         for (key, hits, bw) in src.iter() {
             out.add_hits_bw(key, hits, bw);
         }

@@ -12,10 +12,12 @@ impl Database {
         top_countries: &CountryHitsMap,
         status_codes: &StatusHitsMap,
     ) -> Result<()> {
+        let empty_urls_bw: TopUrlsByBandwidth = AHashMap::new();
         let empty_hosts_bw: TopHostsByBandwidth = AHashMap::new();
         self.flush_all_with_parse_states_split(
             hourly,
             top_urls,
+            &empty_urls_bw,
             top_hosts,
             &empty_hosts_bw,
             top_refs,
@@ -47,10 +49,12 @@ impl Database {
         hll_all_time: Option<&HyperLogLog>,
         parse_states: &[ParseStateUpdate],
     ) -> Result<()> {
+        let empty_urls_bw: TopUrlsByBandwidth = AHashMap::new();
         let empty_hosts_bw: TopHostsByBandwidth = AHashMap::new();
         self.flush_all_with_parse_states_split(
             hourly,
             top_urls,
+            &empty_urls_bw,
             top_hosts,
             &empty_hosts_bw,
             top_refs,
@@ -72,6 +76,7 @@ impl Database {
         &mut self,
         hourly: &HourlyMap,
         top_urls: &TopUrlsByHits,
+        top_urls_bw: &TopUrlsByBandwidth,
         top_hosts: &TopHostsByHits,
         top_hosts_bw: &TopHostsByBandwidth,
         top_refs: &PeriodCountMap,
@@ -144,7 +149,7 @@ impl Database {
                        ON CONFLICT (period,url) DO UPDATE SET \
                          hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth";
             let mut stmt = tx.prepare_cached(sql)?;
-            for (period, urls) in top_urls {
+            for (period, urls) in top_urls_bw {
                 for (url, hits, bw) in urls.iter() {
                     stmt.execute(params![period.as_ref(), url, hits as i64, bw as i64])?;
                 }
