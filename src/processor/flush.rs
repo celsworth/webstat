@@ -137,13 +137,13 @@ impl Processor {
 
         for (period, urls) in top_urls {
             if !self.should_pretrim_period(period.as_ref(), latest_month, latest_year) {
-                filtered.insert(Arc::clone(period), self.clone_top_hits_bw(urls));
+                filtered.insert(Arc::clone(period), self.clone_top_urls(urls));
                 continue;
             }
 
             let mut entries: Vec<_> = urls.iter().collect();
             if entries.len() <= self.top_n {
-                filtered.insert(Arc::clone(period), self.clone_top_hits_bw(urls));
+                filtered.insert(Arc::clone(period), self.clone_top_urls(urls));
                 continue;
             }
 
@@ -180,10 +180,7 @@ impl Processor {
         filtered
     }
 
-    fn filter_top_urls_bw_for_flush(
-        &self,
-        top_urls_bw: &TopUrlsByBandwidth,
-    ) -> TopUrlsByBandwidth {
+    fn filter_top_urls_bw_for_flush(&self, top_urls_bw: &TopUrlsByBandwidth) -> TopUrlsByBandwidth {
         let (latest_month, latest_year) = self.latest_periods(top_urls_bw.keys());
         let mut filtered = TopUrlsByBandwidth::with_capacity(top_urls_bw.len());
 
@@ -336,7 +333,7 @@ impl Processor {
         filtered
     }
 
-    fn clone_top_hits_bw(&self, src: &TopNUrls) -> TopNUrls {
+    fn clone_top_urls(&self, src: &TopNUrls) -> TopNUrls {
         let mut out = TopNUrls::new(src.iter().count());
         for (key, hits, bw) in src.iter() {
             out.add_hits_bw(key, hits, bw);
