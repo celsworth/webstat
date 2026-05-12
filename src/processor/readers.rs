@@ -133,6 +133,8 @@ impl Processor {
         let mut status_codes: StatusMap = AHashMap::with_capacity(32);
         let mut hll_site_counts: AHashMap<Arc<str>, HyperLogLog> = AHashMap::with_capacity(32);
         let mut hll_all_time = Some(HyperLogLog::new(self.hll_precision));
+        let mut method_counts = crate::method_proto::MethodCountsMap::with_capacity(32);
+        let mut proto_counts = crate::method_proto::ProtoCountsMap::with_capacity(32);
 
         let mut lines_processed = 0u64;
         let mut line = String::new();
@@ -158,6 +160,8 @@ impl Processor {
                     &mut status_codes,
                     &mut hll_site_counts,
                     hll_all_time.as_mut(),
+                    &mut method_counts,
+                    &mut proto_counts,
                 );
                 lines_processed += 1;
             }
@@ -178,6 +182,8 @@ impl Processor {
             status_codes,
             hll_site_counts,
             hll_all_time,
+            method_counts,
+            proto_counts,
         };
 
         Ok((lines_processed, run_acc))

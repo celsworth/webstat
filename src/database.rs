@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 
 use crate::hll::HyperLogLog;
+use crate::method_proto::{MethodCountsMap, ProtoCountsMap};
 #[cfg(test)]
 use crate::topn::TopNHosts;
 use crate::topn::{
@@ -169,6 +170,18 @@ CREATE TABLE IF NOT EXISTS status_codes (
     status INTEGER,
     hits   INTEGER DEFAULT 0,
     PRIMARY KEY (period, status)
+);
+CREATE TABLE IF NOT EXISTS method_counts (
+    period TEXT,
+    method TEXT,
+    hits   INTEGER DEFAULT 0,
+    PRIMARY KEY (period, method)
+);
+CREATE TABLE IF NOT EXISTS proto_counts (
+    period TEXT,
+    proto  TEXT,
+    hits   INTEGER DEFAULT 0,
+    PRIMARY KEY (period, proto)
 );
 
 CREATE TABLE IF NOT EXISTS site_counts_hll (

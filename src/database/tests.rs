@@ -3,9 +3,214 @@ use super::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::method_proto::{
+        METHOD_COUNT, METHOD_GET, METHOD_POST, PROTO_1_1, PROTO_2_0, PROTO_COUNT,
+    };
 
     fn open_test_db() -> Database {
         Database::open(":memory:").expect("open in-memory db")
+    }
+
+    fn empty_flush(db: &mut Database, method_counts: &MethodCountsMap, proto_counts: &ProtoCountsMap) {
+        db.flush_all_with_parse_states_split(
+            &AHashMap::new(),
+            &AHashMap::new(),
+            &AHashMap::new(),
+            &AHashMap::new(),
+            &AHashMap::new(),
+            &AHashMap::new(),
+            &AHashMap::new(),
+            &AHashMap::new(),
+            &AHashMap::new(),
+            None,
+            &[],
+            &[],
+            &[],
+            None,
+            method_counts,
+            proto_counts,
+        )
+        .expect("flush");
+    }
+
+    #[test]
+    fn method_counts_stored_with_correct_names_and_values() {
+        let mut db = open_test_db();
+        let period = Arc::<str>::from("2026-05");
+
+        let mut counts = [0u64; METHOD_COUNT];
+        counts[METHOD_GET] = 100;
+        counts[METHOD_POST] = 42;
+        let mut method_counts = AHashMap::new();
+        method_counts.insert(Arc::clone(&period), counts);
+
+        empty_flush(&mut db, &method_counts, &AHashMap::new());
+
+        let get_hits: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM method_counts WHERE period='2026-05' AND method='GET'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("GET row");
+        assert_eq!(get_hits, 100);
+
+        let post_hits: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM method_counts WHERE period='2026-05' AND method='POST'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("POST row");
+        assert_eq!(post_hits, 42);
+    }
+
+    #[test]
+    fn method_counts_zero_slots_are_not_stored() {
+        let mut db = open_test_db();
+        let period = Arc::<str>::from("2026-05");
+
+        let mut counts = [0u64; METHOD_COUNT];
+        counts[METHOD_GET] = 5; // only GET is non-zero
+        let mut method_counts = AHashMap::new();
+        method_counts.insert(Arc::clone(&period), counts);
+
+        empty_flush(&mut db, &method_counts, &AHashMap::new());
+
+        let row_count: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM method_counts WHERE period='2026-05'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(row_count, 1, "only non-zero slots should be stored");
+    }
+
+    #[test]
+    fn method_counts_accumulate_across_flushes() {
+        let mut db = open_test_db();
+        let period = Arc::<str>::from("2026-05");
+
+        let mut c1 = [0u64; METHOD_COUNT];
+        c1[METHOD_GET] = 100;
+        let mut m1 = AHashMap::new();
+        m1.insert(Arc::clone(&period), c1);
+        empty_flush(&mut db, &m1, &AHashMap::new());
+
+        let mut c2 = [0u64; METHOD_COUNT];
+        c2[METHOD_GET] = 50;
+        c2[METHOD_POST] = 10;
+        let mut m2 = AHashMap::new();
+        m2.insert(Arc::clone(&period), c2);
+        empty_flush(&mut db, &m2, &AHashMap::new());
+
+        let get_hits: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM method_counts WHERE period='2026-05' AND method='GET'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("GET after second flush");
+        assert_eq!(get_hits, 150);
+
+        let post_hits: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM method_counts WHERE period='2026-05' AND method='POST'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("POST after second flush");
+        assert_eq!(post_hits, 10);
+    }
+
+    #[test]
+    fn proto_counts_stored_with_version_strings_not_http_prefix() {
+        let mut db = open_test_db();
+        let period = Arc::<str>::from("2026-05");
+
+        let mut counts = [0u64; PROTO_COUNT];
+        counts[PROTO_1_1] = 80;
+        counts[PROTO_2_0] = 20;
+        let mut proto_counts = AHashMap::new();
+        proto_counts.insert(Arc::clone(&period), counts);
+
+        empty_flush(&mut db, &AHashMap::new(), &proto_counts);
+
+        let h11: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM proto_counts WHERE period='2026-05' AND proto='1.1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("1.1 row");
+        assert_eq!(h11, 80);
+
+        let h2: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM proto_counts WHERE period='2026-05' AND proto='2.0'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("2.0 row");
+        assert_eq!(h2, 20);
+
+        // Confirm "HTTP/..." keys are never stored.
+        let http_rows: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM proto_counts WHERE proto LIKE 'HTTP/%'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("http prefix check");
+        assert_eq!(http_rows, 0);
+    }
+
+    #[test]
+    fn proto_counts_accumulate_across_flushes() {
+        let mut db = open_test_db();
+        let period = Arc::<str>::from("2026-05");
+
+        let mut p1 = [0u64; PROTO_COUNT];
+        p1[PROTO_1_1] = 200;
+        let mut pc1 = AHashMap::new();
+        pc1.insert(Arc::clone(&period), p1);
+        empty_flush(&mut db, &AHashMap::new(), &pc1);
+
+        let mut p2 = [0u64; PROTO_COUNT];
+        p2[PROTO_1_1] = 100;
+        p2[PROTO_2_0] = 30;
+        let mut pc2 = AHashMap::new();
+        pc2.insert(Arc::clone(&period), p2);
+        empty_flush(&mut db, &AHashMap::new(), &pc2);
+
+        let h11: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM proto_counts WHERE period='2026-05' AND proto='1.1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("1.1 after second flush");
+        assert_eq!(h11, 300);
+
+        let h2: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM proto_counts WHERE period='2026-05' AND proto='2.0'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("2.0 after second flush");
+        assert_eq!(h2, 30);
     }
 
     fn insert_top_url(db: &Database, period: &str, url: &str, hits: i64) {

@@ -3,6 +3,10 @@ use super::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::method_proto::{
+        METHOD_COUNT, METHOD_GET, METHOD_OTHER, METHOD_POST, PROTO_1_1, PROTO_2_0, PROTO_COUNT,
+        PROTO_OTHER,
+    };
     use crate::topn::{HourlyAcc, TopNCount, TopNHitsBw, TopNHosts};
 
     fn arc(s: &str) -> Arc<str> {
@@ -20,6 +24,97 @@ mod tests {
         codes.insert(200u16, 1u64);
         acc.status_codes.insert(period, codes);
         assert!(!acc.is_empty());
+    }
+
+    #[test]
+    fn new_accumulator_has_empty_method_and_proto_counts() {
+        let acc = RunAccumulators::new(16, 12, false, false, false);
+        assert!(acc.method_counts.is_empty());
+        assert!(acc.proto_counts.is_empty());
+    }
+
+    #[test]
+    fn method_counts_populated_bucket_makes_is_empty_false() {
+        let mut acc = RunAccumulators::new(16, 12, false, false, false);
+        let mut counts = [0u64; METHOD_COUNT];
+        counts[METHOD_GET] = 5;
+        acc.method_counts.insert(arc("2026-05"), counts);
+        assert!(!acc.is_empty());
+    }
+
+    #[test]
+    fn proto_counts_populated_bucket_makes_is_empty_false() {
+        let mut acc = RunAccumulators::new(16, 12, false, false, false);
+        let mut counts = [0u64; PROTO_COUNT];
+        counts[PROTO_1_1] = 3;
+        acc.proto_counts.insert(arc("2026-05"), counts);
+        assert!(!acc.is_empty());
+    }
+
+    #[test]
+    fn merge_from_adds_method_counts_element_wise() {
+        let mut left = RunAccumulators::new(8, 12, false, false, false);
+        let mut right = RunAccumulators::new(8, 12, false, false, false);
+        let period = arc("2026-05");
+
+        let mut lm = [0u64; METHOD_COUNT];
+        lm[METHOD_GET] = 10;
+        lm[METHOD_POST] = 3;
+        left.method_counts.insert(Arc::clone(&period), lm);
+
+        let mut rm = [0u64; METHOD_COUNT];
+        rm[METHOD_GET] = 5;
+        rm[METHOD_OTHER] = 2;
+        right.method_counts.insert(Arc::clone(&period), rm);
+
+        left.merge_from(right, 12, 10);
+
+        let merged = left.method_counts.get("2026-05").unwrap();
+        assert_eq!(merged[METHOD_GET], 15);
+        assert_eq!(merged[METHOD_POST], 3);
+        assert_eq!(merged[METHOD_OTHER], 2);
+    }
+
+    #[test]
+    fn merge_from_adds_proto_counts_element_wise() {
+        let mut left = RunAccumulators::new(8, 12, false, false, false);
+        let mut right = RunAccumulators::new(8, 12, false, false, false);
+        let period = arc("2026-05");
+
+        let mut lp = [0u64; PROTO_COUNT];
+        lp[PROTO_1_1] = 100;
+        left.proto_counts.insert(Arc::clone(&period), lp);
+
+        let mut rp = [0u64; PROTO_COUNT];
+        rp[PROTO_1_1] = 50;
+        rp[PROTO_2_0] = 20;
+        right.proto_counts.insert(Arc::clone(&period), rp);
+
+        left.merge_from(right, 12, 10);
+
+        let merged = left.proto_counts.get("2026-05").unwrap();
+        assert_eq!(merged[PROTO_1_1], 150);
+        assert_eq!(merged[PROTO_2_0], 20);
+        assert_eq!(merged[PROTO_OTHER], 0);
+    }
+
+    #[test]
+    fn merge_from_creates_new_period_entries_when_absent_in_left() {
+        let mut left = RunAccumulators::new(8, 12, false, false, false);
+        let mut right = RunAccumulators::new(8, 12, false, false, false);
+
+        let mut rm = [0u64; METHOD_COUNT];
+        rm[METHOD_GET] = 7;
+        right.method_counts.insert(arc("2026-06"), rm);
+
+        let mut rp = [0u64; PROTO_COUNT];
+        rp[PROTO_2_0] = 4;
+        right.proto_counts.insert(arc("2026-06"), rp);
+
+        left.merge_from(right, 12, 10);
+
+        assert_eq!(left.method_counts.get("2026-06").unwrap()[METHOD_GET], 7);
+        assert_eq!(left.proto_counts.get("2026-06").unwrap()[PROTO_2_0], 4);
     }
 
     #[test]

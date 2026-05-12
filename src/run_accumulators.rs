@@ -3,6 +3,7 @@ use std::sync::Arc;
 use ahash::AHashMap;
 
 use crate::hll::HyperLogLog;
+use crate::method_proto::{MethodCountsMap, ProtoCountsMap, METHOD_COUNT, PROTO_COUNT};
 use crate::topn::{
     CountryCountMap, HostBwMap, HostHitsMap, HourlyMap, PeriodCountMap, PeriodHitsMap, StatusMap,
     TopNCount, TopNHitsBw, TopNHosts, TopNHostsByBandwidth,
@@ -19,6 +20,8 @@ pub(crate) struct RunAccumulators {
     pub(crate) status_codes: StatusMap,
     pub(crate) hll_site_counts: AHashMap<Arc<str>, HyperLogLog>,
     pub(crate) hll_all_time: Option<HyperLogLog>,
+    pub(crate) method_counts: MethodCountsMap,
+    pub(crate) proto_counts: ProtoCountsMap,
 }
 
 impl RunAccumulators {
@@ -40,6 +43,8 @@ impl RunAccumulators {
             status_codes: AHashMap::with_capacity(base_capacity),
             hll_site_counts: AHashMap::with_capacity(base_capacity),
             hll_all_time: Some(HyperLogLog::new(hll_precision)),
+            method_counts: AHashMap::with_capacity(base_capacity),
+            proto_counts: AHashMap::with_capacity(base_capacity),
         }
     }
 
@@ -53,6 +58,8 @@ impl RunAccumulators {
             && self.top_countries.is_empty()
             && self.status_codes.is_empty()
             && self.hll_site_counts.is_empty()
+            && self.method_counts.is_empty()
+            && self.proto_counts.is_empty()
     }
 
     pub(crate) fn merge_from(&mut self, other: RunAccumulators, hll_precision: u8, topn_k: usize) {
@@ -144,6 +151,20 @@ impl RunAccumulators {
             self.hll_all_time
                 .get_or_insert_with(|| HyperLogLog::new(hll_precision))
                 .merge(&incoming);
+        }
+
+        for (period, counts) in other.method_counts {
+            let dst = self.method_counts.entry(period).or_insert([0u64; METHOD_COUNT]);
+            for i in 0..METHOD_COUNT {
+                dst[i] += counts[i];
+            }
+        }
+
+        for (period, counts) in other.proto_counts {
+            let dst = self.proto_counts.entry(period).or_insert([0u64; PROTO_COUNT]);
+            for i in 0..PROTO_COUNT {
+                dst[i] += counts[i];
+            }
         }
     }
 }

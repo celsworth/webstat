@@ -71,6 +71,8 @@ impl Processor {
             retired_parse_states,
             &visit_state_updates,
             visit_state_prune_before_ts,
+            &run_acc.method_counts,
+            &run_acc.proto_counts,
         )?;
 
         let flush_elapsed = flush_start.elapsed().as_secs_f64();

@@ -28,6 +28,8 @@ impl Database {
             &[],
             &[],
             None,
+            &AHashMap::new(),
+            &AHashMap::new(),
         )
     }
 
@@ -61,6 +63,8 @@ impl Database {
             &[],
             &[],
             None,
+            &AHashMap::new(),
+            &AHashMap::new(),
         )
     }
 
@@ -80,6 +84,8 @@ impl Database {
         retired_parse_states: &[ParseStateUpdate],
         visit_states: &[VisitStateUpdate],
         visit_state_prune_before_ts: Option<i64>,
+        method_counts: &MethodCountsMap,
+        proto_counts: &ProtoCountsMap,
     ) -> Result<()> {
         let tx = self.conn.transaction()?;
 
@@ -308,6 +314,42 @@ impl Database {
             for (period, codes) in status_codes {
                 for (status, hits) in codes {
                     stmt.execute(params![period.as_ref(), *status as i64, *hits as i64])?;
+                }
+            }
+        }
+
+        // method_counts
+        {
+            let sql = "INSERT INTO method_counts (period,method,hits) VALUES (?1,?2,?3) \
+                       ON CONFLICT (period,method) DO UPDATE SET hits=hits+excluded.hits";
+            let mut stmt = tx.prepare_cached(sql)?;
+            for (period, counts) in method_counts {
+                for (i, &hits) in counts.iter().enumerate() {
+                    if hits > 0 {
+                        stmt.execute(params![
+                            period.as_ref(),
+                            crate::method_proto::METHOD_NAMES[i],
+                            hits as i64
+                        ])?;
+                    }
+                }
+            }
+        }
+
+        // proto_counts
+        {
+            let sql = "INSERT INTO proto_counts (period,proto,hits) VALUES (?1,?2,?3) \
+                       ON CONFLICT (period,proto) DO UPDATE SET hits=hits+excluded.hits";
+            let mut stmt = tx.prepare_cached(sql)?;
+            for (period, counts) in proto_counts {
+                for (i, &hits) in counts.iter().enumerate() {
+                    if hits > 0 {
+                        stmt.execute(params![
+                            period.as_ref(),
+                            crate::method_proto::PROTO_NAMES[i],
+                            hits as i64
+                        ])?;
+                    }
                 }
             }
         }

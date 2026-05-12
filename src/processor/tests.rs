@@ -2319,4 +2319,236 @@ mod tests {
             .expect("query total hits");
         assert_eq!(total_hits, 2);
     }
+
+    fn line_with_method_proto(
+        method: &str,
+        proto: &str,
+        path: &str,
+        status: u16,
+        bytes: u64,
+    ) -> String {
+        format!(
+            r#"1.2.3.4 - - [08/May/2026:14:23:01 +0000] "{method} {path} {proto}" {status} {bytes} "-" "Mozilla/5.0""#
+        )
+    }
+
+    #[test]
+    fn process_globs_stores_method_counts_per_period() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let log_path = temp.path().join("access.log");
+        let pattern = log_path.to_str().expect("utf-8").to_string();
+
+        let lines = vec![
+            line_with_method_proto("GET", "HTTP/1.1", "/a.html", 200, 100),
+            line_with_method_proto("GET", "HTTP/1.1", "/b.html", 200, 200),
+            line_with_method_proto("POST", "HTTP/1.1", "/submit", 201, 0),
+            line_with_method_proto("HEAD", "HTTP/2.0", "/c.html", 200, 0),
+        ];
+        write_plain_file(&log_path, &lines);
+
+        let mut processor = new_processor(&db_path);
+        let processed = processor.process_globs(&pattern).expect("process");
+        assert_eq!(processed, 4);
+
+        let conn = Connection::open(db_path.to_str().unwrap()).expect("open db");
+
+        let get_hits: i64 = conn
+            .query_row(
+                "SELECT COALESCE(hits,0) FROM method_counts WHERE period='2026-05' AND method='GET'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("GET month");
+        assert_eq!(get_hits, 2);
+
+        let post_hits: i64 = conn
+            .query_row(
+                "SELECT COALESCE(hits,0) FROM method_counts WHERE period='2026-05' AND method='POST'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("POST month");
+        assert_eq!(post_hits, 1);
+
+        let head_hits: i64 = conn
+            .query_row(
+                "SELECT COALESCE(hits,0) FROM method_counts WHERE period='2026-05' AND method='HEAD'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("HEAD month");
+        assert_eq!(head_hits, 1);
+
+        // Year period should also be written.
+        let get_year: i64 = conn
+            .query_row(
+                "SELECT COALESCE(hits,0) FROM method_counts WHERE period='2026' AND method='GET'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("GET year");
+        assert_eq!(get_year, 2);
+    }
+
+    #[test]
+    fn process_globs_stores_proto_counts_per_period() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let log_path = temp.path().join("access.log");
+        let pattern = log_path.to_str().expect("utf-8").to_string();
+
+        let lines = vec![
+            line_with_method_proto("GET", "HTTP/1.1", "/a.html", 200, 100),
+            line_with_method_proto("GET", "HTTP/1.1", "/b.html", 200, 200),
+            line_with_method_proto("GET", "HTTP/1.1", "/c.html", 200, 300),
+            line_with_method_proto("POST", "HTTP/2.0", "/submit", 200, 0),
+            line_with_method_proto("GET", "HTTP/2", "/d.html", 200, 400),
+        ];
+        write_plain_file(&log_path, &lines);
+
+        let mut processor = new_processor(&db_path);
+        processor.process_globs(&pattern).expect("process");
+
+        let conn = Connection::open(db_path.to_str().unwrap()).expect("open db");
+
+        let h11: i64 = conn
+            .query_row(
+                "SELECT COALESCE(hits,0) FROM proto_counts WHERE period='2026-05' AND proto='1.1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("1.1 month");
+        assert_eq!(h11, 3);
+
+        // HTTP/2.0 and HTTP/2 both map to "2.0".
+        let h2: i64 = conn
+            .query_row(
+                "SELECT COALESCE(hits,0) FROM proto_counts WHERE period='2026-05' AND proto='2.0'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("2.0 month");
+        assert_eq!(h2, 2);
+
+        // No HTTP/ prefix in the stored values.
+        let bad_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM proto_counts WHERE proto LIKE 'HTTP/%'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("prefix check");
+        assert_eq!(bad_rows, 0);
+
+        // Year period.
+        let h11_year: i64 = conn
+            .query_row(
+                "SELECT COALESCE(hits,0) FROM proto_counts WHERE period='2026' AND proto='1.1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("1.1 year");
+        assert_eq!(h11_year, 3);
+    }
+
+    #[test]
+    fn process_globs_method_and_proto_accumulate_across_runs() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let log_path = temp.path().join("access.log");
+        let pattern = log_path.to_str().expect("utf-8").to_string();
+
+        write_plain_file(
+            &log_path,
+            &[line_with_method_proto("GET", "HTTP/1.1", "/a.html", 200, 100)],
+        );
+
+        let mut processor = new_processor(&db_path);
+        processor.process_globs(&pattern).expect("first run");
+
+        // Append a new line.
+        append_plain_file(
+            &log_path,
+            &[line_with_method_proto("POST", "HTTP/2.0", "/form", 201, 0)],
+        );
+        processor.process_globs(&pattern).expect("second run");
+
+        let conn = Connection::open(db_path.to_str().unwrap()).expect("open db");
+
+        let get_hits: i64 = conn
+            .query_row(
+                "SELECT COALESCE(hits,0) FROM method_counts WHERE period='2026-05' AND method='GET'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("GET after two runs");
+        assert_eq!(get_hits, 1);
+
+        let post_hits: i64 = conn
+            .query_row(
+                "SELECT COALESCE(hits,0) FROM method_counts WHERE period='2026-05' AND method='POST'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("POST after two runs");
+        assert_eq!(post_hits, 1);
+
+        let h11: i64 = conn
+            .query_row(
+                "SELECT COALESCE(hits,0) FROM proto_counts WHERE period='2026-05' AND proto='1.1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("1.1 after two runs");
+        assert_eq!(h11, 1);
+
+        let h2: i64 = conn
+            .query_row(
+                "SELECT COALESCE(hits,0) FROM proto_counts WHERE period='2026-05' AND proto='2.0'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("2.0 after two runs");
+        assert_eq!(h2, 1);
+    }
+
+    #[test]
+    fn process_globs_unknown_method_and_proto_map_to_other() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let log_path = temp.path().join("access.log");
+        let pattern = log_path.to_str().expect("utf-8").to_string();
+
+        write_plain_file(
+            &log_path,
+            &[
+                line_with_method_proto("CONNECT", "HTTP/1.1", "/tunnel", 200, 0),
+                line_with_method_proto("GET", "SPDY/3", "/a.html", 200, 100),
+            ],
+        );
+
+        let mut processor = new_processor(&db_path);
+        processor.process_globs(&pattern).expect("process");
+
+        let conn = Connection::open(db_path.to_str().unwrap()).expect("open db");
+
+        let other_method: i64 = conn
+            .query_row(
+                "SELECT COALESCE(hits,0) FROM method_counts WHERE period='2026-05' AND method='other'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("other method");
+        assert_eq!(other_method, 1, "CONNECT should map to 'other'");
+
+        let other_proto: i64 = conn
+            .query_row(
+                "SELECT COALESCE(hits,0) FROM proto_counts WHERE period='2026-05' AND proto='other'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("other proto");
+        assert_eq!(other_proto, 1, "SPDY/3 should map to 'other'");
+    }
 }

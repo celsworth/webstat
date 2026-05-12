@@ -5,6 +5,7 @@ mod fingerprint;
 mod geo;
 mod hll;
 mod logging;
+mod method_proto;
 mod parser;
 mod processor;
 mod progress;

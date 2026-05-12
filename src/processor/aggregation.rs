@@ -1,4 +1,5 @@
 use super::*;
+use crate::method_proto::{method_index, proto_index, METHOD_COUNT, PROTO_COUNT};
 
 impl Processor {
     fn visit_state_key(ip: &str) -> VisitStateKey {
@@ -45,6 +46,8 @@ impl Processor {
     ) {
         let mut hll_site_counts = AHashMap::new();
         let mut top_hosts_bw: HostBwMap = AHashMap::new();
+        let mut method_counts = AHashMap::new();
+        let mut proto_counts = AHashMap::new();
         self.aggregate_entry_with_hll_split(
             entry,
             hourly,
@@ -57,6 +60,8 @@ impl Processor {
             status_codes,
             &mut hll_site_counts,
             None,
+            &mut method_counts,
+            &mut proto_counts,
         );
     }
 
@@ -76,6 +81,8 @@ impl Processor {
         hll_all_time: Option<&mut HyperLogLog>,
     ) {
         let mut top_hosts_bw: HostBwMap = AHashMap::new();
+        let mut method_counts = AHashMap::new();
+        let mut proto_counts = AHashMap::new();
         self.aggregate_entry_with_hll_split(
             entry,
             hourly,
@@ -88,6 +95,8 @@ impl Processor {
             status_codes,
             hll_site_counts,
             hll_all_time,
+            &mut method_counts,
+            &mut proto_counts,
         );
     }
 
@@ -105,6 +114,8 @@ impl Processor {
         status_codes: &mut StatusMap,
         hll_site_counts: &mut AHashMap<Arc<str>, HyperLogLog>,
         hll_all_time: Option<&mut HyperLogLog>,
+        method_counts: &mut crate::method_proto::MethodCountsMap,
+        proto_counts: &mut crate::method_proto::ProtoCountsMap,
     ) {
         let ua_result = self.ua.parse(entry.user_agent);
         if self.bot_filter && ua_result.is_bot {
@@ -314,6 +325,18 @@ impl Processor {
         }
         if let Some(all_time) = hll_all_time {
             all_time.add_hash(ip_hash);
+        }
+
+        // ── Method / proto (month + year periods only) ─────────────────────────
+        let mi = method_index(entry.method);
+        let pi = proto_index(entry.proto);
+        for period in [&month_period, &year_period] {
+            method_counts
+                .entry(Arc::clone(period))
+                .or_insert([0u64; METHOD_COUNT])[mi] += 1;
+            proto_counts
+                .entry(Arc::clone(period))
+                .or_insert([0u64; PROTO_COUNT])[pi] += 1;
         }
     }
 

@@ -591,6 +591,8 @@ impl Processor {
                         &mut run_acc.status_codes,
                         &mut run_acc.hll_site_counts,
                         run_acc.hll_all_time.as_mut(),
+                        &mut run_acc.method_counts,
+                        &mut run_acc.proto_counts,
                     );
                     lines_processed += 1;
                 }
@@ -645,6 +647,8 @@ impl Processor {
                         &mut run_acc.status_codes,
                         &mut run_acc.hll_site_counts,
                         run_acc.hll_all_time.as_mut(),
+                        &mut run_acc.method_counts,
+                        &mut run_acc.proto_counts,
                     );
                     lines_processed += 1;
                 }
