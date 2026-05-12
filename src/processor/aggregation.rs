@@ -1,4 +1,5 @@
 use super::*;
+use super::parallel::merge_max;
 use crate::method_proto::{method_index, proto_index, METHOD_COUNT, PROTO_COUNT};
 
 impl Processor {
@@ -121,28 +122,35 @@ impl Processor {
                 self.visit_max_seen_ts = ts;
             }
             let visit_key = Self::visit_state_key(ip);
-            let is_new_visit = match self.visit_last_seen.entry(visit_key.clone()) {
-                std::collections::hash_map::Entry::Occupied(mut occupied) => {
-                    let last_seen = *occupied.get();
-                    if ts > last_seen {
-                        *occupied.get_mut() = ts;
+            let is_new_visit = if let Some(arc) = &self.shared_visit_last_seen {
+                // Parallel-worker path: check in-file dirty cache first, then
+                // fall back to the shared map (one read-lock per unique IP per file).
+                let prev_ts = self.visit_state_dirty.get(&visit_key).copied().or_else(|| {
+                    arc.read().expect("visit last_seen poisoned").get(&visit_key).copied()
+                });
+                let new_visit =
+                    prev_ts.map_or(true, |last| ts.saturating_sub(last) > VISIT_TIMEOUT_SECONDS);
+                merge_max(&mut self.visit_state_dirty, visit_key, ts);
+                new_visit
+            } else {
+                // Coordinator / single-worker path: read-modify-write on local map.
+                let new_visit = match self.visit_last_seen.entry(visit_key.clone()) {
+                    std::collections::hash_map::Entry::Occupied(mut occ) => {
+                        let last_seen = *occ.get();
+                        if ts > last_seen {
+                            *occ.get_mut() = ts;
+                        }
+                        ts.saturating_sub(last_seen) > VISIT_TIMEOUT_SECONDS
                     }
-                    ts.saturating_sub(last_seen) > VISIT_TIMEOUT_SECONDS
-                }
-                std::collections::hash_map::Entry::Vacant(vacant) => {
-                    vacant.insert(ts);
-                    true
-                }
+                    std::collections::hash_map::Entry::Vacant(v) => {
+                        v.insert(ts);
+                        true
+                    }
+                };
+                let dirty_ts = self.visit_last_seen.get(&visit_key).copied().unwrap_or(ts);
+                merge_max(&mut self.visit_state_dirty, visit_key, dirty_ts);
+                new_visit
             };
-            let dirty_ts = self.visit_last_seen.get(&visit_key).copied().unwrap_or(ts);
-            self.visit_state_dirty
-                .entry(visit_key)
-                .and_modify(|v| {
-                    if dirty_ts > *v {
-                        *v = dirty_ts;
-                    }
-                })
-                .or_insert(dirty_ts);
             if is_new_visit {
                 stats.visits += 1;
             }

@@ -4,7 +4,7 @@ use std::hash::Hasher;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use ahash::AHashMap;
@@ -112,6 +112,10 @@ pub struct Processor {
     visit_last_seen: AHashMap<VisitStateKey, i64>,
     /// Dirty visit-state rows to flush at checkpoints/end-of-run.
     visit_state_dirty: AHashMap<VisitStateKey, i64>,
+    /// Set by dispatch_parallel_files so workers read shared last-seen state
+    /// through the Arc instead of cloning the full map at each file pickup.
+    /// None in single-worker / coordinator contexts.
+    pub(crate) shared_visit_last_seen: Option<Arc<RwLock<AHashMap<VisitStateKey, i64>>>>,
     /// GeoIP lookup cache keyed by ip_id for efficient lookups without string allocation.
     geo_cache: AHashMap<u32, (Arc<str>, Arc<str>)>,
     /// Max timestamp seen in this run to anchor state pruning.
@@ -168,6 +172,7 @@ impl Processor {
             next_ip_id: 1,
             visit_last_seen: AHashMap::with_capacity(262_144),
             visit_state_dirty: AHashMap::with_capacity(262_144),
+            shared_visit_last_seen: None,
             geo_cache: AHashMap::with_capacity(262_144),
             visit_max_seen_ts: 0,
         }

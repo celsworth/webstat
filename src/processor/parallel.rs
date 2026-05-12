@@ -78,13 +78,12 @@ impl CheckpointGate {
 }
 
 struct SharedVisitState {
-    last_seen: AHashMap<VisitStateKey, i64>,
     max_seen_ts: i64,
     dirty: AHashMap<VisitStateKey, i64>,
 }
 
 #[inline]
-fn merge_max(map: &mut AHashMap<VisitStateKey, i64>, key: VisitStateKey, ts: i64) {
+pub(super) fn merge_max(map: &mut AHashMap<VisitStateKey, i64>, key: VisitStateKey, ts: i64) {
     map.entry(key)
         .and_modify(|v| {
             if ts > *v {
@@ -105,7 +104,6 @@ impl Processor {
             self.visit_max_seen_ts = sv.max_seen_ts;
         }
         for (key, ts) in sv.dirty.drain() {
-            merge_max(&mut self.visit_last_seen, key.clone(), ts);
             merge_max(&mut self.visit_state_dirty, key, ts);
         }
     }
@@ -283,8 +281,13 @@ impl Processor {
         let geoip_db = self.geoip_db.clone();
         let worker_cfg = self.worker_config();
         let checkpoint_enabled = self.checkpoint_every.is_some();
+
+        // Move the coordinator's map into the shared Arc for the duration of
+        // this dispatch. Workers read through it (read lock) instead of cloning.
+        let shared_last_seen: Arc<RwLock<AHashMap<VisitStateKey, i64>>> =
+            Arc::new(RwLock::new(std::mem::take(&mut self.visit_last_seen)));
+
         let shared_visit: Arc<Mutex<SharedVisitState>> = Arc::new(Mutex::new(SharedVisitState {
-            last_seen: self.visit_last_seen.clone(),
             max_seen_ts: self.visit_max_seen_ts,
             dirty: AHashMap::new(),
         }));
@@ -318,6 +321,7 @@ impl Processor {
             let gz_comp_done = gz_comp_done.clone();
             let gz_decoded_done = gz_decoded_done.clone();
             let shared_visit = shared_visit.clone();
+            let shared_last_seen = shared_last_seen.clone();
 
             handles.push(std::thread::spawn(move || {
                 let db = match Database::open(&db_path) {
@@ -339,6 +343,7 @@ impl Processor {
                     1,
                     worker_cfg,
                 );
+                worker.shared_visit_last_seen = Some(shared_last_seen.clone());
 
                 let mut seen_generation = 0u64;
                 let mut progress_flush_last = Instant::now();
@@ -363,10 +368,8 @@ impl Processor {
                         .clone()
                         .expect("phase-one plan missing for queued file");
 
-                    let sv = shared_visit.lock().expect("shared visit poisoned");
-                    worker.visit_last_seen.clone_from(&sv.last_seen);
-                    worker.visit_max_seen_ts = sv.max_seen_ts;
-                    drop(sv);
+                    worker.visit_max_seen_ts =
+                        shared_visit.lock().expect("shared visit poisoned").max_seen_ts;
                     worker.visit_state_dirty.clear();
 
                     let mut worker_run_acc = RunAccumulators::new(
@@ -398,12 +401,25 @@ impl Processor {
                     ) {
                         Ok(result) => {
                             if !worker.visit_state_dirty.is_empty() {
-                                let mut sv = shared_visit.lock().expect("shared visit poisoned");
-                                for (key, ts) in worker.visit_state_dirty.drain() {
-                                    merge_max(&mut sv.last_seen, key.clone(), ts);
-                                    merge_max(&mut sv.dirty, key, ts);
-                                    if ts > sv.max_seen_ts {
-                                        sv.max_seen_ts = ts;
+                                // Two separate critical sections to avoid nested locking.
+                                // 1. Merge into shared last_seen (write lock on RwLock).
+                                {
+                                    let mut last_seen = shared_last_seen
+                                        .write()
+                                        .expect("visit last_seen poisoned");
+                                    for (key, ts) in &worker.visit_state_dirty {
+                                        merge_max(&mut last_seen, key.clone(), *ts);
+                                    }
+                                }
+                                // 2. Merge into shared dirty + max_seen_ts.
+                                {
+                                    let mut sv =
+                                        shared_visit.lock().expect("shared visit poisoned");
+                                    for (key, ts) in worker.visit_state_dirty.drain() {
+                                        merge_max(&mut sv.dirty, key, ts);
+                                        if ts > sv.max_seen_ts {
+                                            sv.max_seen_ts = ts;
+                                        }
                                     }
                                 }
                             }
@@ -519,12 +535,17 @@ impl Processor {
                 }
 
                 // Drain shared visit dirty into self before flushing to DB.
-                let mut sv = shared_visit.lock().expect("shared visit poisoned");
-                self.absorb_shared_visit(&mut sv);
-                // Prune shared last_seen to match post-flush state.
+                {
+                    let mut sv = shared_visit.lock().expect("shared visit poisoned");
+                    self.absorb_shared_visit(&mut sv);
+                }
+                // Prune the shared last_seen map to match the post-flush cutoff.
                 if self.visit_max_seen_ts > 0 {
                     let cutoff = self.visit_max_seen_ts.saturating_sub(VISIT_TIMEOUT_SECONDS);
-                    sv.last_seen.retain(|_, ts| *ts >= cutoff);
+                    shared_last_seen
+                        .write()
+                        .expect("visit last_seen poisoned")
+                        .retain(|_, ts| *ts >= cutoff);
                 }
 
                 self.flush_run(&run_acc, &pending_parse_states, &retired_parse_states)?;
@@ -578,9 +599,49 @@ impl Processor {
         }
 
         // Drain any remaining shared visit dirty into self for the final flush_run.
-        let mut sv = shared_visit.lock().expect("shared visit poisoned");
-        self.absorb_shared_visit(&mut sv);
+        {
+            let mut sv = shared_visit.lock().expect("shared visit poisoned");
+            self.absorb_shared_visit(&mut sv);
+        }
+
+        // All workers have joined; Arc refcount is 1. Move the map back.
+        self.visit_last_seen = Arc::try_unwrap(shared_last_seen)
+            .expect("all workers joined; shared_last_seen Arc should be unique")
+            .into_inner()
+            .expect("visit last_seen RwLock poisoned");
 
         Ok((total, run_acc, pending_parse_states, retired_parse_states))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(lo: u64) -> VisitStateKey {
+        VisitStateKey { ip_kind: 1, ip_hi: 0, ip_lo: lo, ip_text: String::new() }
+    }
+
+    #[test]
+    fn merge_max_inserts_when_absent() {
+        let mut map: AHashMap<VisitStateKey, i64> = AHashMap::new();
+        merge_max(&mut map, key(1), 100);
+        assert_eq!(map[&key(1)], 100);
+    }
+
+    #[test]
+    fn merge_max_keeps_larger_existing_value() {
+        let mut map: AHashMap<VisitStateKey, i64> = AHashMap::new();
+        map.insert(key(1), 200);
+        merge_max(&mut map, key(1), 100);
+        assert_eq!(map[&key(1)], 200);
+    }
+
+    #[test]
+    fn merge_max_replaces_smaller_existing_value() {
+        let mut map: AHashMap<VisitStateKey, i64> = AHashMap::new();
+        map.insert(key(1), 100);
+        merge_max(&mut map, key(1), 200);
+        assert_eq!(map[&key(1)], 200);
     }
 }

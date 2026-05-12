@@ -56,7 +56,7 @@ impl Processor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::ParseState;
+    use crate::database::{ParseState, VisitStateKey};
     use crate::util::parse_unix_timestamp;
     use flate2::{write::GzEncoder, Compression};
     use rusqlite::Connection;
@@ -2514,5 +2514,144 @@ mod tests {
             )
             .unwrap_or(0);
         assert_eq!(other_proto, 0, "SPDY/3 should be ignored");
+    }
+
+    // ── Visit state internals ──────────────────────────────────────────────────
+
+    fn visit_key(lo: u64) -> VisitStateKey {
+        VisitStateKey { ip_kind: 1, ip_hi: 0, ip_lo: lo, ip_text: String::new() }
+    }
+
+    /// After processing the same IP twice (within the timeout window), the dirty
+    /// map should contain exactly one entry whose timestamp equals the later hit.
+    #[test]
+    fn aggregate_entry_dirty_tracks_max_timestamp_per_ip() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let mut processor = new_processor_with_options(&db_path, false, None);
+
+        let mut hourly: HourlyMap = AHashMap::new();
+        let mut top_urls: TopUrlsByHits = AHashMap::new();
+        let mut top_hosts: TopHostsByHits = AHashMap::new();
+        let mut top_refs: PeriodCountMap = AHashMap::new();
+        let mut top_agents: PeriodCountMap = AHashMap::new();
+        let mut top_countries: CountryHitsMap = AHashMap::new();
+        let mut status_codes: StatusHitsMap = AHashMap::new();
+
+        processor.aggregate_entry_test(
+            log_entry("1.2.3.4", "08/May/2026:14:00:00 +0000", "/a", 200, 100, "", "Mozilla/5.0"),
+            &mut hourly, &mut top_urls, &mut top_hosts, &mut top_refs,
+            &mut top_agents, &mut top_countries, &mut status_codes,
+        );
+        processor.aggregate_entry_test(
+            log_entry("1.2.3.4", "08/May/2026:14:10:00 +0000", "/b", 200, 100, "", "Mozilla/5.0"),
+            &mut hourly, &mut top_urls, &mut top_hosts, &mut top_refs,
+            &mut top_agents, &mut top_countries, &mut status_codes,
+        );
+
+        assert_eq!(processor.visit_state_dirty.len(), 1, "one dirty entry for one IP");
+        let dirty_ts = *processor.visit_state_dirty.values().next().unwrap();
+        assert_eq!(
+            dirty_ts, processor.visit_max_seen_ts,
+            "dirty ts must be the max timestamp seen (14:10, not 14:00)"
+        );
+    }
+
+    /// Each unique IP must produce its own dirty entry.
+    #[test]
+    fn aggregate_entry_dirty_contains_entry_for_each_unique_ip() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let mut processor = new_processor_with_options(&db_path, false, None);
+
+        let mut hourly: HourlyMap = AHashMap::new();
+        let mut top_urls: TopUrlsByHits = AHashMap::new();
+        let mut top_hosts: TopHostsByHits = AHashMap::new();
+        let mut top_refs: PeriodCountMap = AHashMap::new();
+        let mut top_agents: PeriodCountMap = AHashMap::new();
+        let mut top_countries: CountryHitsMap = AHashMap::new();
+        let mut status_codes: StatusHitsMap = AHashMap::new();
+
+        for ip in ["1.2.3.4", "5.6.7.8", "9.10.11.12"] {
+            processor.aggregate_entry_test(
+                log_entry(ip, "08/May/2026:14:00:00 +0000", "/a", 200, 100, "", "Mozilla/5.0"),
+                &mut hourly, &mut top_urls, &mut top_hosts, &mut top_refs,
+                &mut top_agents, &mut top_countries, &mut status_codes,
+            );
+        }
+
+        assert_eq!(processor.visit_state_dirty.len(), 3, "one dirty entry per unique IP");
+        let total_visits: u64 = hourly.values()
+            .flat_map(|h| h.values())
+            .map(|a| a.stats.visits)
+            .sum();
+        assert_eq!(total_visits, 3, "one new visit per unique IP");
+    }
+
+    /// collect_visit_state_flush drains the dirty map into a Vec of updates and
+    /// leaves visit_last_seen intact (it is pruned but not drained).
+    #[test]
+    fn collect_visit_state_flush_drains_dirty_into_updates() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let mut processor = new_processor_with_options(&db_path, false, None);
+
+        processor.visit_max_seen_ts = 600;
+        processor.visit_last_seen.insert(visit_key(1), 500);
+        processor.visit_last_seen.insert(visit_key(2), 600);
+        processor.visit_state_dirty.insert(visit_key(1), 500);
+        processor.visit_state_dirty.insert(visit_key(2), 600);
+
+        let (updates, _) = processor.collect_visit_state_flush();
+
+        assert!(processor.visit_state_dirty.is_empty(), "dirty drained after flush");
+        assert_eq!(updates.len(), 2, "one update per dirty entry");
+        assert_eq!(processor.visit_last_seen.len(), 2, "last_seen not drained, only pruned");
+    }
+
+    /// Entries whose timestamp is older than (visit_max_seen_ts - 1800 s) must
+    /// be removed from both visit_last_seen and the returned updates.
+    #[test]
+    fn collect_visit_state_flush_prunes_entries_older_than_timeout() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let mut processor = new_processor_with_options(&db_path, false, None);
+
+        // cutoff = 3000 - 1800 = 1200; key(1) ts=1000 is below cutoff → pruned
+        processor.visit_max_seen_ts = 3000;
+        processor.visit_last_seen.insert(visit_key(1), 1000);
+        processor.visit_last_seen.insert(visit_key(2), 1200);
+        processor.visit_last_seen.insert(visit_key(3), 2000);
+        processor.visit_state_dirty.insert(visit_key(1), 1000);
+        processor.visit_state_dirty.insert(visit_key(2), 1200);
+        processor.visit_state_dirty.insert(visit_key(3), 2000);
+
+        let (updates, prune_before) = processor.collect_visit_state_flush();
+
+        assert_eq!(prune_before, Some(1200), "cutoff = max_ts - 1800");
+        assert_eq!(processor.visit_last_seen.len(), 2, "expired entry pruned from last_seen");
+        assert!(!processor.visit_last_seen.contains_key(&visit_key(1)), "ts=1000 pruned");
+        assert!(processor.visit_last_seen.contains_key(&visit_key(2)), "ts=1200 (= cutoff) kept");
+        assert!(processor.visit_last_seen.contains_key(&visit_key(3)), "ts=2000 kept");
+        assert_eq!(updates.len(), 2, "only non-pruned entries returned as updates");
+    }
+
+    /// When visit_max_seen_ts == 0, no pruning must occur.
+    #[test]
+    fn collect_visit_state_flush_no_prune_when_max_ts_zero() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let mut processor = new_processor_with_options(&db_path, false, None);
+
+        processor.visit_max_seen_ts = 0;
+        processor.visit_last_seen.insert(visit_key(1), 100);
+        processor.visit_state_dirty.insert(visit_key(1), 100);
+
+        let (updates, prune_before) = processor.collect_visit_state_flush();
+
+        assert_eq!(prune_before, None, "no pruning when max_ts is zero");
+        assert_eq!(processor.visit_last_seen.len(), 1, "last_seen not pruned");
+        assert_eq!(updates.len(), 1, "dirty entry returned as update");
+        assert!(processor.visit_state_dirty.is_empty());
     }
 }
