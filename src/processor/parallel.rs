@@ -430,6 +430,25 @@ impl Processor {
 
         drop(tx);
 
+        let hll_precision = self.hll_precision;
+        let topn_k = self.topn_k;
+        let handle_completed = |work: WorkResult,
+                                total: &mut u64,
+                                run_acc: &mut RunAccumulators,
+                                pending: &mut Vec<ParseStateUpdate>,
+                                completed_files: &mut usize,
+                                paused_files: &mut Vec<usize>| {
+            *total += work.lines_processed;
+            run_acc.merge_from(work.run_acc, hll_precision, topn_k);
+            pending.extend(work.pending_parse_states);
+            if work.file_completed {
+                *completed_files += 1;
+                files_done.fetch_add(1, Ordering::Relaxed);
+            } else {
+                paused_files.push(work.file_idx);
+            }
+        };
+
         while completed_files < count {
             if checkpoint_enabled
                 && !checkpoint_in_progress
@@ -447,16 +466,14 @@ impl Processor {
 
             match rx.recv_timeout(std::time::Duration::from_millis(50)) {
                 Ok(WorkerMessage::Completed(work)) => {
-                    total += work.lines_processed;
-                    run_acc.merge_from(work.run_acc, self.hll_precision, self.topn_k);
-                    pending_parse_states.extend(work.pending_parse_states);
-
-                    if work.file_completed {
-                        completed_files += 1;
-                        files_done.fetch_add(1, Ordering::Relaxed);
-                    } else {
-                        paused_files.push(work.file_idx);
-                    }
+                    handle_completed(
+                        work,
+                        &mut total,
+                        &mut run_acc,
+                        &mut pending_parse_states,
+                        &mut completed_files,
+                        &mut paused_files,
+                    );
                 }
                 Ok(WorkerMessage::Error(err)) => {
                     abort.store(true, Ordering::Relaxed);
@@ -479,16 +496,14 @@ impl Processor {
                 loop {
                     match rx.try_recv() {
                         Ok(WorkerMessage::Completed(work)) => {
-                            total += work.lines_processed;
-                            run_acc.merge_from(work.run_acc, self.hll_precision, self.topn_k);
-                            pending_parse_states.extend(work.pending_parse_states);
-
-                            if work.file_completed {
-                                completed_files += 1;
-                                files_done.fetch_add(1, Ordering::Relaxed);
-                            } else {
-                                paused_files.push(work.file_idx);
-                            }
+                            handle_completed(
+                                work,
+                                &mut total,
+                                &mut run_acc,
+                                &mut pending_parse_states,
+                                &mut completed_files,
+                                &mut paused_files,
+                            );
                         }
                         Ok(WorkerMessage::Error(err)) => {
                             abort.store(true, Ordering::Relaxed);
