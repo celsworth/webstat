@@ -13,9 +13,9 @@ mod tests {
         assert_eq!(entry.ip, "1.2.3.4");
         assert_eq!(entry.status, 200);
         assert_eq!(entry.bytes, 1234);
-        assert_eq!(entry.path, Some("/index.html"));
-        assert_eq!(entry.method, Some("GET"));
-        assert_eq!(entry.referer, Some("https://example.com/"));
+        assert_eq!(entry.path, "/index.html");
+        assert_eq!(entry.method, "GET");
+        assert_eq!(entry.referer, "https://example.com/");
     }
 
     #[test]
@@ -31,7 +31,7 @@ mod tests {
         let entry = parse_line(line).expect("should parse");
         assert_eq!(
             entry.user_agent,
-            Some("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         );
     }
 
@@ -39,23 +39,22 @@ mod tests {
     fn spaces_in_referer_string() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET /path HTTP/1.1" 200 100 "https://example.com/search?q=hello world&sort=date" "Mozilla/5.0""#;
         let entry = parse_line(line).expect("should parse");
-        assert!(entry.referer.unwrap().contains("hello world"));
+        assert!(entry.referer.contains("hello world"));
     }
 
     #[test]
     fn spaces_in_path_with_query_string() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET /search?q=hello%20world&sort=name HTTP/1.1" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.path, Some("/search?q=hello%20world&sort=name"));
+        assert_eq!(entry.path, "/search?q=hello%20world&sort=name");
     }
 
     #[test]
     fn path_with_spaces_and_special_characters() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET /api/users?name=John%20Doe&email=test%40example.com HTTP/1.1" 200 50 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        let path = entry.path.unwrap();
-        assert!(path.contains("John%20Doe"));
-        assert!(path.contains("test%40example.com"));
+        assert!(entry.path.contains("John%20Doe"));
+        assert!(entry.path.contains("test%40example.com"));
     }
 
     // ── HTTP methods ─────────────────────────────────────────────────────────
@@ -64,29 +63,29 @@ mod tests {
     fn post_request() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "POST /api/submit HTTP/1.1" 201 500 "-" "curl/7.68.0""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method, Some("POST"));
-        assert_eq!(entry.path, Some("/api/submit"));
+        assert_eq!(entry.method, "POST");
+        assert_eq!(entry.path, "/api/submit");
     }
 
     #[test]
     fn put_request() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "PUT /api/resource/123 HTTP/1.1" 204 0 "-" "curl/7.68.0""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method, Some("PUT"));
+        assert_eq!(entry.method, "PUT");
     }
 
     #[test]
     fn delete_request() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "DELETE /api/resource/123 HTTP/1.1" 204 0 "-" "curl/7.68.0""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method, Some("DELETE"));
+        assert_eq!(entry.method, "DELETE");
     }
 
     #[test]
     fn head_request() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "HEAD /index.html HTTP/1.1" 200 0 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method, Some("HEAD"));
+        assert_eq!(entry.method, "HEAD");
     }
 
     #[test]
@@ -94,15 +93,15 @@ mod tests {
         let line =
             r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "OPTIONS * HTTP/1.1" 200 0 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method, Some("OPTIONS"));
-        assert_eq!(entry.path, Some("*"));
+        assert_eq!(entry.method, "OPTIONS");
+        assert_eq!(entry.path, "*");
     }
 
     #[test]
     fn patch_request() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "PATCH /api/resource HTTP/1.1" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method, Some("PATCH"));
+        assert_eq!(entry.method, "PATCH");
     }
 
     // ── HTTP status codes ────────────────────────────────────────────────────
@@ -169,17 +168,17 @@ mod tests {
     // ── Missing optional fields (referer, user-agent) ────────────────────────
 
     #[test]
-    fn missing_referer_returns_none() {
+    fn missing_referer_returns_empty() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "Mozilla/5.0""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.referer, None);
+        assert_eq!(entry.referer, "");
     }
 
     #[test]
-    fn missing_user_agent_returns_none() {
+    fn missing_user_agent_returns_empty() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "https://example.com/" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.user_agent, None);
+        assert_eq!(entry.user_agent, "");
     }
 
     #[test]
@@ -187,8 +186,8 @@ mod tests {
         let line =
             r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.referer, None);
-        assert_eq!(entry.user_agent, None);
+        assert_eq!(entry.referer, "");
+        assert_eq!(entry.user_agent, "");
     }
 
     // ── Empty quoted fields (but not dash) ────────────────────────────────────
@@ -197,14 +196,14 @@ mod tests {
     fn empty_referer_string() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "" "Mozilla/5.0""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.referer, None);
+        assert_eq!(entry.referer, "");
     }
 
     #[test]
     fn empty_user_agent_string() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" """#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.user_agent, None);
+        assert_eq!(entry.user_agent, "");
     }
 
     // ── Months ───────────────────────────────────────────────────────────────
@@ -332,35 +331,35 @@ mod tests {
         let line =
             r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.path, Some("/"));
+        assert_eq!(entry.path, "/");
     }
 
     #[test]
     fn deeply_nested_path() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET /a/b/c/d/e/f/g/h/i/j HTTP/1.1" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.path, Some("/a/b/c/d/e/f/g/h/i/j"));
+        assert_eq!(entry.path, "/a/b/c/d/e/f/g/h/i/j");
     }
 
     #[test]
     fn path_with_query_string_and_fragment() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET /path?key=value&other=123 HTTP/1.1" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.path, Some("/path?key=value&other=123"));
+        assert_eq!(entry.path, "/path?key=value&other=123");
     }
 
     #[test]
     fn path_with_special_characters() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET /path-with_special.chars~!@$%^&=+ HTTP/1.1" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert!(entry.path.unwrap().contains("special"));
+        assert!(entry.path.contains("special"));
     }
 
     #[test]
     fn path_with_encoded_characters() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET /search?q=%E2%9C%93&lang=en HTTP/1.1" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert!(entry.path.unwrap().contains("%E2%9C%93"));
+        assert!(entry.path.contains("%E2%9C%93"));
     }
 
     // ── Referers ─────────────────────────────────────────────────────────────
@@ -369,23 +368,22 @@ mod tests {
     fn referer_with_full_url() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "https://subdomain.example.com:8080/path?query=value" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert!(entry.referer.unwrap().contains("subdomain.example.com"));
+        assert!(entry.referer.contains("subdomain.example.com"));
     }
 
     #[test]
     fn referer_with_special_characters() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "https://example.com/search?q=hello%20world&sort=date&filter=active%3Dtrue" "-""#;
         let entry = parse_line(line).expect("should parse");
-        let ref_str = entry.referer.unwrap();
-        assert!(ref_str.contains("hello%20world"));
-        assert!(ref_str.contains("active%3Dtrue"));
+        assert!(entry.referer.contains("hello%20world"));
+        assert!(entry.referer.contains("active%3Dtrue"));
     }
 
     #[test]
     fn referer_with_fragments() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "https://example.com/page#section-with-anchor" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert!(entry.referer.unwrap().contains("section-with-anchor"));
+        assert!(entry.referer.contains("section-with-anchor"));
     }
 
     // ── User Agents ──────────────────────────────────────────────────────────
@@ -394,23 +392,22 @@ mod tests {
     fn complex_browser_user_agent() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36""#;
         let entry = parse_line(line).expect("should parse");
-        let ua = entry.user_agent.unwrap();
-        assert!(ua.contains("Windows NT 10.0"));
-        assert!(ua.contains("Chrome/91.0"));
+        assert!(entry.user_agent.contains("Windows NT 10.0"));
+        assert!(entry.user_agent.contains("Chrome/91.0"));
     }
 
     #[test]
     fn mobile_user_agent() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Mobile/15E148 Safari/604.1""#;
         let entry = parse_line(line).expect("should parse");
-        assert!(entry.user_agent.unwrap().contains("iPhone OS 14_6"));
+        assert!(entry.user_agent.contains("iPhone OS 14_6"));
     }
 
     #[test]
     fn bot_user_agent() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)""#;
         let entry = parse_line(line).expect("should parse");
-        assert!(entry.user_agent.unwrap().contains("Googlebot"));
+        assert!(entry.user_agent.contains("Googlebot"));
     }
 
     // ── Edge cases and malformed input ────────────────────────────────────────
@@ -484,7 +481,7 @@ mod tests {
             long_path
         );
         let entry = parse_line(&line).expect("should parse");
-        assert_eq!(entry.path.unwrap().len(), 1001);
+        assert_eq!(entry.path.len(), 1001);
     }
 
     #[test]
@@ -495,36 +492,36 @@ mod tests {
             long_ua
         );
         let entry = parse_line(&line).expect("should parse");
-        assert!(entry.user_agent.unwrap().len() > 100);
+        assert!(entry.user_agent.len() > 100);
     }
 
     #[test]
     fn unicode_in_path() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET /café/naïve HTTP/1.1" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert!(entry.path.unwrap().contains("café"));
+        assert!(entry.path.contains("café"));
     }
 
     #[test]
     fn unicode_in_referer() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "https://example.com/日本語/ページ" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert!(entry.referer.unwrap().contains("日本語"));
+        assert!(entry.referer.contains("日本語"));
     }
 
     #[test]
     fn http2_protocol() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET /index.html HTTP/2.0" 200 1234 "-" "Mozilla/5.0""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.path, Some("/index.html"));
+        assert_eq!(entry.path, "/index.html");
     }
 
     #[test]
     fn http_connect_method() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "CONNECT example.com:443 HTTP/1.1" 200 0 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method, Some("CONNECT"));
-        assert_eq!(entry.path, Some("example.com:443"));
+        assert_eq!(entry.method, "CONNECT");
+        assert_eq!(entry.path, "example.com:443");
     }
 
     #[test]
@@ -532,22 +529,22 @@ mod tests {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET /path" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
         // Parser extracts up to first space after method as path
-        assert_eq!(entry.path, Some("/path"));
+        assert_eq!(entry.path, "/path");
     }
 
     #[test]
     fn empty_request_string() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method, None);
-        assert_eq!(entry.path, None);
+        assert_eq!(entry.method, "");
+        assert_eq!(entry.path, "");
     }
 
     #[test]
     fn only_method_in_request() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method, None);
-        assert_eq!(entry.path, Some("GET"));
+        assert_eq!(entry.method, "");
+        assert_eq!(entry.path, "GET");
     }
 }

@@ -1,5 +1,5 @@
 use super::*;
-use ahash::AHashSet;
+use ahash::{AHashMap, AHashSet};
 
 use crate::progress::clear_progress_line;
 use std::collections::VecDeque;
@@ -77,12 +77,39 @@ impl CheckpointGate {
     }
 }
 
+struct SharedVisitState {
+    last_seen: AHashMap<VisitStateKey, i64>,
+    max_seen_ts: i64,
+    dirty: AHashMap<VisitStateKey, i64>,
+}
+
+#[inline]
+fn merge_max(map: &mut AHashMap<VisitStateKey, i64>, key: VisitStateKey, ts: i64) {
+    map.entry(key)
+        .and_modify(|v| {
+            if ts > *v {
+                *v = ts;
+            }
+        })
+        .or_insert(ts);
+}
+
 enum WorkerMessage {
     Completed(WorkResult),
     Error(anyhow::Error),
 }
 
 impl Processor {
+    fn absorb_shared_visit(&mut self, sv: &mut SharedVisitState) {
+        if sv.max_seen_ts > self.visit_max_seen_ts {
+            self.visit_max_seen_ts = sv.max_seen_ts;
+        }
+        for (key, ts) in sv.dirty.drain() {
+            merge_max(&mut self.visit_last_seen, key.clone(), ts);
+            merge_max(&mut self.visit_state_dirty, key, ts);
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) fn spawn_progress_thread(
         &self,
@@ -256,8 +283,11 @@ impl Processor {
         let geoip_db = self.geoip_db.clone();
         let worker_cfg = self.worker_config();
         let checkpoint_enabled = self.checkpoint_every.is_some();
-        let seeded_visit_last_seen = self.visit_last_seen.clone();
-        let seeded_visit_max_seen_ts = self.visit_max_seen_ts;
+        let shared_visit: Arc<Mutex<SharedVisitState>> = Arc::new(Mutex::new(SharedVisitState {
+            last_seen: self.visit_last_seen.clone(),
+            max_seen_ts: self.visit_max_seen_ts,
+            dirty: AHashMap::new(),
+        }));
 
         let worker_count = workers.max(1).min(work_queue.len());
         let gate = Arc::new(CheckpointGate::new(worker_count));
@@ -295,7 +325,7 @@ impl Processor {
             let lines_done = lines_done.clone();
             let gz_comp_done = gz_comp_done.clone();
             let gz_decoded_done = gz_decoded_done.clone();
-            let seeded_visit_last_seen = seeded_visit_last_seen.clone();
+            let shared_visit = shared_visit.clone();
 
             handles.push(std::thread::spawn(move || {
                 let db = match Database::open(&db_path) {
@@ -317,12 +347,6 @@ impl Processor {
                     1,
                     worker_cfg,
                 );
-
-                if worker.track_visits {
-                    worker.visit_last_seen = seeded_visit_last_seen;
-                    worker.visit_max_seen_ts = seeded_visit_max_seen_ts;
-                    worker.visit_state_dirty.clear();
-                }
 
                 let mut seen_generation = 0u64;
                 let mut progress_flush_last = Instant::now();
@@ -346,6 +370,14 @@ impl Processor {
                     let plan = plans.lock().expect("plan queue poisoned")[idx]
                         .clone()
                         .expect("phase-one plan missing for queued file");
+
+                    if worker.track_visits {
+                        let sv = shared_visit.lock().expect("shared visit poisoned");
+                        worker.visit_last_seen.clone_from(&sv.last_seen);
+                        worker.visit_max_seen_ts = sv.max_seen_ts;
+                        drop(sv);
+                        worker.visit_state_dirty.clear();
+                    }
                     let mut worker_run_acc = RunAccumulators::new(
                         64,
                         worker.hll_precision,
@@ -374,21 +406,23 @@ impl Processor {
                         &mut progress_flush_last,
                     ) {
                         Ok(result) => {
+                            if worker.track_visits && !worker.visit_state_dirty.is_empty() {
+                                let mut sv =
+                                    shared_visit.lock().expect("shared visit poisoned");
+                                for (key, ts) in worker.visit_state_dirty.drain() {
+                                    merge_max(&mut sv.last_seen, key.clone(), ts);
+                                    merge_max(&mut sv.dirty, key, ts);
+                                    if ts > sv.max_seen_ts {
+                                        sv.max_seen_ts = ts;
+                                    }
+                                }
+                            }
                             let _ = tx.send(WorkerMessage::Completed(WorkResult {
                                 file_idx: idx,
                                 file_completed: result.file_completed,
                                 lines_processed: result.lines_processed,
                                 run_acc: worker_run_acc,
                                 pending_parse_states: worker_pending_parse_states,
-                                visit_state_updates: worker
-                                    .visit_state_dirty
-                                    .drain()
-                                    .map(|(key, last_seen_ts)| VisitStateUpdate {
-                                        key,
-                                        last_seen_ts,
-                                    })
-                                    .collect(),
-                                visit_max_seen_ts: worker.visit_max_seen_ts,
                             }));
                         }
                         Err(err) => {
@@ -446,27 +480,6 @@ impl Processor {
                     }
 
                     pending_parse_states.extend(work.pending_parse_states);
-                    if work.visit_max_seen_ts > self.visit_max_seen_ts {
-                        self.visit_max_seen_ts = work.visit_max_seen_ts;
-                    }
-                    for update in work.visit_state_updates {
-                        self.visit_last_seen
-                            .entry(update.key.clone())
-                            .and_modify(|v| {
-                                if update.last_seen_ts > *v {
-                                    *v = update.last_seen_ts;
-                                }
-                            })
-                            .or_insert(update.last_seen_ts);
-                        self.visit_state_dirty
-                            .entry(update.key)
-                            .and_modify(|v| {
-                                if update.last_seen_ts > *v {
-                                    *v = update.last_seen_ts;
-                                }
-                            })
-                            .or_insert(update.last_seen_ts);
-                    }
 
                     if work.file_completed {
                         completed_files += 1;
@@ -521,27 +534,6 @@ impl Processor {
                             }
 
                             pending_parse_states.extend(work.pending_parse_states);
-                            if work.visit_max_seen_ts > self.visit_max_seen_ts {
-                                self.visit_max_seen_ts = work.visit_max_seen_ts;
-                            }
-                            for update in work.visit_state_updates {
-                                self.visit_last_seen
-                                    .entry(update.key.clone())
-                                    .and_modify(|v| {
-                                        if update.last_seen_ts > *v {
-                                            *v = update.last_seen_ts;
-                                        }
-                                    })
-                                    .or_insert(update.last_seen_ts);
-                                self.visit_state_dirty
-                                    .entry(update.key)
-                                    .and_modify(|v| {
-                                        if update.last_seen_ts > *v {
-                                            *v = update.last_seen_ts;
-                                        }
-                                    })
-                                    .or_insert(update.last_seen_ts);
-                            }
 
                             if work.file_completed {
                                 completed_files += 1;
@@ -563,6 +555,17 @@ impl Processor {
                     }
                 }
 
+                // Drain shared visit dirty into self before flushing to DB.
+                if self.track_visits {
+                    let mut sv = shared_visit.lock().expect("shared visit poisoned");
+                    self.absorb_shared_visit(&mut sv);
+                    // Prune shared last_seen to match post-flush state.
+                    if self.visit_max_seen_ts > 0 {
+                        let cutoff =
+                            self.visit_max_seen_ts.saturating_sub(VISIT_TIMEOUT_SECONDS);
+                        sv.last_seen.retain(|_, ts| *ts >= cutoff);
+                    }
+                }
                 self.flush_run(&run_acc, &pending_parse_states, &retired_parse_states)?;
                 run_acc = RunAccumulators::new(
                     64,
@@ -611,6 +614,12 @@ impl Processor {
         gate.resume();
         for handle in handles {
             let _ = handle.join();
+        }
+
+        // Drain any remaining shared visit dirty into self for the final flush_run.
+        if self.track_visits {
+            let mut sv = shared_visit.lock().expect("shared visit poisoned");
+            self.absorb_shared_visit(&mut sv);
         }
 
         Ok((total, run_acc, pending_parse_states, retired_parse_states))

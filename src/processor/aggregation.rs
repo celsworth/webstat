@@ -106,7 +106,7 @@ impl Processor {
         hll_site_counts: &mut AHashMap<Arc<str>, HyperLogLog>,
         hll_all_time: Option<&mut HyperLogLog>,
     ) {
-        let ua_result = self.ua.parse(entry.user_agent.unwrap_or(""));
+        let ua_result = self.ua.parse(entry.user_agent);
         if self.bot_filter && ua_result.is_bot {
             return;
         }
@@ -129,7 +129,7 @@ impl Processor {
 
         let status = entry.status;
         let bytes = entry.bytes;
-        let path = entry.path.unwrap_or("");
+        let path = entry.path;
         let clean_path = strip_query(path);
         let ip = entry.ip;
         let ip_id = self.intern_ip_id(ip);
@@ -272,8 +272,8 @@ impl Processor {
 
         // ── Referrer ───────────────────────────────────────────────────────────
         if self.enable_top_refs {
-            if let Some(referer_url) = entry.referer {
-                if let Some(host) = self.extract_host(referer_url) {
+            if !entry.referer.is_empty() {
+                if let Some(host) = self.extract_host(entry.referer) {
                     if !self.own_host(&host) {
                         top_refs
                             .entry(Arc::clone(&month_period))

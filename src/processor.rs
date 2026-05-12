@@ -49,8 +49,6 @@ struct WorkResult {
     lines_processed: u64,
     run_acc: RunAccumulators,
     pending_parse_states: Vec<ParseStateUpdate>,
-    visit_state_updates: Vec<VisitStateUpdate>,
-    visit_max_seen_ts: i64,
 }
 
 struct ProcessWithProgressResult {
