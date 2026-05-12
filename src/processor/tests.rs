@@ -925,11 +925,12 @@ mod tests {
         assert_eq!(stats.status_2xx, 2);
 
         let month_urls = top_urls.get("2026-05").expect("month urls");
-        assert_eq!(month_urls.get("/index.html"), Some(&(1, 1200)));
-        assert_eq!(month_urls.get("/app.js"), Some(&(1, 300)));
+        let url_find = |url: &str| month_urls.iter().find(|(k, _, _)| *k == url).map(|(_, h, bw)| (h, bw));
+        assert_eq!(url_find("/index.html"), Some((1, 1200)));
+        assert_eq!(url_find("/app.js"), Some((1, 300)));
 
         let month_refs = top_refs.get("2026-05").expect("month refs");
-        assert_eq!(month_refs.get("news.ycombinator.com"), Some(&2));
+        assert_eq!(month_refs.iter().find(|(k, _)| *k == "news.ycombinator.com").map(|(_, v)| v), Some(2));
 
         let month_status = status_codes.get("2026-05").expect("month status");
         assert_eq!(month_status.get(&200), Some(&2));
@@ -1069,8 +1070,8 @@ mod tests {
         );
 
         let month_refs = top_refs.get("2026-05").expect("month refs");
-        assert_eq!(month_refs.len(), 1);
-        assert_eq!(month_refs.get("external.example.org"), Some(&1));
+        assert_eq!(month_refs.iter().count(), 1);
+        assert_eq!(month_refs.iter().find(|(k, _)| *k == "external.example.org").map(|(_, v)| v), Some(1));
     }
 
     #[test]

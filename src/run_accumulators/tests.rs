@@ -222,27 +222,27 @@ mod tests {
         assert_eq!(hour.ip_set.len(), 2);
 
         let urls = left.top_urls.get("2026-05").unwrap();
-        let url_row = urls.get("/a").unwrap();
+        let url_row = urls.iter().find(|(k, _, _)| *k == "/a").map(|(_, h, bw)| (h, bw)).unwrap();
         assert_eq!(url_row.0, 3);
         assert_eq!(url_row.1, 150);
 
         assert_eq!(
-            *left
-                .top_refs
+            left.top_refs
                 .get("2026-05")
                 .unwrap()
-                .get("google.com")
-                .unwrap(),
-            3
+                .iter()
+                .find(|(k, _)| *k == "google.com")
+                .map(|(_, v)| v),
+            Some(3)
         );
         assert_eq!(
-            *left
-                .top_agents
+            left.top_agents
                 .get("2026-05")
                 .unwrap()
-                .get("Firefox")
-                .unwrap(),
-            4
+                .iter()
+                .find(|(k, _)| *k == "Firefox")
+                .map(|(_, v)| v),
+            Some(4)
         );
         assert_eq!(
             *left
