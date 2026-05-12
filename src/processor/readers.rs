@@ -120,17 +120,17 @@ impl Processor {
         }
 
         let mut hourly: HourlyMap = AHashMap::with_capacity(32);
-        let mut top_urls: PeriodHitsMap =
+        let mut top_urls: TopUrlsByHits =
             AHashMap::with_capacity(if self.enable_top_urls { 32 } else { 0 });
-        let mut top_hosts: HostHitsMap =
+        let mut top_hosts: TopHostsByHits =
             AHashMap::with_capacity(if self.enable_top_hosts { 32 } else { 0 });
-        let mut top_hosts_bw: HostBwMap =
+        let mut top_hosts_bw: TopHostsByBandwidth =
             AHashMap::with_capacity(if self.enable_top_hosts { 32 } else { 0 });
         let mut top_refs: PeriodCountMap =
             AHashMap::with_capacity(if self.enable_top_refs { 32 } else { 0 });
         let mut top_agents: PeriodCountMap = AHashMap::with_capacity(32);
-        let mut top_countries: CountryCountMap = AHashMap::with_capacity(32);
-        let mut status_codes: StatusMap = AHashMap::with_capacity(32);
+        let mut top_countries: CountryHitsMap = AHashMap::with_capacity(32);
+        let mut status_codes: StatusHitsMap = AHashMap::with_capacity(32);
         let mut hll_site_counts: AHashMap<Arc<str>, HyperLogLog> = AHashMap::with_capacity(32);
         let mut hll_all_time = Some(HyperLogLog::new(self.hll_precision));
         let mut method_counts = crate::method_proto::MethodCountsMap::with_capacity(32);

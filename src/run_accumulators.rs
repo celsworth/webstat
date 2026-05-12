@@ -5,19 +5,19 @@ use ahash::AHashMap;
 use crate::hll::HyperLogLog;
 use crate::method_proto::{MethodCountsMap, ProtoCountsMap, METHOD_COUNT, PROTO_COUNT};
 use crate::topn::{
-    CountryCountMap, HostBwMap, HostHitsMap, HourlyMap, PeriodCountMap, PeriodHitsMap, StatusMap,
-    TopNCount, TopNHitsBw, TopNHosts, TopNHostsByBandwidth,
+    CountryHitsMap, HourlyMap, PeriodCountMap, StatusHitsMap, TopHostsByBandwidth, TopHostsByHits,
+    TopNCount, TopNHitsBw, TopNHosts, TopNHostsByBandwidth, TopUrlsByHits,
 };
 
 pub(crate) struct RunAccumulators {
     pub(crate) hourly: HourlyMap,
-    pub(crate) top_urls: PeriodHitsMap,
-    pub(crate) top_hosts: HostHitsMap,
-    pub(crate) top_hosts_bw: HostBwMap,
+    pub(crate) top_urls: TopUrlsByHits,
+    pub(crate) top_hosts: TopHostsByHits,
+    pub(crate) top_hosts_bw: TopHostsByBandwidth,
     pub(crate) top_refs: PeriodCountMap,
     pub(crate) top_agents: PeriodCountMap,
-    pub(crate) top_countries: CountryCountMap,
-    pub(crate) status_codes: StatusMap,
+    pub(crate) top_countries: CountryHitsMap,
+    pub(crate) status_codes: StatusHitsMap,
     pub(crate) hll_site_counts: AHashMap<Arc<str>, HyperLogLog>,
     pub(crate) hll_all_time: Option<HyperLogLog>,
     pub(crate) method_counts: MethodCountsMap,
@@ -154,14 +154,20 @@ impl RunAccumulators {
         }
 
         for (period, counts) in other.method_counts {
-            let dst = self.method_counts.entry(period).or_insert([0u64; METHOD_COUNT]);
+            let dst = self
+                .method_counts
+                .entry(period)
+                .or_insert([0u64; METHOD_COUNT]);
             for i in 0..METHOD_COUNT {
                 dst[i] += counts[i];
             }
         }
 
         for (period, counts) in other.proto_counts {
-            let dst = self.proto_counts.entry(period).or_insert([0u64; PROTO_COUNT]);
+            let dst = self
+                .proto_counts
+                .entry(period)
+                .or_insert([0u64; PROTO_COUNT]);
             for i in 0..PROTO_COUNT {
                 dst[i] += counts[i];
             }

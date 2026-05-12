@@ -27,17 +27,18 @@ pub struct HourlyAcc {
 /// single atomic ref-count increment rather than a heap allocation.
 pub type HourlyMap = AHashMap<Arc<str>, AHashMap<u8, HourlyAcc>>;
 /// period → url → (hits, bandwidth) — bounded by Space-Saving TopN
-pub type PeriodHitsMap = AHashMap<Arc<str>, TopNHitsBw>;
+pub type TopUrlsByHits = AHashMap<Arc<str>, TopNHitsBw>;
+/// missing - TopUrlsByBandwidth - to add
 /// period → host → (hits, bandwidth, country_code, country_name) — bounded by Space-Saving TopN
-pub type HostHitsMap = AHashMap<Arc<str>, TopNHosts>;
+pub type TopHostsByHits = AHashMap<Arc<str>, TopNHosts>;
 /// period → host → (hits, bandwidth, country_code, country_name) — bounded by Space-Saving TopN (bandwidth-ranked)
-pub type HostBwMap = AHashMap<Arc<str>, TopNHostsByBandwidth>;
-/// period → key → hits — bounded by Space-Saving TopN
+pub type TopHostsByBandwidth = AHashMap<Arc<str>, TopNHostsByBandwidth>;
+/// period → key → hits — bounded by Space-Saving TopN (for refs and agents)
 pub type PeriodCountMap = AHashMap<Arc<str>, TopNCount>;
 /// period → country_code → hits (exact, not Space-Saving)
-pub type CountryCountMap = AHashMap<Arc<str>, AHashMap<String, u64>>;
+pub type CountryHitsMap = AHashMap<Arc<str>, AHashMap<String, u64>>;
 /// period → status_code → hits (exact, not Space-Saving)
-pub type StatusMap = AHashMap<Arc<str>, AHashMap<u16, u64>>;
+pub type StatusHitsMap = AHashMap<Arc<str>, AHashMap<u16, u64>>;
 
 // ── Space-Saving top-N trackers ───────────────────────────────────────────────
 
@@ -127,6 +128,8 @@ impl TopNCount {
 
 // ── TopNHitsBw ────────────────────────────────────────────────────────────────
 
+// this is badly named, it just means it stores hits and bandwidth, but the eviction is based on hits, not bandwidth.
+// we need another one, TopNHitsByBandwidth, that evicts based on bandwidth instead of hits.
 pub struct TopNHitsBw {
     map: AHashMap<String, (u64, u64)>,
     capacity: usize,

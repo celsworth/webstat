@@ -11,7 +11,8 @@ use crate::method_proto::{MethodCountsMap, ProtoCountsMap};
 #[cfg(test)]
 use crate::topn::TopNHosts;
 use crate::topn::{
-    CountryCountMap, HostBwMap, HostHitsMap, HourlyMap, PeriodCountMap, PeriodHitsMap, StatusMap,
+    CountryHitsMap, HourlyMap, PeriodCountMap, StatusHitsMap, TopHostsByBandwidth, TopHostsByHits,
+    TopUrlsByHits,
 };
 
 mod maintenance;

@@ -37,15 +37,15 @@ impl Processor {
         &mut self,
         entry: parser::LogEntry<'_>,
         hourly: &mut HourlyMap,
-        top_urls: &mut PeriodHitsMap,
-        top_hosts: &mut HostHitsMap,
+        top_urls: &mut TopUrlsByHits,
+        top_hosts: &mut TopHostsByHits,
         top_refs: &mut PeriodCountMap,
         top_agents: &mut PeriodCountMap,
-        top_countries: &mut CountryCountMap,
-        status_codes: &mut StatusMap,
+        top_countries: &mut CountryHitsMap,
+        status_codes: &mut StatusHitsMap,
     ) {
         let mut hll_site_counts = AHashMap::new();
-        let mut top_hosts_bw: HostBwMap = AHashMap::new();
+        let mut top_hosts_bw: TopHostsByBandwidth = AHashMap::new();
         let mut method_counts = AHashMap::new();
         let mut proto_counts = AHashMap::new();
         self.aggregate_entry_with_hll_split(
@@ -70,13 +70,13 @@ impl Processor {
         &mut self,
         entry: parser::LogEntry<'_>,
         hourly: &mut HourlyMap,
-        top_urls: &mut PeriodHitsMap,
-        top_hosts: &mut HostHitsMap,
-        top_hosts_bw: &mut HostBwMap,
+        top_urls: &mut TopUrlsByHits,
+        top_hosts: &mut TopHostsByHits,
+        top_hosts_bw: &mut TopHostsByBandwidth,
         top_refs: &mut PeriodCountMap,
         top_agents: &mut PeriodCountMap,
-        top_countries: &mut CountryCountMap,
-        status_codes: &mut StatusMap,
+        top_countries: &mut CountryHitsMap,
+        status_codes: &mut StatusHitsMap,
         hll_site_counts: &mut AHashMap<Arc<str>, HyperLogLog>,
         hll_all_time: Option<&mut HyperLogLog>,
         method_counts: &mut crate::method_proto::MethodCountsMap,

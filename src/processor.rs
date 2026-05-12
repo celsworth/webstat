@@ -22,8 +22,8 @@ use crate::parser;
 use crate::progress::{flush_shared_progress, print_dir_progress, SharedProgress};
 use crate::run_accumulators::RunAccumulators;
 use crate::topn::{
-    CountryCountMap, HostBwMap, HostHitsMap, HourlyMap, PeriodCountMap, PeriodHitsMap, StatusMap,
-    TopNCount, TopNHitsBw, TopNHosts, TopNHostsByBandwidth,
+    CountryHitsMap, HourlyMap, PeriodCountMap, StatusHitsMap, TopHostsByBandwidth, TopHostsByHits,
+    TopNCount, TopNHitsBw, TopNHosts, TopNHostsByBandwidth, TopUrlsByHits,
 };
 use crate::ua::UaParser;
 use crate::util::{

@@ -2,12 +2,12 @@ use super::*;
 use ahash::AHashSet;
 
 struct PreFlushTopMaps {
-    top_urls: PeriodHitsMap,
-    top_hosts: HostHitsMap,
-    top_hosts_bw: HostBwMap,
+    top_urls: TopUrlsByHits,
+    top_hosts: TopHostsByHits,
+    top_hosts_bw: TopHostsByBandwidth,
     top_refs: PeriodCountMap,
     top_agents: PeriodCountMap,
-    top_countries: CountryCountMap,
+    top_countries: CountryHitsMap,
 }
 
 impl Processor {
@@ -126,9 +126,9 @@ impl Processor {
         }
     }
 
-    pub(super) fn filter_top_urls_for_flush(&self, top_urls: &PeriodHitsMap) -> PeriodHitsMap {
+    pub(super) fn filter_top_urls_for_flush(&self, top_urls: &TopUrlsByHits) -> TopUrlsByHits {
         let (latest_month, latest_year) = self.latest_periods(top_urls.keys());
-        let mut filtered = PeriodHitsMap::with_capacity(top_urls.len());
+        let mut filtered = TopUrlsByHits::with_capacity(top_urls.len());
 
         for (period, urls) in top_urls {
             if !self.should_pretrim_period(period.as_ref(), latest_month, latest_year) {
@@ -175,9 +175,9 @@ impl Processor {
         filtered
     }
 
-    fn filter_top_hosts_for_flush(&self, top_hosts: &HostHitsMap) -> HostHitsMap {
+    fn filter_top_hosts_for_flush(&self, top_hosts: &TopHostsByHits) -> TopHostsByHits {
         let (latest_month, latest_year) = self.latest_periods(top_hosts.keys());
-        let mut filtered = HostHitsMap::with_capacity(top_hosts.len());
+        let mut filtered = TopHostsByHits::with_capacity(top_hosts.len());
 
         for (period, hosts) in top_hosts {
             if !self.should_pretrim_period(period.as_ref(), latest_month, latest_year) {
@@ -208,9 +208,12 @@ impl Processor {
         filtered
     }
 
-    fn filter_top_hosts_bw_for_flush(&self, top_hosts_bw: &HostBwMap) -> HostBwMap {
+    fn filter_top_hosts_bw_for_flush(
+        &self,
+        top_hosts_bw: &TopHostsByBandwidth,
+    ) -> TopHostsByBandwidth {
         let (latest_month, latest_year) = self.latest_periods(top_hosts_bw.keys());
-        let mut filtered = HostBwMap::with_capacity(top_hosts_bw.len());
+        let mut filtered = TopHostsByBandwidth::with_capacity(top_hosts_bw.len());
 
         for (period, hosts) in top_hosts_bw {
             if !self.should_pretrim_period(period.as_ref(), latest_month, latest_year) {
@@ -268,9 +271,9 @@ impl Processor {
         filtered
     }
 
-    fn filter_top_countries_for_flush(&self, map: &CountryCountMap) -> CountryCountMap {
+    fn filter_top_countries_for_flush(&self, map: &CountryHitsMap) -> CountryHitsMap {
         let (latest_month, latest_year) = self.latest_periods(map.keys());
-        let mut filtered = CountryCountMap::with_capacity(map.len());
+        let mut filtered = CountryHitsMap::with_capacity(map.len());
 
         for (period, countries) in map {
             if !self.should_pretrim_period(period.as_ref(), latest_month, latest_year)

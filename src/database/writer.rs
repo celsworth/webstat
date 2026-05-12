@@ -5,14 +5,14 @@ impl Database {
     pub fn flush_all(
         &mut self,
         hourly: &HourlyMap,
-        top_urls: &PeriodHitsMap,
-        top_hosts: &HostHitsMap,
+        top_urls: &TopUrlsByHits,
+        top_hosts: &TopHostsByHits,
         top_refs: &PeriodCountMap,
         top_agents: &PeriodCountMap,
-        top_countries: &CountryCountMap,
-        status_codes: &StatusMap,
+        top_countries: &CountryHitsMap,
+        status_codes: &StatusHitsMap,
     ) -> Result<()> {
-        let empty_hosts_bw: HostBwMap = AHashMap::new();
+        let empty_hosts_bw: TopHostsByBandwidth = AHashMap::new();
         self.flush_all_with_parse_states_split(
             hourly,
             top_urls,
@@ -37,17 +37,17 @@ impl Database {
     pub fn flush_all_with_parse_states(
         &mut self,
         hourly: &HourlyMap,
-        top_urls: &PeriodHitsMap,
-        top_hosts: &HostHitsMap,
+        top_urls: &TopUrlsByHits,
+        top_hosts: &TopHostsByHits,
         top_refs: &PeriodCountMap,
         top_agents: &PeriodCountMap,
-        top_countries: &CountryCountMap,
-        status_codes: &StatusMap,
+        top_countries: &CountryHitsMap,
+        status_codes: &StatusHitsMap,
         hll_site_counts: &AHashMap<Arc<str>, HyperLogLog>,
         hll_all_time: Option<&HyperLogLog>,
         parse_states: &[ParseStateUpdate],
     ) -> Result<()> {
-        let empty_hosts_bw: HostBwMap = AHashMap::new();
+        let empty_hosts_bw: TopHostsByBandwidth = AHashMap::new();
         self.flush_all_with_parse_states_split(
             hourly,
             top_urls,
@@ -71,13 +71,13 @@ impl Database {
     pub fn flush_all_with_parse_states_split(
         &mut self,
         hourly: &HourlyMap,
-        top_urls: &PeriodHitsMap,
-        top_hosts: &HostHitsMap,
-        top_hosts_bw: &HostBwMap,
+        top_urls: &TopUrlsByHits,
+        top_hosts: &TopHostsByHits,
+        top_hosts_bw: &TopHostsByBandwidth,
         top_refs: &PeriodCountMap,
         top_agents: &PeriodCountMap,
-        top_countries: &CountryCountMap,
-        status_codes: &StatusMap,
+        top_countries: &CountryHitsMap,
+        status_codes: &StatusHitsMap,
         hll_site_counts: &AHashMap<Arc<str>, HyperLogLog>,
         hll_all_time: Option<&HyperLogLog>,
         parse_states: &[ParseStateUpdate],

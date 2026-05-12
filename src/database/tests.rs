@@ -11,7 +11,11 @@ mod tests {
         Database::open(":memory:").expect("open in-memory db")
     }
 
-    fn empty_flush(db: &mut Database, method_counts: &MethodCountsMap, proto_counts: &ProtoCountsMap) {
+    fn empty_flush(
+        db: &mut Database,
+        method_counts: &MethodCountsMap,
+        proto_counts: &ProtoCountsMap,
+    ) {
         db.flush_all_with_parse_states_split(
             &AHashMap::new(),
             &AHashMap::new(),
@@ -261,13 +265,13 @@ mod tests {
         let mut db = open_test_db();
 
         let hourly: HourlyMap = AHashMap::new();
-        let top_urls: PeriodHitsMap = AHashMap::new();
+        let top_urls: TopUrlsByHits = AHashMap::new();
         let top_refs: PeriodCountMap = AHashMap::new();
         let top_agents: PeriodCountMap = AHashMap::new();
-        let top_countries: CountryCountMap = AHashMap::new();
-        let status_codes: StatusMap = AHashMap::new();
+        let top_countries: CountryHitsMap = AHashMap::new();
+        let status_codes: StatusHitsMap = AHashMap::new();
 
-        let mut first_hosts: HostHitsMap = AHashMap::new();
+        let mut first_hosts: TopHostsByHits = AHashMap::new();
         let us = Arc::<str>::from("US");
         let us_name = Arc::<str>::from("United States");
         let mut month_hosts = TopNHosts::new(200);
@@ -297,7 +301,7 @@ mod tests {
             .expect("count all_time_hosts after first flush");
         assert_eq!(first_count, 2);
 
-        let mut second_hosts: HostHitsMap = AHashMap::new();
+        let mut second_hosts: TopHostsByHits = AHashMap::new();
         let mut next_month_hosts = TopNHosts::new(200);
         next_month_hosts.add("site-b", 100, &us, &us_name);
         next_month_hosts.add("site-c", 100, &us, &us_name);
@@ -326,12 +330,12 @@ mod tests {
         let mut db = open_test_db();
 
         let hourly: HourlyMap = AHashMap::new();
-        let top_urls: PeriodHitsMap = AHashMap::new();
-        let top_hosts: HostHitsMap = AHashMap::new();
+        let top_urls: TopUrlsByHits = AHashMap::new();
+        let top_hosts: TopHostsByHits = AHashMap::new();
         let top_refs: PeriodCountMap = AHashMap::new();
         let top_agents: PeriodCountMap = AHashMap::new();
-        let top_countries: CountryCountMap = AHashMap::new();
-        let status_codes: StatusMap = AHashMap::new();
+        let top_countries: CountryHitsMap = AHashMap::new();
+        let status_codes: StatusHitsMap = AHashMap::new();
 
         let mut first = AHashMap::new();
         let mut first_hll = HyperLogLog::new(10);

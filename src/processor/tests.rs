@@ -867,12 +867,12 @@ mod tests {
         let mut processor = new_processor_with_options(&db_path, false, None);
 
         let mut hourly: HourlyMap = AHashMap::new();
-        let mut top_urls: PeriodHitsMap = AHashMap::new();
-        let mut top_hosts: HostHitsMap = AHashMap::new();
+        let mut top_urls: TopUrlsByHits = AHashMap::new();
+        let mut top_hosts: TopHostsByHits = AHashMap::new();
         let mut top_refs: PeriodCountMap = AHashMap::new();
         let mut top_agents: PeriodCountMap = AHashMap::new();
-        let mut top_countries: CountryCountMap = AHashMap::new();
-        let mut status_codes: StatusMap = AHashMap::new();
+        let mut top_countries: CountryHitsMap = AHashMap::new();
+        let mut status_codes: StatusHitsMap = AHashMap::new();
 
         processor.aggregate_entry(
             log_entry(
@@ -942,12 +942,12 @@ mod tests {
         let mut processor = new_processor_with_options(&db_path, true, None);
 
         let mut hourly: HourlyMap = AHashMap::new();
-        let mut top_urls: PeriodHitsMap = AHashMap::new();
-        let mut top_hosts: HostHitsMap = AHashMap::new();
+        let mut top_urls: TopUrlsByHits = AHashMap::new();
+        let mut top_hosts: TopHostsByHits = AHashMap::new();
         let mut top_refs: PeriodCountMap = AHashMap::new();
         let mut top_agents: PeriodCountMap = AHashMap::new();
-        let mut top_countries: CountryCountMap = AHashMap::new();
-        let mut status_codes: StatusMap = AHashMap::new();
+        let mut top_countries: CountryHitsMap = AHashMap::new();
+        let mut status_codes: StatusHitsMap = AHashMap::new();
 
         processor.aggregate_entry(
             log_entry(
@@ -984,12 +984,12 @@ mod tests {
         let mut processor = new_processor_with_options(&db_path, false, None);
 
         let mut hourly: HourlyMap = AHashMap::new();
-        let mut top_urls: PeriodHitsMap = AHashMap::new();
-        let mut top_hosts: HostHitsMap = AHashMap::new();
+        let mut top_urls: TopUrlsByHits = AHashMap::new();
+        let mut top_hosts: TopHostsByHits = AHashMap::new();
         let mut top_refs: PeriodCountMap = AHashMap::new();
         let mut top_agents: PeriodCountMap = AHashMap::new();
-        let mut top_countries: CountryCountMap = AHashMap::new();
-        let mut status_codes: StatusMap = AHashMap::new();
+        let mut top_countries: CountryHitsMap = AHashMap::new();
+        let mut status_codes: StatusHitsMap = AHashMap::new();
 
         for ts in [
             "08/May/2026:14:00:00 +0000",
@@ -997,15 +997,7 @@ mod tests {
             "08/May/2026:15:01:00 +0000",
         ] {
             processor.aggregate_entry(
-                log_entry(
-                    "1.2.3.4",
-                    ts,
-                    "/index.html",
-                    200,
-                    100,
-                    "",
-                    "Mozilla/5.0",
-                ),
+                log_entry("1.2.3.4", ts, "/index.html", 200, 100, "", "Mozilla/5.0"),
                 &mut hourly,
                 &mut top_urls,
                 &mut top_hosts,
@@ -1031,12 +1023,12 @@ mod tests {
         let mut processor = new_processor_with_options(&db_path, false, Some("example.com"));
 
         let mut hourly: HourlyMap = AHashMap::new();
-        let mut top_urls: PeriodHitsMap = AHashMap::new();
-        let mut top_hosts: HostHitsMap = AHashMap::new();
+        let mut top_urls: TopUrlsByHits = AHashMap::new();
+        let mut top_hosts: TopHostsByHits = AHashMap::new();
         let mut top_refs: PeriodCountMap = AHashMap::new();
         let mut top_agents: PeriodCountMap = AHashMap::new();
-        let mut top_countries: CountryCountMap = AHashMap::new();
-        let mut status_codes: StatusMap = AHashMap::new();
+        let mut top_countries: CountryHitsMap = AHashMap::new();
+        let mut status_codes: StatusHitsMap = AHashMap::new();
 
         processor.aggregate_entry(
             log_entry(
@@ -1358,12 +1350,12 @@ mod tests {
         let mut processor = new_processor_with_options(&db_path, false, None);
 
         let mut hourly: HourlyMap = AHashMap::new();
-        let mut top_urls: PeriodHitsMap = AHashMap::new();
-        let mut top_hosts: HostHitsMap = AHashMap::new();
+        let mut top_urls: TopUrlsByHits = AHashMap::new();
+        let mut top_hosts: TopHostsByHits = AHashMap::new();
         let mut top_refs: PeriodCountMap = AHashMap::new();
         let mut top_agents: PeriodCountMap = AHashMap::new();
-        let mut top_countries: CountryCountMap = AHashMap::new();
-        let mut status_codes: StatusMap = AHashMap::new();
+        let mut top_countries: CountryHitsMap = AHashMap::new();
+        let mut status_codes: StatusHitsMap = AHashMap::new();
 
         processor.aggregate_entry(
             log_entry(
@@ -1417,12 +1409,12 @@ mod tests {
         let mut processor = new_processor_with_options(&db_path, false, None);
 
         let mut hourly: HourlyMap = AHashMap::new();
-        let mut top_urls: PeriodHitsMap = AHashMap::new();
-        let mut top_hosts: HostHitsMap = AHashMap::new();
+        let mut top_urls: TopUrlsByHits = AHashMap::new();
+        let mut top_hosts: TopHostsByHits = AHashMap::new();
         let mut top_refs: PeriodCountMap = AHashMap::new();
         let mut top_agents: PeriodCountMap = AHashMap::new();
-        let mut top_countries: CountryCountMap = AHashMap::new();
-        let mut status_codes: StatusMap = AHashMap::new();
+        let mut top_countries: CountryHitsMap = AHashMap::new();
+        let mut status_codes: StatusHitsMap = AHashMap::new();
 
         for status in [302u16, 404u16, 503u16] {
             processor.aggregate_entry(
@@ -1869,7 +1861,7 @@ mod tests {
         processor.top_n = 2;
         processor.topn_k = 5;
 
-        let mut top_urls: PeriodHitsMap = AHashMap::new();
+        let mut top_urls: TopUrlsByHits = AHashMap::new();
 
         let mut old_period = TopNHitsBw::new(5);
         old_period.add_hits_bw("/a", 100, 1);
@@ -2413,7 +2405,9 @@ mod tests {
 
         write_plain_file(
             &log_path,
-            &[line_with_method_proto("GET", "HTTP/1.1", "/a.html", 200, 100)],
+            &[line_with_method_proto(
+                "GET", "HTTP/1.1", "/a.html", 200, 100,
+            )],
         );
 
         let mut processor = new_processor(&db_path);
