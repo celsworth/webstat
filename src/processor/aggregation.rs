@@ -66,41 +66,6 @@ impl Processor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[allow(dead_code)]
-    pub(super) fn aggregate_entry_with_hll(
-        &mut self,
-        entry: parser::LogEntry<'_>,
-        hourly: &mut HourlyMap,
-        top_urls: &mut PeriodHitsMap,
-        top_hosts: &mut HostHitsMap,
-        top_refs: &mut PeriodCountMap,
-        top_agents: &mut PeriodCountMap,
-        top_countries: &mut CountryCountMap,
-        status_codes: &mut StatusMap,
-        hll_site_counts: &mut AHashMap<Arc<str>, HyperLogLog>,
-        hll_all_time: Option<&mut HyperLogLog>,
-    ) {
-        let mut top_hosts_bw: HostBwMap = AHashMap::new();
-        let mut method_counts = AHashMap::new();
-        let mut proto_counts = AHashMap::new();
-        self.aggregate_entry_with_hll_split(
-            entry,
-            hourly,
-            top_urls,
-            top_hosts,
-            &mut top_hosts_bw,
-            top_refs,
-            top_agents,
-            top_countries,
-            status_codes,
-            hll_site_counts,
-            hll_all_time,
-            &mut method_counts,
-            &mut proto_counts,
-        );
-    }
-
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn aggregate_entry_with_hll_split(
         &mut self,
         entry: parser::LogEntry<'_>,
