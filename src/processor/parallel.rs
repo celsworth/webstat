@@ -298,14 +298,6 @@ impl Processor {
         let raw_file_sizes = Arc::new(raw_file_sizes.to_vec());
         let is_compressed_vec = Arc::new(is_compressed_vec.to_vec());
 
-        // In-memory dedup tracking for within-run duplicates.
-        // As files complete processing, their fingerprints are tracked here.
-        // Future files can be checked against this set to detect duplicates.
-        let completed_compressed_heads: Arc<Mutex<AHashSet<u64>>> =
-            Arc::new(Mutex::new(AHashSet::new()));
-        let completed_uncompressed_heads: Arc<Mutex<AHashSet<u64>>> =
-            Arc::new(Mutex::new(AHashSet::new()));
-
         let (tx, rx) = mpsc::channel::<WorkerMessage>();
         let mut handles = Vec::with_capacity(worker_count);
 
@@ -457,26 +449,6 @@ impl Processor {
                 Ok(WorkerMessage::Completed(work)) => {
                     total += work.lines_processed;
                     run_acc.merge_from(work.run_acc, self.hll_precision, self.topn_k);
-
-                    // Track completed fingerprints for in-run dedup detection.
-                    // Extract fingerprints before extending pending_parse_states.
-                    if work.file_completed {
-                        for update in &work.pending_parse_states {
-                            if let Some(compressed_fp) = update.compressed_head_fingerprint {
-                                completed_compressed_heads
-                                    .lock()
-                                    .expect("dedup lock")
-                                    .insert(compressed_fp);
-                            }
-                            if let Some(uncompressed_fp) = update.uncompressed_head_fingerprint {
-                                completed_uncompressed_heads
-                                    .lock()
-                                    .expect("dedup lock")
-                                    .insert(uncompressed_fp);
-                            }
-                        }
-                    }
-
                     pending_parse_states.extend(work.pending_parse_states);
 
                     if work.file_completed {
@@ -509,28 +481,6 @@ impl Processor {
                         Ok(WorkerMessage::Completed(work)) => {
                             total += work.lines_processed;
                             run_acc.merge_from(work.run_acc, self.hll_precision, self.topn_k);
-
-                            // Track completed fingerprints for in-run dedup detection.
-                            if work.file_completed {
-                                for update in &work.pending_parse_states {
-                                    if let Some(compressed_fp) = update.compressed_head_fingerprint
-                                    {
-                                        completed_compressed_heads
-                                            .lock()
-                                            .expect("dedup lock")
-                                            .insert(compressed_fp);
-                                    }
-                                    if let Some(uncompressed_fp) =
-                                        update.uncompressed_head_fingerprint
-                                    {
-                                        completed_uncompressed_heads
-                                            .lock()
-                                            .expect("dedup lock")
-                                            .insert(uncompressed_fp);
-                                    }
-                                }
-                            }
-
                             pending_parse_states.extend(work.pending_parse_states);
 
                             if work.file_completed {
