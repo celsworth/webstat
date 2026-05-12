@@ -66,6 +66,9 @@ pub fn parse_line(line: &str) -> Option<LogEntry<'_>> {
     let req_start = pos + 1;
     let req_end = find_byte(b'"', b, req_start)?;
     let request = &line[req_start..req_end];
+    if b[req_start..req_end].iter().any(|&c| c < 32 || c > 126) {
+        return None;
+    }
 
     // ── status (3 ASCII digits) ──────────────────────────────────────────────
     let pos = req_end + 2; // skip '" '
@@ -98,6 +101,9 @@ pub fn parse_line(line: &str) -> Option<LogEntry<'_>> {
     let ua_str = &line[ua_start..ua_end];
 
     let (method, path, proto) = split_request(request);
+    if !proto.starts_with("HTTP/") {
+        return None;
+    }
 
     Some(LogEntry {
         ip,

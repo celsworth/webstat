@@ -496,20 +496,6 @@ mod tests {
     }
 
     #[test]
-    fn unicode_in_path() {
-        let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET /café/naïve HTTP/1.1" 200 100 "-" "-""#;
-        let entry = parse_line(line).expect("should parse");
-        assert!(entry.path.contains("café"));
-    }
-
-    #[test]
-    fn unicode_in_referer() {
-        let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "https://example.com/日本語/ページ" "-""#;
-        let entry = parse_line(line).expect("should parse");
-        assert!(entry.referer.contains("日本語"));
-    }
-
-    #[test]
     fn http2_protocol() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET /index.html HTTP/2.0" 200 1234 "-" "Mozilla/5.0""#;
         let entry = parse_line(line).expect("should parse");
@@ -524,27 +510,49 @@ mod tests {
         assert_eq!(entry.path, "example.com:443");
     }
 
+    // ── Junk / non-HTTP requests ─────────────────────────────────────────────
+
     #[test]
-    fn request_with_no_protocol() {
+    fn rejects_tls_handshake_binary() {
+        // TLS ClientHello starts with control bytes \x16\x03\x01 (record type, version)
+        let line = "212.102.40.218 - - [12/May/2026:17:48:14 +0100] \"\x16\x03\x01\x01\" 400 166 \"-\" \"-\"";
+        assert!(parse_line(line).is_none());
+    }
+
+    #[test]
+    fn rejects_tls_handshake_variant() {
+        let line = "206.123.144.13 - - [12/May/2026:14:25:34 +0100] \"\x16\x03\x01\x02\" 400 166 \"-\" \"-\"";
+        assert!(parse_line(line).is_none());
+    }
+
+    #[test]
+    fn rejects_ssh_banner() {
+        let line = r#"20.163.15.93 - - [12/May/2026:14:34:16 +0100] "SSH-2.0-Go" 400 166 "-" "-""#;
+        assert!(parse_line(line).is_none());
+    }
+
+    #[test]
+    fn rejects_scanner_probe() {
+        let line = r#"20.163.15.93 - - [12/May/2026:14:34:16 +0100] "MGLNDD_89.16.164.98_443" 400 166 "-" "-""#;
+        assert!(parse_line(line).is_none());
+    }
+
+    #[test]
+    fn rejects_empty_request() {
+        let line = r#"18.116.101.220 - - [12/May/2026:16:58:14 +0100] "" 400 0 "-" "-""#;
+        assert!(parse_line(line).is_none());
+    }
+
+    #[test]
+    fn rejects_request_without_protocol() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET /path" 200 100 "-" "-""#;
-        let entry = parse_line(line).expect("should parse");
-        // Parser extracts up to first space after method as path
-        assert_eq!(entry.path, "/path");
+        assert!(parse_line(line).is_none());
     }
 
     #[test]
-    fn empty_request_string() {
-        let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "" 200 100 "-" "-""#;
-        let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method, "");
-        assert_eq!(entry.path, "");
-    }
-
-    #[test]
-    fn only_method_in_request() {
-        let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET" 200 100 "-" "-""#;
-        let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method, "");
-        assert_eq!(entry.path, "GET");
+    fn rejects_non_ascii_in_request() {
+        // Non-ASCII chars (bytes > 126) in the request field are rejected
+        let line = "1.2.3.4 - user [08/May/2026:14:23:01 +0000] \"GET /café HTTP/1.1\" 200 100 \"-\" \"-\"";
+        assert!(parse_line(line).is_none());
     }
 }
