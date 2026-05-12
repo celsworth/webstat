@@ -2,6 +2,7 @@ use std::net::Ipv6Addr;
 use std::sync::Arc;
 
 use chrono::Local;
+use memchr::{memchr, memrchr};
 
 // ── Extension tables ──────────────────────────────────────────────────────────
 
@@ -16,7 +17,7 @@ pub const FILE_EXTS: &[&str] = &[
 /// Strip the query string from a path (`/foo?bar=1` → `/foo`).
 #[inline]
 pub fn strip_query(path: &str) -> &str {
-    match path.as_bytes().iter().position(|&b| b == b'?') {
+    match memchr(b'?', path.as_bytes()) {
         Some(i) => &path[..i],
         None => path,
     }
@@ -29,9 +30,12 @@ pub fn strip_query(path: &str) -> &str {
 #[inline]
 pub fn file_ext(path: &str) -> &str {
     let b = path.as_bytes();
-    let start = b.iter().rposition(|&c| c == b'/').map_or(0, |p| p + 1);
+
+    let start = memrchr(b'/', b).map_or(0, |p| p + 1);
+
     let filename = &path[start..];
-    match filename.as_bytes().iter().rposition(|&c| c == b'.') {
+
+    match memrchr(b'.', filename.as_bytes()) {
         Some(i) => &filename[i..],
         None => "",
     }
@@ -44,22 +48,27 @@ pub fn file_ext(path: &str) -> &str {
 /// Returns `None` if `url` has no `://` scheme or an empty host.
 #[inline]
 pub fn extract_host_from_url(url: &str) -> Option<Arc<str>> {
-    let after_scheme = url.find("://")?;
-    let start = after_scheme + 3;
+    let scheme = url.find("://")?;
+    let start = scheme + 3;
+
     if start >= url.len() {
         return None;
     }
+
     let rest = &url[start..];
+
     let end = rest
-        .bytes()
-        .position(|b| b == b'/' || b == b':' || b == b'?')
+        .as_bytes()
+        .iter()
+        .position(|&b| b == b'/' || b == b':' || b == b'?')
         .unwrap_or(rest.len());
+
     if end == 0 {
         return None;
     }
+
     Some(Arc::from(&rest[..end]))
 }
-
 // ── IP parsing ────────────────────────────────────────────────────────────────
 
 /// Fast IPv4 parser — returns big-endian packed octets as `u32`.
@@ -122,8 +131,9 @@ pub fn current_log_timestamp() -> String {
 /// Parse a nginx timestamp (`DD/Mon/YYYY:HH:MM:SS ±HHMM`) into a Unix
 /// timestamp (seconds since epoch, UTC).
 ///
+/// Only used in tests.
+///
 /// Returns `None` on any parse failure.
-#[inline]
 #[cfg(test)]
 pub fn parse_unix_timestamp(time_str: &str, month_num: u8) -> Option<i64> {
     let b = time_str.as_bytes();
