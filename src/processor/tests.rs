@@ -1411,54 +1411,6 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_entry_with_tracking_disabled_keeps_visits_at_zero() {
-        let temp = TempDir::new().expect("tempdir");
-        let db_path = temp.path().join("webstat.db");
-        let mut processor = new_processor_with_options(&db_path, false, None);
-        processor.track_visits = false;
-
-        let mut hourly: HourlyMap = AHashMap::new();
-        let mut top_urls: PeriodHitsMap = AHashMap::new();
-        let mut top_hosts: HostHitsMap = AHashMap::new();
-        let mut top_refs: PeriodCountMap = AHashMap::new();
-        let mut top_agents: PeriodCountMap = AHashMap::new();
-        let mut top_countries: CountryCountMap = AHashMap::new();
-        let mut status_codes: StatusMap = AHashMap::new();
-
-        for ts in [
-            "08/May/2026:14:00:00 +0000",
-            "08/May/2026:15:30:00 +0000",
-            "08/May/2026:17:00:00 +0000",
-        ] {
-            processor.aggregate_entry(
-                log_entry(
-                    "1.2.3.4",
-                    ts,
-                    "/index.html",
-                    200,
-                    100,
-                    "",
-                    "Mozilla/5.0",
-                ),
-                &mut hourly,
-                &mut top_urls,
-                &mut top_hosts,
-                &mut top_refs,
-                &mut top_agents,
-                &mut top_countries,
-                &mut status_codes,
-            );
-        }
-
-        let total_visits: u64 = hourly
-            .values()
-            .flat_map(|hours| hours.values())
-            .map(|acc| acc.stats.visits)
-            .sum();
-        assert_eq!(total_visits, 0);
-    }
-
-    #[test]
     fn aggregate_entry_status_buckets_cover_3xx_4xx_and_5xx() {
         let temp = TempDir::new().expect("tempdir");
         let db_path = temp.path().join("webstat.db");

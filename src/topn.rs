@@ -2,8 +2,6 @@ use std::sync::Arc;
 
 use ahash::{AHashMap, AHashSet};
 
-use crate::hll::HyperLogLog;
-
 // ── Map type aliases ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
@@ -40,9 +38,6 @@ pub type PeriodCountMap = AHashMap<Arc<str>, TopNCount>;
 pub type CountryCountMap = AHashMap<Arc<str>, AHashMap<String, u64>>;
 /// period → status_code → hits (exact, not Space-Saving)
 pub type StatusMap = AHashMap<Arc<str>, AHashMap<u16, u64>>;
-/// period → HyperLogLog sketch for unique-IP counts (used by processor and database)
-#[allow(dead_code)]
-pub type HllSiteCountMap = AHashMap<Arc<str>, HyperLogLog>;
 
 // ── Space-Saving top-N trackers ───────────────────────────────────────────────
 

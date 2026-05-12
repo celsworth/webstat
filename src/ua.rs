@@ -115,7 +115,7 @@ impl UaParser {
             _ => Arc::from("Unknown"),
         };
 
-        let is_crawler = parsed.map_or(false, |r| r.category == "crawler");
+        let is_crawler = parsed.is_some_and(|r| r.category == "crawler");
         let is_bot = is_crawler || self.is_bot_heuristic(&family, ua);
         (family, is_bot)
     }

@@ -371,13 +371,12 @@ impl Processor {
                         .clone()
                         .expect("phase-one plan missing for queued file");
 
-                    if worker.track_visits {
-                        let sv = shared_visit.lock().expect("shared visit poisoned");
-                        worker.visit_last_seen.clone_from(&sv.last_seen);
-                        worker.visit_max_seen_ts = sv.max_seen_ts;
-                        drop(sv);
-                        worker.visit_state_dirty.clear();
-                    }
+                    let sv = shared_visit.lock().expect("shared visit poisoned");
+                    worker.visit_last_seen.clone_from(&sv.last_seen);
+                    worker.visit_max_seen_ts = sv.max_seen_ts;
+                    drop(sv);
+                    worker.visit_state_dirty.clear();
+
                     let mut worker_run_acc = RunAccumulators::new(
                         64,
                         worker.hll_precision,
@@ -406,9 +405,8 @@ impl Processor {
                         &mut progress_flush_last,
                     ) {
                         Ok(result) => {
-                            if worker.track_visits && !worker.visit_state_dirty.is_empty() {
-                                let mut sv =
-                                    shared_visit.lock().expect("shared visit poisoned");
+                            if !worker.visit_state_dirty.is_empty() {
+                                let mut sv = shared_visit.lock().expect("shared visit poisoned");
                                 for (key, ts) in worker.visit_state_dirty.drain() {
                                     merge_max(&mut sv.last_seen, key.clone(), ts);
                                     merge_max(&mut sv.dirty, key, ts);
@@ -556,16 +554,14 @@ impl Processor {
                 }
 
                 // Drain shared visit dirty into self before flushing to DB.
-                if self.track_visits {
-                    let mut sv = shared_visit.lock().expect("shared visit poisoned");
-                    self.absorb_shared_visit(&mut sv);
-                    // Prune shared last_seen to match post-flush state.
-                    if self.visit_max_seen_ts > 0 {
-                        let cutoff =
-                            self.visit_max_seen_ts.saturating_sub(VISIT_TIMEOUT_SECONDS);
-                        sv.last_seen.retain(|_, ts| *ts >= cutoff);
-                    }
+                let mut sv = shared_visit.lock().expect("shared visit poisoned");
+                self.absorb_shared_visit(&mut sv);
+                // Prune shared last_seen to match post-flush state.
+                if self.visit_max_seen_ts > 0 {
+                    let cutoff = self.visit_max_seen_ts.saturating_sub(VISIT_TIMEOUT_SECONDS);
+                    sv.last_seen.retain(|_, ts| *ts >= cutoff);
                 }
+
                 self.flush_run(&run_acc, &pending_parse_states, &retired_parse_states)?;
                 run_acc = RunAccumulators::new(
                     64,
@@ -617,10 +613,8 @@ impl Processor {
         }
 
         // Drain any remaining shared visit dirty into self for the final flush_run.
-        if self.track_visits {
-            let mut sv = shared_visit.lock().expect("shared visit poisoned");
-            self.absorb_shared_visit(&mut sv);
-        }
+        let mut sv = shared_visit.lock().expect("shared visit poisoned");
+        self.absorb_shared_visit(&mut sv);
 
         Ok((total, run_acc, pending_parse_states, retired_parse_states))
     }

@@ -115,7 +115,6 @@ pub struct Processor {
     geo_cache: AHashMap<u32, (Arc<str>, Arc<str>)>,
     /// Max timestamp seen in this run to anchor state pruning.
     visit_max_seen_ts: i64,
-    track_visits: bool,
 }
 
 #[derive(Clone)]
@@ -170,7 +169,6 @@ impl Processor {
             visit_state_dirty: AHashMap::with_capacity(262_144),
             geo_cache: AHashMap::with_capacity(262_144),
             visit_max_seen_ts: 0,
-            track_visits: true,
         }
     }
 
@@ -287,9 +285,7 @@ impl Processor {
 
         let dir_started = Instant::now();
 
-        if self.track_visits {
-            self.load_visit_state_from_db()?;
-        }
+        self.load_visit_state_from_db()?;
 
         logging::log(&format!(
             "Found {} file(s) across {} pattern(s)",
@@ -495,7 +491,7 @@ impl Processor {
             None
         };
 
-        if !self.track_visits
+        if false
             && !is_compressed
             && self.file_workers > 1
             && total_bytes.unwrap_or(0) >= RANGE_PARALLEL_MIN_BYTES
@@ -767,10 +763,6 @@ impl Processor {
     }
 
     fn collect_visit_state_flush(&mut self) -> (Vec<VisitStateUpdate>, Option<i64>) {
-        if !self.track_visits {
-            return (Vec::new(), None);
-        }
-
         let prune_before = if self.visit_max_seen_ts > 0 {
             Some(self.visit_max_seen_ts.saturating_sub(VISIT_TIMEOUT_SECONDS))
         } else {

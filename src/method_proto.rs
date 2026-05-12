@@ -32,14 +32,14 @@ pub type ProtoCountsMap = AHashMap<Arc<str>, [u64; PROTO_COUNT]>;
 
 #[inline]
 pub fn method_index(method: &str) -> usize {
-    match method {
-        "GET" => METHOD_GET,
-        "POST" => METHOD_POST,
-        "HEAD" => METHOD_HEAD,
-        "PUT" => METHOD_PUT,
-        "DELETE" => METHOD_DELETE,
-        "OPTIONS" => METHOD_OPTIONS,
-        "PATCH" => METHOD_PATCH,
+    match method.as_bytes() {
+        b"GET" => METHOD_GET,
+        b"POST" => METHOD_POST,
+        b"HEAD" => METHOD_HEAD,
+        b"PUT" => METHOD_PUT,
+        b"DELETE" => METHOD_DELETE,
+        b"OPTIONS" => METHOD_OPTIONS,
+        b"PATCH" => METHOD_PATCH,
         _ => METHOD_OTHER,
     }
 }
@@ -120,7 +120,10 @@ mod tests {
         assert_eq!(PROTO_NAMES[PROTO_OTHER], "other");
         assert_eq!(PROTO_NAMES.len(), PROTO_COUNT);
         for name in &PROTO_NAMES {
-            assert!(!name.starts_with("HTTP/"), "proto storage name must not include HTTP/ prefix");
+            assert!(
+                !name.starts_with("HTTP/"),
+                "proto storage name must not include HTTP/ prefix"
+            );
         }
     }
 
@@ -145,8 +148,14 @@ mod tests {
     #[test]
     fn method_constants_are_all_distinct() {
         let indices = [
-            METHOD_GET, METHOD_POST, METHOD_HEAD, METHOD_PUT,
-            METHOD_DELETE, METHOD_OPTIONS, METHOD_PATCH, METHOD_OTHER,
+            METHOD_GET,
+            METHOD_POST,
+            METHOD_HEAD,
+            METHOD_PUT,
+            METHOD_DELETE,
+            METHOD_OPTIONS,
+            METHOD_PATCH,
+            METHOD_OTHER,
         ];
         let unique: std::collections::HashSet<usize> = indices.iter().copied().collect();
         assert_eq!(unique.len(), METHOD_COUNT);

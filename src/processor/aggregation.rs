@@ -122,17 +122,10 @@ impl Processor {
             return;
         }
 
-        let (date, hour, month_period, year_period, request_ts) = if self.track_visits {
+        let (date, hour, month_period, year_period, request_ts) = {
             match self.time_periods_with_timestamp(entry.time_str, entry.month_num) {
                 Some((date, hour, month_period, year_period, request_ts)) => {
                     (date, hour, month_period, year_period, Some(request_ts))
-                }
-                None => return,
-            }
-        } else {
-            match self.time_periods(entry.time_str, entry.month_num) {
-                Some((date, hour, month_period, year_period)) => {
-                    (date, hour, month_period, year_period, None)
                 }
                 None => return,
             }
@@ -155,37 +148,35 @@ impl Processor {
         h.ip_set.insert(ip_id);
         let stats = &mut h.stats;
 
-        if self.track_visits {
-            if let Some(ts) = request_ts {
-                if ts > self.visit_max_seen_ts {
-                    self.visit_max_seen_ts = ts;
-                }
-                let visit_key = Self::visit_state_key(ip);
-                let is_new_visit = match self.visit_last_seen.entry(visit_key.clone()) {
-                    std::collections::hash_map::Entry::Occupied(mut occupied) => {
-                        let last_seen = *occupied.get();
-                        if ts > last_seen {
-                            *occupied.get_mut() = ts;
-                        }
-                        ts.saturating_sub(last_seen) > VISIT_TIMEOUT_SECONDS
+        if let Some(ts) = request_ts {
+            if ts > self.visit_max_seen_ts {
+                self.visit_max_seen_ts = ts;
+            }
+            let visit_key = Self::visit_state_key(ip);
+            let is_new_visit = match self.visit_last_seen.entry(visit_key.clone()) {
+                std::collections::hash_map::Entry::Occupied(mut occupied) => {
+                    let last_seen = *occupied.get();
+                    if ts > last_seen {
+                        *occupied.get_mut() = ts;
                     }
-                    std::collections::hash_map::Entry::Vacant(vacant) => {
-                        vacant.insert(ts);
-                        true
-                    }
-                };
-                let dirty_ts = self.visit_last_seen.get(&visit_key).copied().unwrap_or(ts);
-                self.visit_state_dirty
-                    .entry(visit_key)
-                    .and_modify(|v| {
-                        if dirty_ts > *v {
-                            *v = dirty_ts;
-                        }
-                    })
-                    .or_insert(dirty_ts);
-                if is_new_visit {
-                    stats.visits += 1;
+                    ts.saturating_sub(last_seen) > VISIT_TIMEOUT_SECONDS
                 }
+                std::collections::hash_map::Entry::Vacant(vacant) => {
+                    vacant.insert(ts);
+                    true
+                }
+            };
+            let dirty_ts = self.visit_last_seen.get(&visit_key).copied().unwrap_or(ts);
+            self.visit_state_dirty
+                .entry(visit_key)
+                .and_modify(|v| {
+                    if dirty_ts > *v {
+                        *v = dirty_ts;
+                    }
+                })
+                .or_insert(dirty_ts);
+            if is_new_visit {
+                stats.visits += 1;
             }
         }
 
@@ -282,20 +273,18 @@ impl Processor {
             .add(agent.as_ref(), 1);
 
         // ── Referrer ───────────────────────────────────────────────────────────
-        if self.enable_top_refs {
-            if !entry.referer.is_empty() {
-                if let Some(host) = self.extract_host(entry.referer) {
-                    if !self.own_host(&host) {
-                        top_refs
-                            .entry(Arc::clone(&month_period))
-                            .or_insert_with(|| TopNCount::new(topn_k))
-                            .add(&host, 1);
+        if self.enable_top_refs && !entry.referer.is_empty() {
+            if let Some(host) = self.extract_host(entry.referer) {
+                if !(self.site_host.as_deref() == Some(&host)) {
+                    top_refs
+                        .entry(Arc::clone(&month_period))
+                        .or_insert_with(|| TopNCount::new(topn_k))
+                        .add(&host, 1);
 
-                        top_refs
-                            .entry(Arc::clone(&year_period))
-                            .or_insert_with(|| TopNCount::new(topn_k))
-                            .add(&host, 1);
-                    }
+                    top_refs
+                        .entry(Arc::clone(&year_period))
+                        .or_insert_with(|| TopNCount::new(topn_k))
+                        .add(&host, 1);
                 }
             }
         }
@@ -342,56 +331,8 @@ impl Processor {
 
     // ── Helpers ────────────────────────────────────────────────────────────────
 
-    /// Return `(date, hour, month_period, year_period)` decoded from a nginx
+    /// Return `(date, hour, month_period, year_period, ts)` decoded from a nginx
     /// timestamp string "DD/Mon/YYYY:HH:MM:SS ±HHMM".  Results are memoised.
-    ///
-    /// Returns `Arc<str>` values so cloning them in the hot loop costs only an
-    /// atomic ref-count increment rather than a heap allocation.
-    fn time_periods(
-        &mut self,
-        time_str: &str,
-        mon_num: u8,
-    ) -> Option<(Arc<str>, u8, Arc<str>, Arc<str>)> {
-        let b = time_str.as_bytes();
-        if b.len() < 26 {
-            return None;
-        }
-        let day: u32 = std::str::from_utf8(&b[0..2]).ok()?.parse().ok()?;
-        let year: u32 = std::str::from_utf8(&b[7..11]).ok()?.parse().ok()?;
-        let hour: u8 = std::str::from_utf8(&b[12..14]).ok()?.parse().ok()?;
-
-        let key = year * 1_000_000 + mon_num as u32 * 10_000 + day * 100 + hour as u32;
-
-        if let Some(cached) = self.time_cache.get(&key) {
-            // Arc::clone × 3 = 3 atomic increments, not 3 heap allocations.
-            return Some((
-                Arc::clone(&cached.0),
-                hour,
-                Arc::clone(&cached.1),
-                Arc::clone(&cached.2),
-            ));
-        }
-
-        let mon_s = format!("{mon_num:02}");
-        let result = (
-            Arc::from(format!("{year}-{mon_s}-{day:02}").as_str()),
-            hour,
-            Arc::from(format!("{year}-{mon_s}").as_str()),
-            Arc::from(format!("{year}").as_str()),
-        );
-        self.time_cache.insert(
-            key,
-            (
-                Arc::clone(&result.0),
-                Arc::clone(&result.2),
-                Arc::clone(&result.3),
-            ),
-        );
-        Some(result)
-    }
-
-    /// Parse the same timestamp once and return both the memoised periods and
-    /// the Unix timestamp used for visit tracking.
     fn time_periods_with_timestamp(
         &mut self,
         time_str: &str,
@@ -464,10 +405,6 @@ impl Processor {
                 .insert(url.to_string(), Arc::clone(host_value));
         }
         host
-    }
-
-    fn own_host(&self, host: &str) -> bool {
-        self.site_host.as_deref().map_or(false, |own| own == host)
     }
 
     /// Return a stable, exact integer ID for an IP string.

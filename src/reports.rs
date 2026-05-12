@@ -653,7 +653,7 @@ fn number_fmt(n: u64) -> String {
     for (i, c) in chars.iter().enumerate() {
         out.push(*c);
         let remain = chars.len() - i - 1;
-        if remain > 0 && remain % 3 == 0 {
+        if remain > 0 && remain.is_multiple_of(3) {
             out.push(',');
         }
     }
