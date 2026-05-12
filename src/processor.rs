@@ -23,7 +23,8 @@ use crate::progress::{flush_shared_progress, print_dir_progress, SharedProgress}
 use crate::run_accumulators::RunAccumulators;
 use crate::topn::{
     CountryHitsMap, HourlyMap, PeriodCountMap, StatusHitsMap, TopHostsByBandwidth, TopHostsByHits,
-    TopNCount, TopNHosts, TopNHostsByBandwidth, TopNUrls, TopNUrlsByBandwidth, TopUrlsByHits, TopUrlsByBandwidth
+    TopNCount, TopNHosts, TopNHostsByBandwidth, TopNUrls, TopNUrlsByBandwidth, TopUrlsByBandwidth,
+    TopUrlsByHits,
 };
 use crate::ua::UaParser;
 use crate::util::{
@@ -575,7 +576,7 @@ impl Processor {
                     }
                 }
                 if let Some(entry) = parser::parse_line(&line) {
-                    self.aggregate_entry_with_hll_split(
+                    self.aggregate_entry(
                         entry,
                         &mut run_acc.hourly,
                         &mut run_acc.top_urls,
@@ -632,7 +633,7 @@ impl Processor {
                 }
                 bytes_read += n as u64;
                 if let Some(entry) = parser::parse_line(&line) {
-                    self.aggregate_entry_with_hll_split(
+                    self.aggregate_entry(
                         entry,
                         &mut run_acc.hourly,
                         &mut run_acc.top_urls,

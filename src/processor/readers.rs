@@ -150,7 +150,7 @@ impl Processor {
             pos += n as u64;
 
             if let Some(entry) = parser::parse_line(&line) {
-                self.aggregate_entry_with_hll_split(
+                self.aggregate_entry(
                     entry,
                     &mut hourly,
                     &mut top_urls,

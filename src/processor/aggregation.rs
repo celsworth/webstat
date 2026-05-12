@@ -33,7 +33,7 @@ impl Processor {
 
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn aggregate_entry(
+    pub(super) fn aggregate_entry_test(
         &mut self,
         entry: parser::LogEntry<'_>,
         hourly: &mut HourlyMap,
@@ -49,7 +49,7 @@ impl Processor {
         let mut top_hosts_bw: TopHostsByBandwidth = AHashMap::new();
         let mut method_counts = AHashMap::new();
         let mut proto_counts = AHashMap::new();
-        self.aggregate_entry_with_hll_split(
+        self.aggregate_entry(
             entry,
             hourly,
             top_urls,
@@ -68,7 +68,7 @@ impl Processor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn aggregate_entry_with_hll_split(
+    pub(super) fn aggregate_entry(
         &mut self,
         entry: parser::LogEntry<'_>,
         hourly: &mut HourlyMap,

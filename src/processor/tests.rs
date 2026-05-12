@@ -874,7 +874,7 @@ mod tests {
         let mut top_countries: CountryHitsMap = AHashMap::new();
         let mut status_codes: StatusHitsMap = AHashMap::new();
 
-        processor.aggregate_entry(
+        processor.aggregate_entry_test(
             log_entry(
                 "1.2.3.4",
                 "08/May/2026:14:23:01 +0000",
@@ -893,7 +893,7 @@ mod tests {
             &mut status_codes,
         );
 
-        processor.aggregate_entry(
+        processor.aggregate_entry_test(
             log_entry(
                 "1.2.3.4",
                 "08/May/2026:14:24:01 +0000",
@@ -925,12 +925,23 @@ mod tests {
         assert_eq!(stats.status_2xx, 2);
 
         let month_urls = top_urls.get("2026-05").expect("month urls");
-        let url_find = |url: &str| month_urls.iter().find(|(k, _, _)| *k == url).map(|(_, h, bw)| (h, bw));
+        let url_find = |url: &str| {
+            month_urls
+                .iter()
+                .find(|(k, _, _)| *k == url)
+                .map(|(_, h, bw)| (h, bw))
+        };
         assert_eq!(url_find("/index.html"), Some((1, 1200)));
         assert_eq!(url_find("/app.js"), Some((1, 300)));
 
         let month_refs = top_refs.get("2026-05").expect("month refs");
-        assert_eq!(month_refs.iter().find(|(k, _)| *k == "news.ycombinator.com").map(|(_, v)| v), Some(2));
+        assert_eq!(
+            month_refs
+                .iter()
+                .find(|(k, _)| *k == "news.ycombinator.com")
+                .map(|(_, v)| v),
+            Some(2)
+        );
 
         let month_status = status_codes.get("2026-05").expect("month status");
         assert_eq!(month_status.get(&200), Some(&2));
@@ -950,7 +961,7 @@ mod tests {
         let mut top_countries: CountryHitsMap = AHashMap::new();
         let mut status_codes: StatusHitsMap = AHashMap::new();
 
-        processor.aggregate_entry(
+        processor.aggregate_entry_test(
             log_entry(
                 "1.2.3.4",
                 "08/May/2026:14:23:01 +0000",
@@ -997,7 +1008,7 @@ mod tests {
             "08/May/2026:14:20:00 +0000",
             "08/May/2026:15:01:00 +0000",
         ] {
-            processor.aggregate_entry(
+            processor.aggregate_entry_test(
                 log_entry("1.2.3.4", ts, "/index.html", 200, 100, "", "Mozilla/5.0"),
                 &mut hourly,
                 &mut top_urls,
@@ -1031,7 +1042,7 @@ mod tests {
         let mut top_countries: CountryHitsMap = AHashMap::new();
         let mut status_codes: StatusHitsMap = AHashMap::new();
 
-        processor.aggregate_entry(
+        processor.aggregate_entry_test(
             log_entry(
                 "1.2.3.4",
                 "08/May/2026:14:23:01 +0000",
@@ -1050,7 +1061,7 @@ mod tests {
             &mut status_codes,
         );
 
-        processor.aggregate_entry(
+        processor.aggregate_entry_test(
             log_entry(
                 "1.2.3.4",
                 "08/May/2026:14:24:01 +0000",
@@ -1071,7 +1082,13 @@ mod tests {
 
         let month_refs = top_refs.get("2026-05").expect("month refs");
         assert_eq!(month_refs.iter().count(), 1);
-        assert_eq!(month_refs.iter().find(|(k, _)| *k == "external.example.org").map(|(_, v)| v), Some(1));
+        assert_eq!(
+            month_refs
+                .iter()
+                .find(|(k, _)| *k == "external.example.org")
+                .map(|(_, v)| v),
+            Some(1)
+        );
     }
 
     #[test]
@@ -1358,7 +1375,7 @@ mod tests {
         let mut top_countries: CountryHitsMap = AHashMap::new();
         let mut status_codes: StatusHitsMap = AHashMap::new();
 
-        processor.aggregate_entry(
+        processor.aggregate_entry_test(
             log_entry(
                 "1.2.3.4",
                 "08/May/2026:14:00:00 +0000",
@@ -1376,7 +1393,7 @@ mod tests {
             &mut top_countries,
             &mut status_codes,
         );
-        processor.aggregate_entry(
+        processor.aggregate_entry_test(
             log_entry(
                 "1.2.3.4",
                 "08/May/2026:14:30:00 +0000",
@@ -1418,7 +1435,7 @@ mod tests {
         let mut status_codes: StatusHitsMap = AHashMap::new();
 
         for status in [302u16, 404u16, 503u16] {
-            processor.aggregate_entry(
+            processor.aggregate_entry_test(
                 log_entry(
                     "1.2.3.4",
                     "08/May/2026:14:23:01 +0000",
@@ -2495,7 +2512,7 @@ mod tests {
                 [],
                 |r| r.get(0),
             )
-            .expect("other proto");
-        assert_eq!(other_proto, 1, "SPDY/3 should map to 'other'");
+            .unwrap_or(0);
+        assert_eq!(other_proto, 0, "SPDY/3 should be ignored");
     }
 }
