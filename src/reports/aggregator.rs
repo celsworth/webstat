@@ -7,9 +7,9 @@ use rusqlite::{params, Connection};
 
 use super::{
     count_fmt, flag_emoji, format_bytes, format_totals, month_name, percent_str, status_label,
-    DailyAvgMax, DailyRow, HourlyAvgMax, HourlyRow, MonthRow, MonthlySummary, OverallSummary,
-    PeriodMonth, StatusRow, TopAgentRow, TopCountryRow, TopHostRow, TopRefRow, TopUrlRow,
-    TotalsView, YearAggregateRow, YearlySummary,
+    DailyAvgMax, DailyRow, HourlyAvgMax, HourlyRow, MethodRow, MonthRow, MonthlySummary,
+    OverallSummary, PeriodMonth, ProtoRow, StatusRow, TopAgentRow, TopCountryRow, TopHostRow,
+    TopRefRow, TopUrlRow, TotalsView, YearAggregateRow, YearlySummary,
 };
 
 pub(super) fn available_years(conn: &Connection) -> Result<Vec<i32>> {
@@ -114,6 +114,8 @@ pub(super) fn monthly_summary(
         .collect();
 
     let status_codes = status_codes(conn, &period, compact_counts)?;
+    let proto_codes = proto_codes(conn, &period, compact_counts)?;
+    let method_codes = method_codes(conn, &period, compact_counts)?;
     let daily_avg_max = daily_avg_max(conn, year, month, compact_counts)?;
     let hourly_avg_max = hourly_avg_max(conn, year, month, compact_counts)?;
 
@@ -132,6 +134,8 @@ pub(super) fn monthly_summary(
         top_agents,
         top_countries,
         status_codes,
+        proto_codes,
+        method_codes,
         daily_avg_max,
         hourly_avg_max,
     })
@@ -185,6 +189,8 @@ pub(super) fn yearly_summary(
         .collect();
 
     let status_codes = status_codes(conn, &period, compact_counts)?;
+    let proto_codes = proto_codes(conn, &period, compact_counts)?;
+    let method_codes = method_codes(conn, &period, compact_counts)?;
 
     Ok(YearlySummary {
         year,
@@ -196,6 +202,8 @@ pub(super) fn yearly_summary(
         top_agents,
         top_countries,
         status_codes,
+        proto_codes,
+        method_codes,
         totals,
     })
 }
@@ -1050,6 +1058,72 @@ fn status_codes_all(conn: &Connection, compact_counts: bool) -> Result<Vec<Statu
         out.push(StatusRow {
             status,
             label: status_label(status),
+            hits,
+            hits_fmt: count_fmt(hits, compact_counts),
+            hits_exact_fmt: super::number_fmt(hits),
+            pct_fmt: percent_str(hits as f64, total),
+        });
+    }
+
+    Ok(out)
+}
+
+fn proto_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result<Vec<ProtoRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT proto, hits
+         FROM proto_counts
+         WHERE period = ?1
+         ORDER BY hits DESC",
+    )?;
+
+    let rows = stmt.query_map(params![period], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+    })?;
+
+    let mut raw = Vec::<(String, u64)>::new();
+    for row in rows {
+        raw.push(row?);
+    }
+
+    let total = raw.iter().map(|(_, hits)| *hits).sum::<u64>() as f64;
+
+    let mut out = Vec::new();
+    for (proto, hits) in raw {
+        out.push(ProtoRow {
+            proto,
+            hits,
+            hits_fmt: count_fmt(hits, compact_counts),
+            hits_exact_fmt: super::number_fmt(hits),
+            pct_fmt: percent_str(hits as f64, total),
+        });
+    }
+
+    Ok(out)
+}
+
+fn method_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result<Vec<MethodRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT method, hits
+         FROM method_counts
+         WHERE period = ?1
+         ORDER BY hits DESC",
+    )?;
+
+    let rows = stmt.query_map(params![period], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+    })?;
+
+    let mut raw = Vec::<(String, u64)>::new();
+    for row in rows {
+        raw.push(row?);
+    }
+
+    let total = raw.iter().map(|(_, hits)| *hits).sum::<u64>() as f64;
+
+    let mut out = Vec::new();
+    for (method, hits) in raw {
+        out.push(MethodRow {
+            method,
             hits,
             hits_fmt: count_fmt(hits, compact_counts),
             hits_exact_fmt: super::number_fmt(hits),

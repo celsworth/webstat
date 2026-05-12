@@ -286,9 +286,6 @@ main.container {
 }
 
 /* ---------- Tables ---------- */
-.table-wrap {
-    overflow-x: auto;
-}
 
 .data-table {
     width: 100%;
@@ -314,48 +311,32 @@ main.container {
     user-select: none;
 }
 
-.data-table.sortable thead th[data-sort] {
-    cursor: pointer;
+.data-table thead th.mst-section-header {
+  background: #eee;
 }
 
 .data-table thead th.metric-hits {
-    background: var(--surface-alt);
     color: #2f8f75;
 }
 
 .data-table thead th.metric-files {
-    background: var(--surface-alt);
     color: #3f67cf;
 }
 
 .data-table thead th.metric-pages {
-    background: var(--surface-alt);
     color: #3a9dbd;
 }
 
 .data-table thead th.metric-visits {
-    background: var(--surface-alt);
     color: #9f8f28;
 }
 
 .data-table thead th.metric-sites {
-    background: var(--surface-alt);
     color: #c07f35;
 }
 
 .data-table thead th.metric-bandwidth {
-    background: var(--surface-alt);
     color: #cf6a6a;
-}
-
-.data-table.sortable thead th[data-sort]:hover {
-    color: var(--accent);
-}
-.data-table thead th.sort-asc::after {
-    content: " ↑";
-}
-.data-table thead th.sort-desc::after {
-    content: " ↓";
 }
 
 .data-table tbody tr:hover {
@@ -410,28 +391,6 @@ main.container {
 .data-table .num-col {
     text-align: right;
     white-space: nowrap;
-}
-
-/* ---------- Table search ---------- */
-.table-search-wrap {
-    margin-bottom: var(--gap-sm);
-}
-
-.table-search {
-    padding: 0.4rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface-alt);
-    color: var(--text);
-    font-size: 0.88rem;
-    width: 100%;
-    max-width: 320px;
-    outline: none;
-    transition: border-color 0.15s;
-}
-
-.table-search:focus {
-    border-color: var(--accent);
 }
 
 /* ---------- Month grid (index page) ---------- */
@@ -577,19 +536,6 @@ code {
     white-space: nowrap;
 }
 
-/* Full-width section header band (used in every panel) */
-.mst-section-header {
-    background: var(--surface-alt);
-    font-weight: 700;
-    font-size: 0.77rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-muted);
-    text-align: center;
-    padding: 0.35rem 0.7rem;
-    border-bottom: 1px solid var(--border);
-}
-
 /* Column-label subheader row (Avg / Max) */
 .mst-col-header th {
     background: var(--surface-alt);
@@ -605,11 +551,6 @@ code {
 
 .mst-col-header th:first-child {
     text-align: left;
-}
-
-/* Zebra striping */
-.monthly-stats-table tbody tr:nth-child(even) {
-    background: var(--surface-alt);
 }
 
 .monthly-stats-table tbody tr:hover {

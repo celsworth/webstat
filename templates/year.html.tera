@@ -62,96 +62,141 @@
 </section>
 {% endif %}
 
-<section class="data-section">
-  <h3>Monthly Breakdown</h3>
-  <div class="table-wrap">
-    <table class="data-table">
+<section class="monthly-stats-section">
+<div class="mst-panel">
+  <table class="data-table monthly-stats-table">
+    <thead>
+      <tr><th colspan="8" class="mst-section-header">Monthly Breakdown</th></tr>
+      <tr>
+        <th>Month</th>
+        <th class="num-col metric-hits">Hits</th>
+        <th class="num-col metric-pages">Pages</th>
+        <th class="num-col metric-files">Files</th>
+        <th class="num-col metric-visits">Visits</th>
+        <th class="num-col metric-sites">Sites</th>
+        <th class="num-col metric-bandwidth">Bandwidth</th>
+        <th>Detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in monthly_rows %}
+      <tr>
+        <td>{{ row.month_name }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.pages }}" title="{{ row.pages_exact_fmt }}">{{ row.pages_fmt }}</td>
+        <td class="num-col" data-value="{{ row.files }}" title="{{ row.files_exact_fmt }}">{{ row.files_fmt }}</td>
+        <td class="num-col" data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">{{ row.visits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.sites }}" title="{{ row.sites_exact_fmt }}">{{ row.sites_fmt }}</td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+        <td><a href="../{{ row.period }}/index.html" class="btn-link">View -></a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+</section>
+
+<section class="monthly-stats-section">
+  <div class="mst-panel">
+    {% if status_codes | length > 0 %}
+    <table class="data-table monthly-stats-table mst-3col">
       <thead>
-        <tr>
-          <th>Month</th>
-          <th class="num-col metric-hits">Hits</th>
-          <th class="num-col metric-pages">Pages</th>
-          <th class="num-col metric-files">Files</th>
-          <th class="num-col metric-visits">Visits</th>
-          <th class="num-col metric-sites">Sites</th>
-          <th class="num-col metric-bandwidth">Bandwidth</th>
-          <th>Detail</th>
-        </tr>
+        <tr><th colspan="3" class="mst-section-header">Hits by Response Code</th></tr>
       </thead>
       <tbody>
-        {% for row in monthly_rows %}
-        <tr>
-          <td>{{ row.month_name }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
-          <td class="num-col" data-value="{{ row.pages }}" title="{{ row.pages_exact_fmt }}">{{ row.pages_fmt }}</td>
-          <td class="num-col" data-value="{{ row.files }}" title="{{ row.files_exact_fmt }}">{{ row.files_fmt }}</td>
-          <td class="num-col" data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">{{ row.visits_fmt }}</td>
-          <td class="num-col" data-value="{{ row.sites }}" title="{{ row.sites_exact_fmt }}">{{ row.sites_fmt }}</td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
-          <td><a href="../{{ row.period }}/index.html" class="btn-link">View -></a></td>
+        {% for s in status_codes %}
+        <tr class="{% if s.status >= 200 and s.status < 300 %}status-row--2xx{% elif s.status >= 300 and s.status < 400 %}status-row--3xx{% elif s.status >= 400 and s.status < 500 %}status-row--4xx{% elif s.status >= 500 and s.status < 600 %}status-row--5xx{% else %}status-row--other{% endif %}">
+          <td>{{ s.label }}</td>
+          <td class="mst-pct">{{ s.pct_fmt }}</td>
+          <td title="{{ s.hits_exact_fmt }}">{{ s.hits_fmt }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
+    {% endif %}
+  </div>
+
+  <div class="mst-panel">
+    {% if proto_codes | length > 0 %}
+    <table class="data-table monthly-stats-table mst-3col">
+      <thead>
+        <tr><th colspan="3" class="mst-section-header">Hits by Protocol</th></tr>
+      </thead>
+      <tbody>
+        {% for p in proto_codes %}
+        <tr>
+          <td>{{ p.proto }}</td>
+          <td class="mst-pct">{{ p.pct_fmt }}</td>
+          <td title="{{ p.hits_exact_fmt }}">{{ p.hits_fmt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  <div class="mst-panel">
+    {% if method_codes | length > 0 %}
+    <table class="data-table monthly-stats-table mst-3col">
+      <thead>
+        <tr><th colspan="3" class="mst-section-header">Hits by Method</th></tr>
+      </thead>
+      <tbody>
+        {% for m in method_codes %}
+        <tr>
+          <td>{{ m.method }}</td>
+          <td class="mst-pct">{{ m.pct_fmt }}</td>
+          <td title="{{ m.hits_exact_fmt }}">{{ m.hits_fmt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
   </div>
 </section>
 
 {% if top_urls_hits | length > 0 or top_urls_bandwidth | length > 0 %}
 <div class="paired-tables-grid">
 {% if top_urls_hits | length > 0 %}
-<section class="data-section">
-  <h3>Top URLs by Hits - {{ year }}</h3>
-  <div class="table-wrap">
-    <table class="data-table sortable">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th data-sort="str">URL</th>
-          <th class="num-col" data-sort="num">Hits</th>
-          <th class="num-col" data-sort="num">Bandwidth</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in top_urls_hits %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td class="url-cell">{{ row.url }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
+<div class="mst-panel">
+  <table class="data-table monthly-stats-table">
+    <thead>
+      <tr><th colspan="4" class="mst-section-header">Top URLs by Hits - {{ year }}</th></tr>
+      <tr><th>#</th><th>URL</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
+    </thead>
+    <tbody>
+      {% for row in top_urls_hits %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td class="url-cell">{{ row.url }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 
 {% if top_urls_bandwidth | length > 0 %}
-<section class="data-section">
-  <h3>Top URLs by Bandwidth - {{ year }}</h3>
-  <div class="table-wrap">
-    <table class="data-table sortable">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th data-sort="str">URL</th>
-          <th class="num-col" data-sort="num">Hits</th>
-          <th class="num-col" data-sort="num">Bandwidth</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in top_urls_bandwidth %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td class="url-cell">{{ row.url }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
+<div class="mst-panel">
+  <table class="data-table monthly-stats-table">
+    <thead>
+      <tr><th colspan="4" class="mst-section-header">Top URLs by Bandwidth - {{ year }}</th></tr>
+      <tr><th>#</th><th>URL</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
+    </thead>
+    <tbody>
+      {% for row in top_urls_bandwidth %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td class="url-cell">{{ row.url }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 </div>
 {% endif %}
@@ -159,63 +204,47 @@
 {% if top_sites_hits | length > 0 or top_sites_bandwidth | length > 0 %}
 <div class="paired-tables-grid">
 {% if top_sites_hits | length > 0 %}
-<section class="data-section">
-  <h3>Top Sites by Hits - {{ year }}</h3>
-  <div class="table-wrap">
-    <table class="data-table sortable">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th data-sort="str">Site</th>
-          <th data-sort="str">Country</th>
-          <th class="num-col" data-sort="num">Hits</th>
-          <th class="num-col" data-sort="num">Bandwidth</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in top_sites_hits %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td>{{ row.host }}</td>
-          <td>{{ row.country_flag }} {{ row.country_name }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
+<div class="mst-panel">
+  <table class="data-table monthly-stats-table">
+    <thead>
+      <tr><th colspan="5" class="mst-section-header">Top Sites by Hits - {{ year }}</th></tr>
+      <tr><th>#</th><th>Site</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
+    </thead>
+    <tbody>
+      {% for row in top_sites_hits %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.host }}</td>
+        <td>{{ row.country_flag }} {{ row.country_name }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 
 {% if top_sites_bandwidth | length > 0 %}
-<section class="data-section">
-  <h3>Top Sites by Bandwidth - {{ year }}</h3>
-  <div class="table-wrap">
-    <table class="data-table sortable">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th data-sort="str">Site</th>
-          <th data-sort="str">Country</th>
-          <th class="num-col" data-sort="num">Hits</th>
-          <th class="num-col" data-sort="num">Bandwidth</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in top_sites_bandwidth %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td>{{ row.host }}</td>
-          <td>{{ row.country_flag }} {{ row.country_name }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
+<div class="mst-panel">
+  <table class="data-table monthly-stats-table">
+    <thead>
+      <tr><th colspan="5" class="mst-section-header">Top Sites by Bandwidth - {{ year }}</th></tr>
+      <tr><th>#</th><th>Site</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
+    </thead>
+    <tbody>
+      {% for row in top_sites_bandwidth %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.host }}</td>
+        <td>{{ row.country_flag }} {{ row.country_name }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 </div>
 {% endif %}

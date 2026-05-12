@@ -207,6 +207,24 @@ struct StatusRow {
     pct_fmt: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ProtoRow {
+    proto: String,
+    hits: u64,
+    hits_fmt: String,
+    hits_exact_fmt: String,
+    pct_fmt: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MethodRow {
+    method: String,
+    hits: u64,
+    hits_fmt: String,
+    hits_exact_fmt: String,
+    pct_fmt: String,
+}
+
 #[derive(Debug, Clone, Serialize, Default)]
 struct DailyAvgMax {
     avg_hits: u64,
@@ -277,6 +295,8 @@ struct MonthlySummary {
     top_agents: Vec<TopAgentRow>,
     top_countries: Vec<TopCountryRow>,
     status_codes: Vec<StatusRow>,
+    proto_codes: Vec<ProtoRow>,
+    method_codes: Vec<MethodRow>,
     daily_avg_max: DailyAvgMax,
     hourly_avg_max: HourlyAvgMax,
 }
@@ -292,6 +312,8 @@ struct YearlySummary {
     top_agents: Vec<TopAgentRow>,
     top_countries: Vec<TopCountryRow>,
     status_codes: Vec<StatusRow>,
+    proto_codes: Vec<ProtoRow>,
+    method_codes: Vec<MethodRow>,
     totals: TotalsView,
 }
 
@@ -486,6 +508,8 @@ fn render_year_page(
     page_ctx.insert("top_agents", &summary.top_agents);
     page_ctx.insert("top_countries", &summary.top_countries);
     page_ctx.insert("status_codes", &summary.status_codes);
+    page_ctx.insert("proto_codes", &summary.proto_codes);
+    page_ctx.insert("method_codes", &summary.method_codes);
     page_ctx.insert("totals", &summary.totals);
 
     page_ctx.insert(
@@ -536,6 +560,8 @@ fn render_month_page(
     page_ctx.insert("top_agents", &summary.top_agents);
     page_ctx.insert("top_countries", &summary.top_countries);
     page_ctx.insert("status_codes", &summary.status_codes);
+    page_ctx.insert("proto_codes", &summary.proto_codes);
+    page_ctx.insert("method_codes", &summary.method_codes);
     page_ctx.insert("daily_avg_max", &summary.daily_avg_max);
     page_ctx.insert("hourly_avg_max", &summary.hourly_avg_max);
 
