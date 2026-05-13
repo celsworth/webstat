@@ -1,5 +1,6 @@
 use super::*;
-use super::parallel::merge_max;
+use super::merge_max;
+use super::messages::OwnedLogEntry;
 use crate::method_proto::{method_index, proto_index, METHOD_COUNT, PROTO_COUNT};
 
 impl Processor {
@@ -122,18 +123,7 @@ impl Processor {
                 self.visit_max_seen_ts = ts;
             }
             let visit_key = Self::visit_state_key(ip);
-            let is_new_visit = if let Some(arc) = &self.shared_visit_last_seen {
-                // Parallel-worker path: check in-file dirty cache first, then
-                // fall back to the shared map (one read-lock per unique IP per file).
-                let prev_ts = self.visit_state_dirty.get(&visit_key).copied().or_else(|| {
-                    arc.read().expect("visit last_seen poisoned").get(&visit_key).copied()
-                });
-                let new_visit =
-                    prev_ts.map_or(true, |last| ts.saturating_sub(last) > VISIT_TIMEOUT_SECONDS);
-                merge_max(&mut self.visit_state_dirty, visit_key, ts);
-                new_visit
-            } else {
-                // Coordinator / single-worker path: read-modify-write on local map.
+            let is_new_visit = {
                 let new_visit = match self.visit_last_seen.entry(visit_key.clone()) {
                     std::collections::hash_map::Entry::Occupied(mut occ) => {
                         let last_seen = *occ.get();
@@ -391,6 +381,39 @@ impl Processor {
                 .insert(url.to_string(), Arc::clone(host_value));
         }
         host
+    }
+
+    /// Adapter: aggregate an owned entry (from the parser-stage channel).
+    pub(super) fn aggregate_owned(&mut self, entry: OwnedLogEntry, run_acc: &mut RunAccumulators) {
+        // Construct a zero-copy LogEntry borrowing from the owned fields.
+        let log_entry = crate::parser::LogEntry {
+            ip: &entry.ip,
+            time_str: &entry.time_str,
+            month_num: entry.month_num,
+            method: &entry.method,
+            path: &entry.path,
+            proto: &entry.proto,
+            status: entry.status,
+            bytes: entry.bytes,
+            referer: &entry.referer,
+            user_agent: &entry.user_agent,
+        };
+        self.aggregate_entry(
+            log_entry,
+            &mut run_acc.hourly,
+            &mut run_acc.top_urls,
+            &mut run_acc.top_urls_bw,
+            &mut run_acc.top_hosts,
+            &mut run_acc.top_hosts_bw,
+            &mut run_acc.top_refs,
+            &mut run_acc.top_agents,
+            &mut run_acc.top_countries,
+            &mut run_acc.status_codes,
+            &mut run_acc.hll_site_counts,
+            run_acc.hll_all_time.as_mut(),
+            &mut run_acc.method_counts,
+            &mut run_acc.proto_counts,
+        );
     }
 
     /// Return a stable, exact integer ID for an IP string.

@@ -15,7 +15,7 @@ mod topn;
 mod ua;
 mod util;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use clap::{ArgAction, Parser, Subcommand};
 
 use database::Database;
@@ -255,11 +255,6 @@ fn build_config(args: &Args) -> Result<config::Config> {
 }
 
 fn run_processing(cfg: &config::Config) -> Result<()> {
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(cfg.file_workers.max(1))
-        .build_global()
-        .context("Failed to configure global rayon thread pool")?;
-
     let db = Database::open(&cfg.database)?;
     let geo = Geo::new(cfg.geoip_db.as_deref());
     let ua = UaParser::new();
@@ -268,9 +263,6 @@ fn run_processing(cfg: &config::Config) -> Result<()> {
         db,
         geo,
         ua,
-        cfg.database.clone(),
-        cfg.geoip_db.clone(),
-        cfg.file_workers,
         ProcessorConfig {
             top_n: cfg.top_n,
             vacuum_after_prune: cfg.vacuum_after_prune,

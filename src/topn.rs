@@ -47,7 +47,6 @@ trait TopNValue: Sized {
     fn sort_key(&self) -> u64;
     fn merge_into(&mut self, other: Self);
     fn on_evict(self, evicted_key: u64) -> Self;
-    fn trim_cmp(ak: &Arc<str>, a: &Self, bk: &Arc<str>, b: &Self) -> std::cmp::Ordering;
 }
 
 struct TopN<V> {
@@ -117,43 +116,6 @@ impl<V: TopNValue> TopN<V> {
         self.map.iter()
     }
 
-    fn merge_from(&mut self, other: TopN<V>) {
-        for (key, val) in other.map {
-            if let Some(existing) = self.map.get_mut(key.as_ref()) {
-                existing.merge_into(val);
-            } else {
-                let sort_key = val.sort_key();
-                self.map.insert(Arc::clone(&key), val);
-                self.min_heap.push(Reverse((sort_key, key)));
-            }
-        }
-        self.trim_to_capacity();
-    }
-
-    fn trim_to_capacity(&mut self) {
-        if self.capacity == 0 {
-            self.map.clear();
-            self.min_heap.clear();
-            return;
-        }
-
-        if self.map.len() <= self.capacity {
-            return;
-        }
-
-        let mut entries: Vec<_> = self.map.drain().collect();
-        entries.select_nth_unstable_by(self.capacity - 1, |(ak, a), (bk, b)| {
-            V::trim_cmp(ak, a, bk, b)
-        });
-        entries.truncate(self.capacity);
-        self.min_heap.clear();
-
-        for (key, val) in entries {
-            let sort_key = val.sort_key();
-            self.min_heap.push(Reverse((sort_key, Arc::clone(&key))));
-            self.map.insert(key, val);
-        }
-    }
 }
 
 // ── Value types ───────────────────────────────────────────────────────────────
@@ -164,9 +126,6 @@ impl TopNValue for CountVal {
     fn sort_key(&self) -> u64 { self.0 }
     fn merge_into(&mut self, other: Self) { self.0 += other.0; }
     fn on_evict(self, evicted_key: u64) -> Self { CountVal(evicted_key + self.0) }
-    fn trim_cmp(ak: &Arc<str>, a: &Self, bk: &Arc<str>, b: &Self) -> std::cmp::Ordering {
-        b.0.cmp(&a.0).then_with(|| ak.cmp(bk))
-    }
 }
 
 struct UrlByHitsVal(u64, u64); // (hits, bw)
@@ -175,9 +134,6 @@ impl TopNValue for UrlByHitsVal {
     fn sort_key(&self) -> u64 { self.0 }
     fn merge_into(&mut self, other: Self) { self.0 += other.0; self.1 += other.1; }
     fn on_evict(self, evicted_key: u64) -> Self { UrlByHitsVal(evicted_key + self.0, self.1) }
-    fn trim_cmp(ak: &Arc<str>, a: &Self, bk: &Arc<str>, b: &Self) -> std::cmp::Ordering {
-        b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)).then_with(|| ak.cmp(bk))
-    }
 }
 
 struct UrlByBwVal(u64, u64); // (hits, bw)
@@ -186,9 +142,6 @@ impl TopNValue for UrlByBwVal {
     fn sort_key(&self) -> u64 { self.1 }
     fn merge_into(&mut self, other: Self) { self.0 += other.0; self.1 += other.1; }
     fn on_evict(self, evicted_key: u64) -> Self { UrlByBwVal(self.0, evicted_key + self.1) }
-    fn trim_cmp(ak: &Arc<str>, a: &Self, bk: &Arc<str>, b: &Self) -> std::cmp::Ordering {
-        b.1.cmp(&a.1).then_with(|| b.0.cmp(&a.0)).then_with(|| ak.cmp(bk))
-    }
 }
 
 struct HostByHitsVal(u64, u64, Arc<str>, Arc<str>); // (hits, bw, cc, cn)
@@ -205,9 +158,6 @@ impl TopNValue for HostByHitsVal {
     }
     fn on_evict(self, evicted_key: u64) -> Self {
         HostByHitsVal(evicted_key + self.0, self.1, self.2, self.3)
-    }
-    fn trim_cmp(ak: &Arc<str>, a: &Self, bk: &Arc<str>, b: &Self) -> std::cmp::Ordering {
-        b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)).then_with(|| ak.cmp(bk))
     }
 }
 
@@ -226,9 +176,6 @@ impl TopNValue for HostByBwVal {
     fn on_evict(self, evicted_key: u64) -> Self {
         HostByBwVal(self.0, evicted_key + self.1, self.2, self.3)
     }
-    fn trim_cmp(ak: &Arc<str>, a: &Self, bk: &Arc<str>, b: &Self) -> std::cmp::Ordering {
-        b.1.cmp(&a.1).then_with(|| b.0.cmp(&a.0)).then_with(|| ak.cmp(bk))
-    }
 }
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -245,7 +192,6 @@ impl TopNCount {
         self.0.iter().map(|(k, v)| (k.as_ref(), v.0))
     }
 
-    pub fn merge_from(&mut self, other: TopNCount) { self.0.merge_from(other.0); }
 }
 
 pub struct TopNUrls(TopN<UrlByHitsVal>);
@@ -265,7 +211,6 @@ impl TopNUrls {
         self.0.iter().map(|(k, v)| (k.as_ref(), v.0, v.1))
     }
 
-    pub fn merge_from(&mut self, other: TopNUrls) { self.0.merge_from(other.0); }
 }
 
 pub struct TopNUrlsByBandwidth(TopN<UrlByBwVal>);
@@ -285,7 +230,6 @@ impl TopNUrlsByBandwidth {
         self.0.iter().map(|(k, v)| (k.as_ref(), v.0, v.1))
     }
 
-    pub fn merge_from(&mut self, other: TopNUrlsByBandwidth) { self.0.merge_from(other.0); }
 }
 
 pub struct TopNHosts(TopN<HostByHitsVal>);
@@ -307,7 +251,6 @@ impl TopNHosts {
         self.0.iter().map(|(k, v)| (k.as_ref(), v.0, v.1, &v.2, &v.3))
     }
 
-    pub fn merge_from(&mut self, other: TopNHosts) { self.0.merge_from(other.0); }
 }
 
 pub struct TopNHostsByBandwidth(TopN<HostByBwVal>);
@@ -329,7 +272,6 @@ impl TopNHostsByBandwidth {
         self.0.iter().map(|(k, v)| (k.as_ref(), v.0, v.1, &v.2, &v.3))
     }
 
-    pub fn merge_from(&mut self, other: TopNHostsByBandwidth) { self.0.merge_from(other.0); }
 }
 
 #[cfg(test)]

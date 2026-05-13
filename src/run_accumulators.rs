@@ -3,11 +3,10 @@ use std::sync::Arc;
 use ahash::AHashMap;
 
 use crate::hll::HyperLogLog;
-use crate::method_proto::{MethodCountsMap, ProtoCountsMap, METHOD_COUNT, PROTO_COUNT};
+use crate::method_proto::{MethodCountsMap, ProtoCountsMap};
 use crate::topn::{
     CountryHitsMap, HourlyMap, PeriodCountMap, StatusHitsMap, TopHostsByBandwidth, TopHostsByHits,
-    TopNCount, TopNHosts, TopNHostsByBandwidth, TopNUrls, TopNUrlsByBandwidth, TopUrlsByBandwidth,
-    TopUrlsByHits,
+    TopUrlsByBandwidth, TopUrlsByHits,
 };
 
 pub(crate) struct RunAccumulators {
@@ -66,125 +65,6 @@ impl RunAccumulators {
             && self.proto_counts.is_empty()
     }
 
-    pub(crate) fn merge_from(&mut self, other: RunAccumulators, hll_precision: u8, topn_k: usize) {
-        for (date, hours) in other.hourly {
-            let dst_hours = self.hourly.entry(date).or_default();
-            for (hour, acc) in hours {
-                let dst = dst_hours.entry(hour).or_default();
-                dst.stats.hits += acc.stats.hits;
-                dst.stats.visits += acc.stats.visits;
-                dst.stats.bandwidth += acc.stats.bandwidth;
-                dst.stats.files += acc.stats.files;
-                dst.stats.pages += acc.stats.pages;
-                dst.stats.status_2xx += acc.stats.status_2xx;
-                dst.stats.status_3xx += acc.stats.status_3xx;
-                dst.stats.status_4xx += acc.stats.status_4xx;
-                dst.stats.status_5xx += acc.stats.status_5xx;
-                dst.ip_set.extend(acc.ip_set);
-            }
-        }
-
-        for (period, urls) in other.top_urls {
-            let dst = self
-                .top_urls
-                .entry(period)
-                .or_insert_with(|| TopNUrls::new(topn_k));
-            for (url, hits, bw) in urls.iter() {
-                dst.add_hits_bw(url, hits, bw);
-            }
-        }
-
-        for (period, urls) in other.top_urls_bw {
-            let dst = self
-                .top_urls_bw
-                .entry(period)
-                .or_insert_with(|| TopNUrlsByBandwidth::new(topn_k));
-            dst.merge_from(urls);
-        }
-
-        for (period, hosts) in other.top_hosts {
-            let dst = self
-                .top_hosts
-                .entry(period)
-                .or_insert_with(|| TopNHosts::new(topn_k));
-            dst.merge_from(hosts);
-        }
-
-        for (period, hosts) in other.top_hosts_bw {
-            let dst = self
-                .top_hosts_bw
-                .entry(period)
-                .or_insert_with(|| TopNHostsByBandwidth::new(topn_k));
-            dst.merge_from(hosts);
-        }
-
-        for (period, refs) in other.top_refs {
-            let dst = self
-                .top_refs
-                .entry(period)
-                .or_insert_with(|| TopNCount::new(topn_k));
-            for (referrer, hits) in refs.iter() {
-                dst.add(referrer, hits);
-            }
-        }
-
-        for (period, agents) in other.top_agents {
-            let dst = self
-                .top_agents
-                .entry(period)
-                .or_insert_with(|| TopNCount::new(topn_k));
-            for (agent, hits) in agents.iter() {
-                dst.add(agent, hits);
-            }
-        }
-
-        for (period, countries) in other.top_countries {
-            let dst = self.top_countries.entry(period).or_default();
-            for (country, hits) in countries {
-                *dst.entry(country).or_insert(0) += hits;
-            }
-        }
-
-        for (period, codes) in other.status_codes {
-            let dst = self.status_codes.entry(period).or_default();
-            for (status, hits) in codes {
-                *dst.entry(status).or_insert(0) += hits;
-            }
-        }
-
-        for (scope, incoming) in other.hll_site_counts {
-            self.hll_site_counts
-                .entry(scope)
-                .or_insert_with(|| HyperLogLog::new(hll_precision))
-                .merge(&incoming);
-        }
-
-        if let Some(incoming) = other.hll_all_time {
-            self.hll_all_time
-                .get_or_insert_with(|| HyperLogLog::new(hll_precision))
-                .merge(&incoming);
-        }
-
-        for (period, counts) in other.method_counts {
-            let dst = self
-                .method_counts
-                .entry(period)
-                .or_insert([0u64; METHOD_COUNT]);
-            for i in 0..METHOD_COUNT {
-                dst[i] += counts[i];
-            }
-        }
-
-        for (period, counts) in other.proto_counts {
-            let dst = self
-                .proto_counts
-                .entry(period)
-                .or_insert([0u64; PROTO_COUNT]);
-            for i in 0..PROTO_COUNT {
-                dst[i] += counts[i];
-            }
-        }
-    }
 }
 
 #[cfg(test)]

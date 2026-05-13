@@ -1,22 +1,11 @@
 use std::io::{IsTerminal, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
+
 
 use crate::util::current_log_timestamp;
 
 const CHECKPOINT_NONE: u64 = u64::MAX;
 const ANSI_CLEAR_LINE: &str = "\r\x1b[2K";
-
-/// Shared counters that worker threads write into so the progress thread can
-/// display aggregate throughput across all parallel files.
-pub struct SharedProgress<'a> {
-    pub bytes_done: &'a AtomicU64,
-    pub lines_done: &'a AtomicU64,
-    pub gz_comp_done: &'a AtomicU64,
-    pub gz_decoded_done: &'a AtomicU64,
-    pub is_compressed: bool,
-    pub compressed_bytes: u64,
-}
 
 /// Write the aggregate directory-level progress line to stderr.
 ///
@@ -100,58 +89,6 @@ pub fn clear_progress_line() {
     }
     let _ = stderr.flush();
 }
-
-/// Accumulate per-file byte/line progress into the shared atomic counters.
-///
-/// Writes are batched: we only flush when ≥ 8 MB of new bytes, ≥ 1 s has
-/// elapsed, or `force` is set (end of file).
-pub fn flush_shared_progress(
-    shared: Option<&SharedProgress<'_>>,
-    current_bytes: u64,
-    lines_processed: u64,
-    reported_bytes: &mut u64,
-    reported_lines: &mut u64,
-    last_flush: &mut Instant,
-    force: bool,
-    mark_gz_complete: bool,
-) {
-    let Some(shared) = shared else { return };
-
-    let bytes_delta = current_bytes.saturating_sub(*reported_bytes);
-    let lines_delta = lines_processed.saturating_sub(*reported_lines);
-    let should_flush =
-        force || bytes_delta >= (8 * 1024 * 1024) || last_flush.elapsed().as_secs_f64() >= 1.0;
-
-    if !should_flush {
-        return;
-    }
-
-    if bytes_delta > 0 {
-        shared.bytes_done.fetch_add(bytes_delta, Ordering::Relaxed);
-        *reported_bytes = current_bytes;
-    }
-
-    if lines_delta > 0 {
-        shared.lines_done.fetch_add(lines_delta, Ordering::Relaxed);
-        *reported_lines = lines_processed;
-    }
-
-    if force && mark_gz_complete && shared.is_compressed && shared.compressed_bytes > 0 {
-        shared
-            .gz_comp_done
-            .fetch_add(shared.compressed_bytes, Ordering::Relaxed);
-        // Add this file's full decoded bytes to keep the ratio accurate.
-        // Only update at completion so that gz_ratio = gz_decoded_done/gz_comp_done
-        // stays stable during in-progress processing (otherwise bytes_total grows
-        // at the same rate as bytes_done, pinning pct).
-        shared
-            .gz_decoded_done
-            .fetch_add(current_bytes, Ordering::Relaxed);
-    }
-
-    *last_flush = Instant::now();
-}
-
 
 // ── Shared formatting helpers ─────────────────────────────────────────────────
 
