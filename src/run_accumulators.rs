@@ -64,7 +64,6 @@ impl RunAccumulators {
             && self.method_counts.is_empty()
             && self.proto_counts.is_empty()
     }
-
 }
 
 #[cfg(test)]

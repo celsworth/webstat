@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use ahash::AHashMap;
 use anyhow::Result;
+use twox_hash::XxHash3_64;
 
 use crate::compression::CompressionType;
 use crate::database::{Database, ParseStateUpdate, VisitStateKey, VisitStateUpdate};
@@ -14,12 +15,10 @@ use crate::fingerprint::compute_fingerprints;
 use crate::geo::Geo;
 use crate::hll::HyperLogLog;
 use crate::logging;
-use crate::parser;
 use crate::progress::print_dir_progress;
-use twox_hash::XxHash3_64;
 use crate::run_accumulators::RunAccumulators;
 use crate::topn::{
-    CountryHitsMap, HourlyMap, PeriodCountMap, StatusHitsMap, TopHostsByBandwidth, TopHostsByHits,
+    CountryHitsMap, PeriodCountMap, TopHostsByBandwidth, TopHostsByHits,
     TopNCount, TopNHosts, TopNHostsByBandwidth, TopNUrls, TopNUrlsByBandwidth, TopUrlsByBandwidth,
     TopUrlsByHits,
 };
@@ -108,12 +107,7 @@ pub struct ProcessorConfig {
 }
 
 impl Processor {
-    pub fn new(
-        db: Database,
-        geo: Geo,
-        ua: UaParser,
-        config: ProcessorConfig,
-    ) -> Self {
+    pub fn new(db: Database, geo: Geo, ua: UaParser, config: ProcessorConfig) -> Self {
         Self {
             db,
             geo,
@@ -237,9 +231,7 @@ impl Processor {
         }
 
         // Sort oldest-first so visit-state is accumulated in chronological order.
-        files.sort_by_key(|f| {
-            std::fs::metadata(f).map(|m| m.mtime()).unwrap_or(0)
-        });
+        files.sort_by_key(|f| std::fs::metadata(f).map(|m| m.mtime()).unwrap_or(0));
 
         let dir_started = Instant::now();
 
@@ -436,7 +428,10 @@ impl Processor {
 
         let mut updates = Vec::with_capacity(self.visit_state_dirty.len());
         for (key, ts) in self.visit_state_dirty.drain() {
-            updates.push(VisitStateUpdate { key, last_seen_ts: ts });
+            updates.push(VisitStateUpdate {
+                key,
+                last_seen_ts: ts,
+            });
         }
 
         (updates, prune_before)

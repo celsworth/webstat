@@ -1,7 +1,9 @@
 use super::*;
-use crate::database::ParseState;
 use crate::compression::CompressionType;
-use crate::fingerprint::{compute_compressed_head_fingerprint, compute_decompressed_head_fingerprint};
+use crate::database::ParseState;
+use crate::fingerprint::{
+    compute_compressed_head_fingerprint, compute_decompressed_head_fingerprint,
+};
 
 impl Processor {
     #[allow(clippy::too_many_arguments)]
@@ -93,11 +95,19 @@ impl Processor {
         let (mut offset, state, inode_changed_for_path) =
             match (state_by_path.as_ref(), state_by_inode.as_ref()) {
                 (Some(state), _) if state.inode == current_inode => {
-                    let stored_offset = if is_compressed { 0 } else { state.uncompressed_offset };
+                    let stored_offset = if is_compressed {
+                        0
+                    } else {
+                        state.uncompressed_offset
+                    };
                     (stored_offset, Some(state), false)
                 }
                 (_, Some(state)) => {
-                    let stored_offset = if is_compressed { 0 } else { state.uncompressed_offset };
+                    let stored_offset = if is_compressed {
+                        0
+                    } else {
+                        state.uncompressed_offset
+                    };
                     (stored_offset, Some(state), false)
                 }
                 (Some(state), None) => (0, Some(state), true),

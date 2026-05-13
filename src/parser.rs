@@ -1,20 +1,19 @@
-use memchr::memchr;
+use std::ops::Range;
 
 /// A single parsed nginx combined-log entry.
 #[derive(Debug)]
-pub struct LogEntry<'a> {
-    pub ip: &'a str,
-    pub time_str: &'a str,
+pub struct ParsedEntry {
+    pub ip: Range<usize>,
+    pub time: Range<usize>,
+    pub method: Range<usize>,
+    pub path: Range<usize>,
+    pub proto: Range<usize>,
+    pub referer: Range<usize>,
+    pub user_agent: Range<usize>,
+
     pub month_num: u8,
-    pub method: &'a str,
-    pub path: &'a str,
-    pub proto: &'a str,
     pub status: u16,
     pub bytes: u64,
-    /// Empty string when absent (nginx `-` sentinel or empty field).
-    pub referer: &'a str,
-    /// Empty string when absent (nginx `-` sentinel or empty field).
-    pub user_agent: &'a str,
 }
 
 /// Parse one line of nginx combined-log format into a `LogEntry`.
@@ -22,108 +21,219 @@ pub struct LogEntry<'a> {
 /// Nginx combined format:
 ///   IP IDENT USER [TIMESTAMP] "REQUEST" STATUS BYTES "REFERER" "UA"
 ///
-/// All positional searches use byte values; ASCII delimiters (`[`, `]`, `"`,
-/// space) are never part of a multi-byte UTF-8 sequence, so slicing at those
-/// positions is always on a valid char boundary.
-///
 /// Returns `None` for blank or malformed lines.
-pub fn parse_line(line: &str) -> Option<LogEntry<'_>> {
+pub fn parse_line(line: &str) -> Option<ParsedEntry> {
     let b = line.as_bytes();
-    let b_len = b.len();
-    if b_len < 30 {
+    let len = b.len();
+
+    let mut i = 0;
+
+    // ─────────────────────────────────────────────
+    // IP
+    let ip_start = 0;
+    while i < len && b[i] != b' ' {
+        i += 1;
+    }
+    if i == 0 {
+        return None;
+    }
+    let ip = ip_start..i;
+
+    i += 1;
+
+    // ident
+    while i < len && b[i] != b' ' {
+        i += 1;
+    }
+    i += 1;
+
+    // user
+    while i < len && b[i] != b' ' {
+        i += 1;
+    }
+    i += 1;
+
+    // ─────────────────────────────────────────────
+    // timestamp
+    if i >= len || b[i] != b'[' {
+        return None;
+    }
+    i += 1;
+
+    let time_start = i;
+    while i < len && b[i] != b']' {
+        i += 1;
+    }
+    if i >= len {
         return None;
     }
 
-    // ── IP ──────────────────────────────────────────────────────────────────
-    let sp1 = find_byte(b' ', b, 0)?;
-    let ip = &line[..sp1];
+    let time = time_start..i;
 
-    // ── ident (always '-', skip) ────────────────────────────────────────────
-    let sp2 = find_byte(b' ', b, sp1 + 1)?;
-
-    // ── user (skip) ─────────────────────────────────────────────────────────
-    let sp3 = find_byte(b' ', b, sp2 + 1)?;
-
-    // ── timestamp  [ DD/Mon/YYYY:HH:MM:SS ±HHMM ] ───────────────────────────
-    let pos = sp3 + 1;
-    if pos >= b_len || b[pos] != b'[' {
-        return None;
-    }
-    let ts_start = pos + 1;
-    let bracket_end = find_byte(b']', b, ts_start)?;
-    let time_str = &line[ts_start..bracket_end];
-    if bracket_end < ts_start + 26 {
-        return None;
-    }
-    // month sanity check
-    let month_num = month_num(&time_str.as_bytes()[3..6])?;
-
-    // ── request  "METHOD PATH PROTO" ────────────────────────────────────────
-    let pos = bracket_end + 2; // skip '] '
-    if pos >= b_len || b[pos] != b'"' {
-        return None;
-    }
-    let req_start = pos + 1;
-    let req_end = find_byte(b'"', b, req_start)?;
-    let request = &line[req_start..req_end];
-    if b[req_start..req_end].iter().any(|&c| c < 32 || c > 126) {
+    if i + 2 >= len || b[i + 1] != b' ' {
         return None;
     }
 
-    // ── status (3 ASCII digits) ──────────────────────────────────────────────
-    let pos = req_end + 2; // skip '" '
-    if pos + 3 > b_len {
+    let month_num = month_num(&b.get(time_start + 3..time_start + 6)?)?;
+
+    i += 2; // "] "
+
+    // ─────────────────────────────────────────────
+    // request
+    if i >= len || b[i] != b'"' {
         return None;
     }
-    let status = parse_u16_3(b, pos)?;
-    let pos = pos + 4; // skip 'NNN '
+    i += 1;
 
-    // ── bytes ────────────────────────────────────────────────────────────────
-    let sp = find_byte(b' ', b, pos)?;
-    let bytes = parse_u64(&b[pos..sp]).unwrap_or(0);
-
-    // ── referer  "..." ───────────────────────────────────────────────────────
-    let pos = sp + 1;
-    if pos >= b_len || b[pos] != b'"' {
-        return None;
+    let req_start = i;
+    while i < len && b[i] != b'"' {
+        i += 1;
     }
-    let ref_start = pos + 1;
-    let ref_end = find_byte(b'"', b, ref_start)?;
-    let referer_str = &line[ref_start..ref_end];
-
-    // ── user agent  "..." ────────────────────────────────────────────────────
-    let pos = ref_end + 2; // skip '" '
-    if pos >= b_len || b[pos] != b'"' {
-        return None;
-    }
-    let ua_start = pos + 1;
-    let ua_end = find_byte(b'"', b, ua_start)?;
-    let ua_str = &line[ua_start..ua_end];
-
-    let (method, path, proto) = split_request(request);
-    if !proto.starts_with("HTTP/") {
+    if i >= len || i <= req_start {
         return None;
     }
 
-    Some(LogEntry {
+    let req_end = i;
+    let request = req_start..req_end;
+
+    let req_b = &b[request.clone()];
+
+    // reject non-HTTP / TLS / garbage
+    if !(req_b.starts_with(b"GET ")
+        || req_b.starts_with(b"HEAD ")
+        || req_b.starts_with(b"OPTIONS ")
+        || req_b.starts_with(b"POST ")
+        || req_b.starts_with(b"PATCH ")
+        || req_b.starts_with(b"PUT ")
+        || req_b.starts_with(b"DELETE ")
+        || req_b.starts_with(b"CONNECT ")
+        || req_b.starts_with(b"PROPFIND ")
+        || req_b.starts_with(b"PRI "))
+    {
+        return None;
+    }
+
+    i += 2; // "\" "
+
+    // ─────────────────────────────────────────────
+    // status
+    while i < len && b[i] == b' ' {
+        i += 1;
+    }
+
+    let status_start = i;
+    while i < len && b[i] != b' ' {
+        i += 1;
+    }
+
+    if i <= status_start {
+        return None;
+    }
+
+    let status = parse_u16_3(b, status_start)?;
+    i += 1;
+
+    // ─────────────────────────────────────────────
+    // bytes
+    while i < len && b[i] == b' ' {
+        i += 1;
+    }
+
+    let bytes_start = i;
+    while i < len && b[i] != b' ' {
+        i += 1;
+    }
+
+    let bytes = parse_u64(&b[bytes_start..i]).unwrap_or(0);
+    i += 1;
+
+    // ─────────────────────────────────────────────
+    // referer
+    while i < len && b[i] == b' ' {
+        i += 1;
+    }
+
+    if i >= len || b[i] != b'"' {
+        return None;
+    }
+    i += 1;
+
+    let ref_start = i;
+    while i < len && b[i] != b'"' {
+        i += 1;
+    }
+    if i >= len || i <= ref_start {
+        return None;
+    }
+
+    let referer = ref_start..i;
+    i += 2; // "\" "
+
+    // ─────────────────────────────────────────────
+    // user agent
+    while i < len && b[i] == b' ' {
+        i += 1;
+    }
+
+    if i >= len || b[i] != b'"' {
+        return None;
+    }
+    i += 1;
+
+    let ua_start = i;
+    while i < len && b[i] != b'"' {
+        i += 1;
+    }
+    if i >= len || i <= ua_start {
+        return None;
+    }
+
+    let user_agent = ua_start..i;
+
+    // ─────────────────────────────────────────────
+    // split request (method / path / proto)
+    let req = &b[request.clone()];
+
+    let mut j = 0;
+    while j < req.len() && req[j] != b' ' {
+        j += 1;
+    }
+    if j == 0 || j >= req.len() {
+        return None;
+    }
+
+    let method = request.start..request.start + j;
+
+    j += 1;
+    let path_start = j + request.start;
+
+    while j < req.len() && req[j] != b' ' {
+        j += 1;
+    }
+    if j >= req.len() {
+        return None;
+    }
+
+    let path = path_start..request.start + j;
+
+    j += 1;
+    if j >= req.len() {
+        return None;
+    }
+
+    let proto = request.start + j..request.end;
+
+    Some(ParsedEntry {
         ip,
-        time_str,
-        month_num,
+        time,
         method,
         path,
         proto,
+        referer,
+        user_agent,
+        month_num,
         status,
         bytes,
-        referer: if referer_str.is_empty() || referer_str == "-" {
-            ""
-        } else {
-            referer_str
-        },
-        user_agent: if ua_str.is_empty() || ua_str == "-" {
-            ""
-        } else {
-            ua_str
-        },
     })
 }
 
@@ -150,11 +260,6 @@ pub fn month_num(m: &[u8]) -> Option<u8> {
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 #[inline]
-fn find_byte(needle: u8, haystack: &[u8], from: usize) -> Option<usize> {
-    memchr(needle, &haystack[from..]).map(|p| p + from)
-}
-
-#[inline]
 fn parse_u16_3(b: &[u8], pos: usize) -> Option<u16> {
     let a = b.get(pos)?.wrapping_sub(b'0');
     let c = b.get(pos + 1)?.wrapping_sub(b'0');
@@ -179,27 +284,6 @@ fn parse_u64(bytes: &[u8]) -> Option<u64> {
     }
 
     Some(n)
-}
-
-#[inline]
-fn split_request(req: &str) -> (&str, &str, &str) {
-    let b = req.as_bytes();
-
-    let Some(sp1) = memchr(b' ', b) else {
-        return ("", req, "");
-    };
-
-    let method = &req[..sp1];
-
-    let tail = &b[sp1 + 1..];
-
-    let Some(rel_sp2) = memchr(b' ', tail) else {
-        return (method, &req[sp1 + 1..], "");
-    };
-
-    let sp2 = sp1 + 1 + rel_sp2;
-
-    (method, &req[sp1 + 1..sp2], &req[sp2 + 1..])
 }
 
 #[cfg(test)]

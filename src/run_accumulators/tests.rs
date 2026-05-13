@@ -222,7 +222,11 @@ mod tests {
         assert_eq!(hour.ip_set.len(), 2);
 
         let urls = left.top_urls.get("2026-05").unwrap();
-        let url_row = urls.iter().find(|(k, _, _)| *k == "/a").map(|(_, h, bw)| (h, bw)).unwrap();
+        let url_row = urls
+            .iter()
+            .find(|(k, _, _)| *k == "/a")
+            .map(|(_, h, bw)| (h, bw))
+            .unwrap();
         assert_eq!(url_row.0, 3);
         assert_eq!(url_row.1, 150);
 

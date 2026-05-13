@@ -1,6 +1,6 @@
-use super::*;
 use super::merge_max;
 use super::messages::OwnedLogEntry;
+use super::*;
 use crate::method_proto::{method_index, proto_index, METHOD_COUNT, PROTO_COUNT};
 
 impl Processor {
@@ -33,67 +33,14 @@ impl Processor {
 
     // ── Per-entry aggregation ─────────────────────────────────────────────────
 
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn aggregate_entry_test(
-        &mut self,
-        entry: parser::LogEntry<'_>,
-        hourly: &mut HourlyMap,
-        top_urls: &mut TopUrlsByHits,
-        top_hosts: &mut TopHostsByHits,
-        top_refs: &mut PeriodCountMap,
-        top_agents: &mut PeriodCountMap,
-        top_countries: &mut CountryHitsMap,
-        status_codes: &mut StatusHitsMap,
-    ) {
-        let mut hll_site_counts = AHashMap::new();
-        let mut top_urls_bw: TopUrlsByBandwidth = AHashMap::new();
-        let mut top_hosts_bw: TopHostsByBandwidth = AHashMap::new();
-        let mut method_counts = AHashMap::new();
-        let mut proto_counts = AHashMap::new();
-        self.aggregate_entry(
-            entry,
-            hourly,
-            top_urls,
-            &mut top_urls_bw,
-            top_hosts,
-            &mut top_hosts_bw,
-            top_refs,
-            top_agents,
-            top_countries,
-            status_codes,
-            &mut hll_site_counts,
-            None,
-            &mut method_counts,
-            &mut proto_counts,
-        );
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn aggregate_entry(
-        &mut self,
-        entry: parser::LogEntry<'_>,
-        hourly: &mut HourlyMap,
-        top_urls: &mut TopUrlsByHits,
-        top_urls_bw: &mut TopUrlsByBandwidth,
-        top_hosts: &mut TopHostsByHits,
-        top_hosts_bw: &mut TopHostsByBandwidth,
-        top_refs: &mut PeriodCountMap,
-        top_agents: &mut PeriodCountMap,
-        top_countries: &mut CountryHitsMap,
-        status_codes: &mut StatusHitsMap,
-        hll_site_counts: &mut AHashMap<Arc<str>, HyperLogLog>,
-        hll_all_time: Option<&mut HyperLogLog>,
-        method_counts: &mut crate::method_proto::MethodCountsMap,
-        proto_counts: &mut crate::method_proto::ProtoCountsMap,
-    ) {
-        let ua_result = self.ua.parse(entry.user_agent);
+    pub(super) fn aggregate_entry(&mut self, entry: OwnedLogEntry, run_acc: &mut RunAccumulators) {
+        let ua_result = self.ua.parse(entry.user_agent());
         if self.bot_filter && ua_result.is_bot {
             return;
         }
 
         let (date, hour, month_period, year_period, request_ts) = {
-            match self.time_periods_with_timestamp(entry.time_str, entry.month_num) {
+            match self.time_periods_with_timestamp(entry.time_str(), entry.month_num) {
                 Some((date, hour, month_period, year_period, request_ts)) => {
                     (date, hour, month_period, year_period, Some(request_ts))
                 }
@@ -103,14 +50,15 @@ impl Processor {
 
         let status = entry.status;
         let bytes = entry.bytes;
-        let path = entry.path;
+        let ip = entry.ip();
+        let path = entry.path();
         let clean_path = strip_query(path);
-        let ip = entry.ip;
         let ip_id = self.intern_ip_id(ip);
         let agent = ua_result.family;
 
         // ── Hourly bucket ──────────────────────────────────────────────────────
-        let h = hourly
+        let h = run_acc
+            .hourly
             .entry(Arc::clone(&date))
             .or_default()
             .entry(hour)
@@ -178,128 +126,150 @@ impl Processor {
         // ── Month-period ───────────────────────────────────────────────────────
         let topn_k = self.topn_k;
         if self.enable_top_urls {
-            top_urls
+            run_acc
+                .top_urls
                 .entry(Arc::clone(&month_period))
                 .or_insert_with(|| TopNUrls::new(topn_k))
                 .add(clean_path, bytes);
 
-            top_urls_bw
+            run_acc
+                .top_urls_bw
                 .entry(Arc::clone(&month_period))
                 .or_insert_with(|| TopNUrlsByBandwidth::new(topn_k))
                 .add(clean_path, bytes);
         }
 
         if self.enable_top_hosts {
-            top_hosts
+            run_acc
+                .top_hosts
                 .entry(Arc::clone(&month_period))
                 .or_insert_with(|| TopNHosts::new(topn_k))
                 .add(ip, bytes, &country_code, &country_name);
 
-            top_hosts_bw
+            run_acc
+                .top_hosts_bw
                 .entry(Arc::clone(&month_period))
                 .or_insert_with(|| TopNHostsByBandwidth::new(topn_k))
                 .add(ip, bytes, &country_code, &country_name);
         }
 
-        *status_codes
+        *run_acc
+            .status_codes
             .entry(Arc::clone(&month_period))
             .or_default()
             .entry(status)
             .or_insert(0) += 1;
 
-        top_agents
+        run_acc
+            .top_agents
             .entry(Arc::clone(&month_period))
             .or_insert_with(|| TopNCount::new(topn_k))
             .add(agent.as_ref(), 1);
 
         // ── Year-period ────────────────────────────────────────────────────────
-        if self.enable_top_urls {
-            top_urls
+        if false && self.enable_top_urls {
+            run_acc
+                .top_urls
                 .entry(Arc::clone(&year_period))
                 .or_insert_with(|| TopNUrls::new(topn_k))
                 .add(clean_path, bytes);
 
-            top_urls_bw
+            run_acc
+                .top_urls_bw
                 .entry(Arc::clone(&year_period))
                 .or_insert_with(|| TopNUrlsByBandwidth::new(topn_k))
                 .add(clean_path, bytes);
         }
 
-        if self.enable_top_hosts {
-            top_hosts
+        if false && self.enable_top_hosts {
+            run_acc
+                .top_hosts
                 .entry(Arc::clone(&year_period))
                 .or_insert_with(|| TopNHosts::new(topn_k))
                 .add(ip, bytes, &country_code, &country_name);
 
-            top_hosts_bw
+            run_acc
+                .top_hosts_bw
                 .entry(Arc::clone(&year_period))
                 .or_insert_with(|| TopNHostsByBandwidth::new(topn_k))
                 .add(ip, bytes, &country_code, &country_name);
         }
 
-        *status_codes
-            .entry(Arc::clone(&year_period))
-            .or_default()
-            .entry(status)
-            .or_insert(0) += 1;
+        if false {
+            *run_acc
+                .status_codes
+                .entry(Arc::clone(&year_period))
+                .or_default()
+                .entry(status)
+                .or_insert(0) += 1;
 
-        top_agents
-            .entry(Arc::clone(&year_period))
-            .or_insert_with(|| TopNCount::new(topn_k))
-            .add(agent.as_ref(), 1);
+            run_acc
+                .top_agents
+                .entry(Arc::clone(&year_period))
+                .or_insert_with(|| TopNCount::new(topn_k))
+                .add(agent.as_ref(), 1);
+        }
 
         // ── Referrer ───────────────────────────────────────────────────────────
-        if self.enable_top_refs && !entry.referer.is_empty() {
-            if let Some(host) = self.extract_host(entry.referer) {
+        if self.enable_top_refs && !entry.referer().is_empty() {
+            if let Some(host) = self.extract_host(entry.referer()) {
                 if !(self.site_host.as_deref() == Some(&host)) {
-                    top_refs
+                    run_acc
+                        .top_refs
                         .entry(Arc::clone(&month_period))
                         .or_insert_with(|| TopNCount::new(topn_k))
                         .add(&host, 1);
 
+                    /*
                     top_refs
                         .entry(Arc::clone(&year_period))
                         .or_insert_with(|| TopNCount::new(topn_k))
                         .add(&host, 1);
+                        */
                 }
             }
         }
 
-        *top_countries
+        *run_acc
+            .top_countries
             .entry(Arc::clone(&month_period))
             .or_default()
             .entry(country_code.to_string())
             .or_insert(0) += 1;
 
-        *top_countries
+        /*
+        *run_acc.top_countries
             .entry(Arc::clone(&year_period))
             .or_default()
             .entry(country_code.to_string())
             .or_insert(0) += 1;
-
+            */
         let ip_hash = {
             let mut h = XxHash3_64::default();
             h.write(ip.as_bytes());
             h.finish()
         };
         for scope in [&date, &month_period, &year_period] {
-            hll_site_counts
+            run_acc
+                .hll_site_counts
                 .entry(Arc::clone(scope))
                 .or_insert_with(|| HyperLogLog::new(self.hll_precision))
                 .add_hash(ip_hash);
         }
-        if let Some(all_time) = hll_all_time {
+        if let Some(ref mut all_time) = run_acc.hll_all_time {
             all_time.add_hash(ip_hash);
         }
 
         // ── Method / proto (month + year periods only) ─────────────────────────
-        let mi = method_index(entry.method);
-        let pi = proto_index(entry.proto);
+        let mi = method_index(entry.method());
+        let pi = proto_index(entry.proto());
         for period in [&month_period, &year_period] {
-            method_counts
+            run_acc
+                .method_counts
                 .entry(Arc::clone(period))
                 .or_insert([0u64; METHOD_COUNT])[mi] += 1;
-            proto_counts
+            run_acc
+                .proto_counts
                 .entry(Arc::clone(period))
                 .or_insert([0u64; PROTO_COUNT])[pi] += 1;
         }
@@ -381,39 +351,6 @@ impl Processor {
                 .insert(url.to_string(), Arc::clone(host_value));
         }
         host
-    }
-
-    /// Adapter: aggregate an owned entry (from the parser-stage channel).
-    pub(super) fn aggregate_owned(&mut self, entry: OwnedLogEntry, run_acc: &mut RunAccumulators) {
-        // Construct a zero-copy LogEntry borrowing from the owned fields.
-        let log_entry = crate::parser::LogEntry {
-            ip: &entry.ip,
-            time_str: &entry.time_str,
-            month_num: entry.month_num,
-            method: &entry.method,
-            path: &entry.path,
-            proto: &entry.proto,
-            status: entry.status,
-            bytes: entry.bytes,
-            referer: &entry.referer,
-            user_agent: &entry.user_agent,
-        };
-        self.aggregate_entry(
-            log_entry,
-            &mut run_acc.hourly,
-            &mut run_acc.top_urls,
-            &mut run_acc.top_urls_bw,
-            &mut run_acc.top_hosts,
-            &mut run_acc.top_hosts_bw,
-            &mut run_acc.top_refs,
-            &mut run_acc.top_agents,
-            &mut run_acc.top_countries,
-            &mut run_acc.status_codes,
-            &mut run_acc.hll_site_counts,
-            run_acc.hll_all_time.as_mut(),
-            &mut run_acc.method_counts,
-            &mut run_acc.proto_counts,
-        );
     }
 
     /// Return a stable, exact integer ID for an IP string.

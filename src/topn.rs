@@ -107,7 +107,8 @@ impl<V: TopNValue> TopN<V> {
 
             self.min_heap.reserve(self.map.len());
             for (key, val) in &self.map {
-                self.min_heap.push(Reverse((val.sort_key(), Arc::clone(key))));
+                self.min_heap
+                    .push(Reverse((val.sort_key(), Arc::clone(key))));
             }
         }
     }
@@ -115,7 +116,6 @@ impl<V: TopNValue> TopN<V> {
     fn iter(&self) -> impl Iterator<Item = (&Arc<str>, &V)> + '_ {
         self.map.iter()
     }
-
 }
 
 // ── Value types ───────────────────────────────────────────────────────────────
@@ -123,31 +123,53 @@ impl<V: TopNValue> TopN<V> {
 struct CountVal(u64);
 
 impl TopNValue for CountVal {
-    fn sort_key(&self) -> u64 { self.0 }
-    fn merge_into(&mut self, other: Self) { self.0 += other.0; }
-    fn on_evict(self, evicted_key: u64) -> Self { CountVal(evicted_key + self.0) }
+    fn sort_key(&self) -> u64 {
+        self.0
+    }
+    fn merge_into(&mut self, other: Self) {
+        self.0 += other.0;
+    }
+    fn on_evict(self, evicted_key: u64) -> Self {
+        CountVal(evicted_key + self.0)
+    }
 }
 
 struct UrlByHitsVal(u64, u64); // (hits, bw)
 
 impl TopNValue for UrlByHitsVal {
-    fn sort_key(&self) -> u64 { self.0 }
-    fn merge_into(&mut self, other: Self) { self.0 += other.0; self.1 += other.1; }
-    fn on_evict(self, evicted_key: u64) -> Self { UrlByHitsVal(evicted_key + self.0, self.1) }
+    fn sort_key(&self) -> u64 {
+        self.0
+    }
+    fn merge_into(&mut self, other: Self) {
+        self.0 += other.0;
+        self.1 += other.1;
+    }
+    fn on_evict(self, evicted_key: u64) -> Self {
+        UrlByHitsVal(evicted_key + self.0, self.1)
+    }
 }
 
 struct UrlByBwVal(u64, u64); // (hits, bw)
 
 impl TopNValue for UrlByBwVal {
-    fn sort_key(&self) -> u64 { self.1 }
-    fn merge_into(&mut self, other: Self) { self.0 += other.0; self.1 += other.1; }
-    fn on_evict(self, evicted_key: u64) -> Self { UrlByBwVal(self.0, evicted_key + self.1) }
+    fn sort_key(&self) -> u64 {
+        self.1
+    }
+    fn merge_into(&mut self, other: Self) {
+        self.0 += other.0;
+        self.1 += other.1;
+    }
+    fn on_evict(self, evicted_key: u64) -> Self {
+        UrlByBwVal(self.0, evicted_key + self.1)
+    }
 }
 
 struct HostByHitsVal(u64, u64, Arc<str>, Arc<str>); // (hits, bw, cc, cn)
 
 impl TopNValue for HostByHitsVal {
-    fn sort_key(&self) -> u64 { self.0 }
+    fn sort_key(&self) -> u64 {
+        self.0
+    }
     fn merge_into(&mut self, other: Self) {
         self.0 += other.0;
         self.1 += other.1;
@@ -164,7 +186,9 @@ impl TopNValue for HostByHitsVal {
 struct HostByBwVal(u64, u64, Arc<str>, Arc<str>); // (hits, bw, cc, cn)
 
 impl TopNValue for HostByBwVal {
-    fn sort_key(&self) -> u64 { self.1 }
+    fn sort_key(&self) -> u64 {
+        self.1
+    }
     fn merge_into(&mut self, other: Self) {
         self.0 += other.0;
         self.1 += other.1;
@@ -183,24 +207,31 @@ impl TopNValue for HostByBwVal {
 pub struct TopNCount(TopN<CountVal>);
 
 impl TopNCount {
-    pub fn new(capacity: usize) -> Self { Self(TopN::new(capacity)) }
+    pub fn new(capacity: usize) -> Self {
+        Self(TopN::new(capacity))
+    }
 
     #[inline]
-    pub fn add(&mut self, key: &str, delta: u64) { self.0.add(key, CountVal(delta)); }
+    pub fn add(&mut self, key: &str, delta: u64) {
+        self.0.add(key, CountVal(delta));
+    }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, u64)> + '_ {
         self.0.iter().map(|(k, v)| (k.as_ref(), v.0))
     }
-
 }
 
 pub struct TopNUrls(TopN<UrlByHitsVal>);
 
 impl TopNUrls {
-    pub fn new(capacity: usize) -> Self { Self(TopN::new(capacity)) }
+    pub fn new(capacity: usize) -> Self {
+        Self(TopN::new(capacity))
+    }
 
     #[inline]
-    pub fn add(&mut self, url: &str, bw: u64) { self.0.add(url, UrlByHitsVal(1, bw)); }
+    pub fn add(&mut self, url: &str, bw: u64) {
+        self.0.add(url, UrlByHitsVal(1, bw));
+    }
 
     #[inline]
     pub fn add_hits_bw(&mut self, url: &str, hits: u64, bw: u64) {
@@ -210,16 +241,19 @@ impl TopNUrls {
     pub fn iter(&self) -> impl Iterator<Item = (&str, u64, u64)> + '_ {
         self.0.iter().map(|(k, v)| (k.as_ref(), v.0, v.1))
     }
-
 }
 
 pub struct TopNUrlsByBandwidth(TopN<UrlByBwVal>);
 
 impl TopNUrlsByBandwidth {
-    pub fn new(capacity: usize) -> Self { Self(TopN::new(capacity)) }
+    pub fn new(capacity: usize) -> Self {
+        Self(TopN::new(capacity))
+    }
 
     #[inline]
-    pub fn add(&mut self, url: &str, bw: u64) { self.0.add(url, UrlByBwVal(1, bw)); }
+    pub fn add(&mut self, url: &str, bw: u64) {
+        self.0.add(url, UrlByBwVal(1, bw));
+    }
 
     #[inline]
     pub fn add_hits_bw(&mut self, url: &str, hits: u64, bw: u64) {
@@ -229,13 +263,14 @@ impl TopNUrlsByBandwidth {
     pub fn iter(&self) -> impl Iterator<Item = (&str, u64, u64)> + '_ {
         self.0.iter().map(|(k, v)| (k.as_ref(), v.0, v.1))
     }
-
 }
 
 pub struct TopNHosts(TopN<HostByHitsVal>);
 
 impl TopNHosts {
-    pub fn new(capacity: usize) -> Self { Self(TopN::new(capacity)) }
+    pub fn new(capacity: usize) -> Self {
+        Self(TopN::new(capacity))
+    }
 
     #[inline]
     pub fn add(&mut self, host: &str, bw: u64, cc: &Arc<str>, cn: &Arc<str>) {
@@ -244,19 +279,25 @@ impl TopNHosts {
 
     #[inline]
     pub fn add_hits_bw(&mut self, host: &str, hits: u64, bw: u64, cc: &Arc<str>, cn: &Arc<str>) {
-        self.0.add(host, HostByHitsVal(hits, bw, Arc::clone(cc), Arc::clone(cn)));
+        self.0.add(
+            host,
+            HostByHitsVal(hits, bw, Arc::clone(cc), Arc::clone(cn)),
+        );
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, u64, u64, &Arc<str>, &Arc<str>)> + '_ {
-        self.0.iter().map(|(k, v)| (k.as_ref(), v.0, v.1, &v.2, &v.3))
+        self.0
+            .iter()
+            .map(|(k, v)| (k.as_ref(), v.0, v.1, &v.2, &v.3))
     }
-
 }
 
 pub struct TopNHostsByBandwidth(TopN<HostByBwVal>);
 
 impl TopNHostsByBandwidth {
-    pub fn new(capacity: usize) -> Self { Self(TopN::new(capacity)) }
+    pub fn new(capacity: usize) -> Self {
+        Self(TopN::new(capacity))
+    }
 
     #[inline]
     pub fn add(&mut self, host: &str, bw: u64, cc: &Arc<str>, cn: &Arc<str>) {
@@ -265,13 +306,15 @@ impl TopNHostsByBandwidth {
 
     #[inline]
     pub fn add_hits_bw(&mut self, host: &str, hits: u64, bw: u64, cc: &Arc<str>, cn: &Arc<str>) {
-        self.0.add(host, HostByBwVal(hits, bw, Arc::clone(cc), Arc::clone(cn)));
+        self.0
+            .add(host, HostByBwVal(hits, bw, Arc::clone(cc), Arc::clone(cn)));
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, u64, u64, &Arc<str>, &Arc<str>)> + '_ {
-        self.0.iter().map(|(k, v)| (k.as_ref(), v.0, v.1, &v.2, &v.3))
+        self.0
+            .iter()
+            .map(|(k, v)| (k.as_ref(), v.0, v.1, &v.2, &v.3))
     }
-
 }
 
 #[cfg(test)]

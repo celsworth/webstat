@@ -1,7 +1,6 @@
 use std::io::{IsTerminal, Write};
 use std::time::Instant;
 
-
 use crate::util::current_log_timestamp;
 
 const CHECKPOINT_NONE: u64 = u64::MAX;
@@ -111,7 +110,6 @@ fn format_lps(lps: u64) -> String {
         format!("{} l/s", lps)
     }
 }
-
 
 fn format_lines(n: u64) -> String {
     if n < 1_000 {

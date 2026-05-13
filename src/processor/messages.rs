@@ -1,16 +1,87 @@
-/// An owned, fully-decoded log entry that can cross thread boundaries.
-/// Created by the parser stage from a borrowed `parser::LogEntry`.
-pub(super) struct OwnedLogEntry {
-    pub ip: String,
-    pub time_str: String,
+use std::ops::Range;
+
+/// Fully-owned parsed log entry.
+///
+/// Instead of allocating individual Strings for every field,
+/// we keep one owned backing line and store spans into it.
+///
+/// This is dramatically more allocation/cache efficient than:
+///
+///   ip: String,
+///   path: String,
+///   ...
+///
+#[derive(Debug)]
+pub struct OwnedLogEntry {
+    raw: Box<str>,
+
+    ip: Range<usize>,
+    time: Range<usize>,
+    method: Range<usize>,
+    path: Range<usize>,
+    proto: Range<usize>,
+    referer: Range<usize>,
+    user_agent: Range<usize>,
+
     pub month_num: u8,
-    pub method: String,
-    pub path: String,
-    pub proto: String,
     pub status: u16,
     pub bytes: u64,
-    pub referer: String,
-    pub user_agent: String,
+}
+
+impl OwnedLogEntry {
+    #[inline]
+    pub fn parse(line: String) -> Option<Self> {
+        let raw: Box<str> = line.into_boxed_str();
+        let parsed = crate::parser::parse_line(&raw)?;
+
+        Some(Self {
+            ip: parsed.ip,
+            time: parsed.time,
+            method: parsed.method,
+            path: parsed.path,
+            proto: parsed.proto,
+            referer: parsed.referer,
+            user_agent: parsed.user_agent,
+
+            month_num: parsed.month_num,
+            status: parsed.status,
+            bytes: parsed.bytes,
+
+            raw,
+        })
+    }
+    #[inline]
+    fn slice(&self, r: Range<usize>) -> &str {
+        &self.raw[r]
+    }
+
+    pub fn ip(&self) -> &str {
+        self.slice(self.ip.clone())
+    }
+
+    pub fn path(&self) -> &str {
+        self.slice(self.path.clone())
+    }
+
+    pub fn method(&self) -> &str {
+        self.slice(self.method.clone())
+    }
+
+    pub fn proto(&self) -> &str {
+        self.slice(self.proto.clone())
+    }
+
+    pub fn referer(&self) -> &str {
+        self.slice(self.referer.clone())
+    }
+
+    pub fn user_agent(&self) -> &str {
+        self.slice(self.user_agent.clone())
+    }
+
+    pub fn time_str(&self) -> &str {
+        self.slice(self.time.clone())
+    }
 }
 
 pub(super) enum LoaderMsg {

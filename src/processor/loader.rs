@@ -20,14 +20,28 @@ pub(super) fn run_loader(
         push_blocking(&mut tx, LoaderMsg::FileStart { file_idx });
 
         let result = if plan.compression.is_compressed() {
-            read_compressed(&filepath, &plan, &mut tx, &bytes_done, &gz_comp_done, &gz_decoded_done)
+            read_compressed(
+                &filepath,
+                &plan,
+                &mut tx,
+                &bytes_done,
+                &gz_comp_done,
+                &gz_decoded_done,
+            )
         } else {
             read_plain(&filepath, &plan, &mut tx, &bytes_done)
         };
 
         match result {
             Ok((final_offset, completed)) => {
-                push_blocking(&mut tx, LoaderMsg::FileDone { file_idx, final_offset, completed });
+                push_blocking(
+                    &mut tx,
+                    LoaderMsg::FileDone {
+                        file_idx,
+                        final_offset,
+                        completed,
+                    },
+                );
             }
             Err(e) => {
                 push_blocking(&mut tx, LoaderMsg::Done);
@@ -70,7 +84,13 @@ fn read_plain(
             let delta = bytes_read.saturating_sub(reported);
             bytes_done.fetch_add(delta, Ordering::Relaxed);
             reported = bytes_read;
-            push_blocking(tx, LoaderMsg::Lines { batch: std::mem::take(&mut batch), current_offset });
+            push_blocking(
+                tx,
+                LoaderMsg::Lines {
+                    batch: std::mem::take(&mut batch),
+                    current_offset,
+                },
+            );
             batch = Vec::with_capacity(LOADER_BATCH_SIZE);
         }
     }
@@ -78,7 +98,13 @@ fn read_plain(
     if !batch.is_empty() {
         let current_offset = plan.offset + bytes_read;
         bytes_done.fetch_add(bytes_read.saturating_sub(reported), Ordering::Relaxed);
-        push_blocking(tx, LoaderMsg::Lines { batch, current_offset });
+        push_blocking(
+            tx,
+            LoaderMsg::Lines {
+                batch,
+                current_offset,
+            },
+        );
     }
 
     let final_offset = plan.offset + bytes_read;
@@ -130,7 +156,13 @@ fn read_compressed(
             let delta = effective.saturating_sub(reported);
             bytes_done.fetch_add(delta, Ordering::Relaxed);
             reported = effective;
-            push_blocking(tx, LoaderMsg::Lines { batch: std::mem::take(&mut batch), current_offset: decoded_total });
+            push_blocking(
+                tx,
+                LoaderMsg::Lines {
+                    batch: std::mem::take(&mut batch),
+                    current_offset: decoded_total,
+                },
+            );
             batch = Vec::with_capacity(LOADER_BATCH_SIZE);
         }
     }
@@ -138,7 +170,13 @@ fn read_compressed(
     if !batch.is_empty() {
         let effective = decoded_total.saturating_sub(plan.skip_decoded_prefix_bytes);
         bytes_done.fetch_add(effective.saturating_sub(reported), Ordering::Relaxed);
-        push_blocking(tx, LoaderMsg::Lines { batch, current_offset: decoded_total });
+        push_blocking(
+            tx,
+            LoaderMsg::Lines {
+                batch,
+                current_offset: decoded_total,
+            },
+        );
     }
 
     // Update gz progress counters once the whole file is done.

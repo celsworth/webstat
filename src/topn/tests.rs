@@ -193,7 +193,7 @@ mod tests {
 
         a.merge_from(b);
         let x = get_url(&a, "/x").unwrap();
-        assert_eq!(x.0, 5);    // hits merged
+        assert_eq!(x.0, 5); // hits merged
         assert_eq!(x.1, 1500); // bandwidth merged
         assert!(get_url(&a, "/y").is_some());
     }
@@ -221,7 +221,7 @@ mod tests {
         t.add("/foo", 500);
         t.add("/bar", 200);
         let entry = get_url_bw(&t, "/foo").unwrap();
-        assert_eq!(entry.0, 2);    // hits
+        assert_eq!(entry.0, 2); // hits
         assert_eq!(entry.1, 1500); // bandwidth
     }
 
@@ -370,7 +370,7 @@ mod tests {
         t.add("1.1.1.1", 1000, &us, &cc("United States"));
         t.add("1.1.1.1", 500, &us, &cc("United States"));
         let entry = get_host_bw(&t, "1.1.1.1").unwrap();
-        assert_eq!(entry.0, 2);    // hits
+        assert_eq!(entry.0, 2); // hits
         assert_eq!(entry.1, 1500); // bandwidth
     }
 

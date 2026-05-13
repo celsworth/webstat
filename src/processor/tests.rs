@@ -2519,7 +2519,12 @@ mod tests {
     // ── Visit state internals ──────────────────────────────────────────────────
 
     fn visit_key(lo: u64) -> VisitStateKey {
-        VisitStateKey { ip_kind: 1, ip_hi: 0, ip_lo: lo, ip_text: String::new() }
+        VisitStateKey {
+            ip_kind: 1,
+            ip_hi: 0,
+            ip_lo: lo,
+            ip_text: String::new(),
+        }
     }
 
     /// After processing the same IP twice (within the timeout window), the dirty
@@ -2539,17 +2544,47 @@ mod tests {
         let mut status_codes: StatusHitsMap = AHashMap::new();
 
         processor.aggregate_entry_test(
-            log_entry("1.2.3.4", "08/May/2026:14:00:00 +0000", "/a", 200, 100, "", "Mozilla/5.0"),
-            &mut hourly, &mut top_urls, &mut top_hosts, &mut top_refs,
-            &mut top_agents, &mut top_countries, &mut status_codes,
+            log_entry(
+                "1.2.3.4",
+                "08/May/2026:14:00:00 +0000",
+                "/a",
+                200,
+                100,
+                "",
+                "Mozilla/5.0",
+            ),
+            &mut hourly,
+            &mut top_urls,
+            &mut top_hosts,
+            &mut top_refs,
+            &mut top_agents,
+            &mut top_countries,
+            &mut status_codes,
         );
         processor.aggregate_entry_test(
-            log_entry("1.2.3.4", "08/May/2026:14:10:00 +0000", "/b", 200, 100, "", "Mozilla/5.0"),
-            &mut hourly, &mut top_urls, &mut top_hosts, &mut top_refs,
-            &mut top_agents, &mut top_countries, &mut status_codes,
+            log_entry(
+                "1.2.3.4",
+                "08/May/2026:14:10:00 +0000",
+                "/b",
+                200,
+                100,
+                "",
+                "Mozilla/5.0",
+            ),
+            &mut hourly,
+            &mut top_urls,
+            &mut top_hosts,
+            &mut top_refs,
+            &mut top_agents,
+            &mut top_countries,
+            &mut status_codes,
         );
 
-        assert_eq!(processor.visit_state_dirty.len(), 1, "one dirty entry for one IP");
+        assert_eq!(
+            processor.visit_state_dirty.len(),
+            1,
+            "one dirty entry for one IP"
+        );
         let dirty_ts = *processor.visit_state_dirty.values().next().unwrap();
         assert_eq!(
             dirty_ts, processor.visit_max_seen_ts,
@@ -2574,14 +2609,32 @@ mod tests {
 
         for ip in ["1.2.3.4", "5.6.7.8", "9.10.11.12"] {
             processor.aggregate_entry_test(
-                log_entry(ip, "08/May/2026:14:00:00 +0000", "/a", 200, 100, "", "Mozilla/5.0"),
-                &mut hourly, &mut top_urls, &mut top_hosts, &mut top_refs,
-                &mut top_agents, &mut top_countries, &mut status_codes,
+                log_entry(
+                    ip,
+                    "08/May/2026:14:00:00 +0000",
+                    "/a",
+                    200,
+                    100,
+                    "",
+                    "Mozilla/5.0",
+                ),
+                &mut hourly,
+                &mut top_urls,
+                &mut top_hosts,
+                &mut top_refs,
+                &mut top_agents,
+                &mut top_countries,
+                &mut status_codes,
             );
         }
 
-        assert_eq!(processor.visit_state_dirty.len(), 3, "one dirty entry per unique IP");
-        let total_visits: u64 = hourly.values()
+        assert_eq!(
+            processor.visit_state_dirty.len(),
+            3,
+            "one dirty entry per unique IP"
+        );
+        let total_visits: u64 = hourly
+            .values()
             .flat_map(|h| h.values())
             .map(|a| a.stats.visits)
             .sum();
@@ -2604,9 +2657,16 @@ mod tests {
 
         let (updates, _) = processor.collect_visit_state_flush();
 
-        assert!(processor.visit_state_dirty.is_empty(), "dirty drained after flush");
+        assert!(
+            processor.visit_state_dirty.is_empty(),
+            "dirty drained after flush"
+        );
         assert_eq!(updates.len(), 2, "one update per dirty entry");
-        assert_eq!(processor.visit_last_seen.len(), 2, "last_seen not drained, only pruned");
+        assert_eq!(
+            processor.visit_last_seen.len(),
+            2,
+            "last_seen not drained, only pruned"
+        );
     }
 
     /// Entries whose timestamp is older than (visit_max_seen_ts - 1800 s) must
@@ -2629,11 +2689,28 @@ mod tests {
         let (updates, prune_before) = processor.collect_visit_state_flush();
 
         assert_eq!(prune_before, Some(1200), "cutoff = max_ts - 1800");
-        assert_eq!(processor.visit_last_seen.len(), 2, "expired entry pruned from last_seen");
-        assert!(!processor.visit_last_seen.contains_key(&visit_key(1)), "ts=1000 pruned");
-        assert!(processor.visit_last_seen.contains_key(&visit_key(2)), "ts=1200 (= cutoff) kept");
-        assert!(processor.visit_last_seen.contains_key(&visit_key(3)), "ts=2000 kept");
-        assert_eq!(updates.len(), 2, "only non-pruned entries returned as updates");
+        assert_eq!(
+            processor.visit_last_seen.len(),
+            2,
+            "expired entry pruned from last_seen"
+        );
+        assert!(
+            !processor.visit_last_seen.contains_key(&visit_key(1)),
+            "ts=1000 pruned"
+        );
+        assert!(
+            processor.visit_last_seen.contains_key(&visit_key(2)),
+            "ts=1200 (= cutoff) kept"
+        );
+        assert!(
+            processor.visit_last_seen.contains_key(&visit_key(3)),
+            "ts=2000 kept"
+        );
+        assert_eq!(
+            updates.len(),
+            2,
+            "only non-pruned entries returned as updates"
+        );
     }
 
     /// When visit_max_seen_ts == 0, no pruning must occur.

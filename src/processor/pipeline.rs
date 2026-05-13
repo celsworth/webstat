@@ -25,7 +25,11 @@ impl ActiveFile {
         ParseStateUpdate {
             filepath: self.path.clone(),
             inode: self.plan.current_inode,
-            compressed_size: if is_compressed { self.plan.stat_size } else { 0 },
+            compressed_size: if is_compressed {
+                self.plan.stat_size
+            } else {
+                0
+            },
             uncompressed_size: if is_compressed {
                 self.last_offset
             } else {
@@ -68,7 +72,11 @@ fn make_file_parse_state(
             None
         },
         uncompressed_head_fingerprint: plan.uncompressed_head_fingerprint,
-        compressed_offset: if is_compressed && completed { plan.stat_size } else { 0 },
+        compressed_offset: if is_compressed && completed {
+            plan.stat_size
+        } else {
+            0
+        },
         uncompressed_offset: final_offset,
         mtime_ns: plan.mtime_ns,
         completed,
@@ -90,7 +98,12 @@ impl Processor {
         gz_decoded_done: Arc<AtomicU64>,
         checkpoint_last_elapsed: Arc<AtomicU64>,
         dir_started: Instant,
-    ) -> Result<(u64, RunAccumulators, Vec<ParseStateUpdate>, Vec<ParseStateUpdate>)> {
+    ) -> Result<(
+        u64,
+        RunAccumulators,
+        Vec<ParseStateUpdate>,
+        Vec<ParseStateUpdate>,
+    )> {
         let count = files.len();
         let mut run_acc = RunAccumulators::new(
             64,
@@ -142,7 +155,13 @@ impl Processor {
         let loader_handle = std::thread::Builder::new()
             .name("loader".into())
             .spawn(move || {
-                loader::run_loader(work_files, loader_tx, bytes_done2, gz_comp_done2, gz_decoded_done2)
+                loader::run_loader(
+                    work_files,
+                    loader_tx,
+                    bytes_done2,
+                    gz_comp_done2,
+                    gz_decoded_done2,
+                )
             })?;
 
         let lines_done2 = lines_done.clone();
@@ -172,13 +191,16 @@ impl Processor {
                     }
                 }
 
-                ParserMsg::Entries { batch, current_offset } => {
+                ParserMsg::Entries {
+                    batch,
+                    current_offset,
+                } => {
                     if let Some(ref mut af) = active {
                         af.last_offset = current_offset;
                     }
                     total += batch.len() as u64;
                     for entry in batch {
-                        self.aggregate_owned(entry, &mut run_acc);
+                        self.aggregate_entry(entry, &mut run_acc);
                     }
 
                     if self.checkpoint_due(&last_checkpoint) {
@@ -201,7 +223,11 @@ impl Processor {
                     }
                 }
 
-                ParserMsg::FileDone { file_idx, final_offset, completed } => {
+                ParserMsg::FileDone {
+                    file_idx,
+                    final_offset,
+                    completed,
+                } => {
                     if let Some((path, plan)) = file_plans.get(&file_idx) {
                         pending_parse_states.push(make_file_parse_state(
                             path,
