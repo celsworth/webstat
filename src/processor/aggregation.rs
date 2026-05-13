@@ -114,7 +114,7 @@ impl Processor {
         }
 
         // ── GeoIP ──────────────────────────────────────────────────────────────
-        let (country_code, country_name) = if let Some(cached) = self.geo_cache.get(&ip_id) {
+        let (country_code, _country_name) = if let Some(cached) = self.geo_cache.get(&ip_id) {
             (Arc::clone(&cached.0), Arc::clone(&cached.1))
         } else {
             let result = self.geo.lookup(ip);
@@ -144,13 +144,13 @@ impl Processor {
                 .top_hosts
                 .entry(Arc::clone(&month_period))
                 .or_insert_with(|| TopNHosts::new(topn_k))
-                .add(ip, bytes, &country_code, &country_name);
+                .add(ip, bytes);
 
             run_acc
                 .top_hosts_bw
                 .entry(Arc::clone(&month_period))
                 .or_insert_with(|| TopNHostsByBandwidth::new(topn_k))
-                .add(ip, bytes, &country_code, &country_name);
+                .add(ip, bytes);
         }
 
         *run_acc
@@ -186,13 +186,13 @@ impl Processor {
                 .top_hosts
                 .entry(Arc::clone(&year_period))
                 .or_insert_with(|| TopNHosts::new(topn_k))
-                .add(ip, bytes, &country_code, &country_name);
+                .add(ip, bytes);
 
             run_acc
                 .top_hosts_bw
                 .entry(Arc::clone(&year_period))
                 .or_insert_with(|| TopNHostsByBandwidth::new(topn_k))
-                .add(ip, bytes, &country_code, &country_name);
+                .add(ip, bytes);
         }
 
         if false {

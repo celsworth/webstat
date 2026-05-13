@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use super::*;
-use ahash::AHashSet;
+use ahash::{AHashMap, AHashSet};
 
 struct PreFlushTopMaps {
     top_urls: TopUrlsByHits,
@@ -57,6 +59,26 @@ impl Processor {
                 )
             };
 
+        // GeoIP lookup for every host that will be written — only the top-K
+        // candidates per period, so this is a small number of lookups.
+        let mut host_geo: AHashMap<String, (Arc<str>, Arc<str>)> = AHashMap::new();
+        for hosts in top_hosts.values() {
+            for (host, _, _) in hosts.iter() {
+                if !host_geo.contains_key(host) {
+                    let (cc, cn) = self.geo.lookup(host);
+                    host_geo.insert(host.to_string(), (cc, cn));
+                }
+            }
+        }
+        for hosts in top_hosts_bw.values() {
+            for (host, _, _) in hosts.iter() {
+                if !host_geo.contains_key(host) {
+                    let (cc, cn) = self.geo.lookup(host);
+                    host_geo.insert(host.to_string(), (cc, cn));
+                }
+            }
+        }
+
         let flush_start = Instant::now();
         crate::logging::log_debug_at(2, "Flushing run aggregates and parse state to database...");
         self.db.flush_all_with_parse_states_split(
@@ -65,6 +87,7 @@ impl Processor {
             top_urls_bw,
             top_hosts,
             top_hosts_bw,
+            &host_geo,
             top_refs,
             top_agents,
             top_countries,
@@ -222,20 +245,18 @@ impl Processor {
 
             let mut entries: Vec<_> = hosts.iter().collect();
             if entries.len() > self.top_n {
-                entries.sort_unstable_by(
-                    |(host_a, hits_a, bw_a, _, _), (host_b, hits_b, bw_b, _, _)| {
-                        hits_b
-                            .cmp(hits_a)
-                            .then_with(|| bw_b.cmp(bw_a))
-                            .then_with(|| host_a.cmp(host_b))
-                    },
-                );
+                entries.sort_unstable_by(|(host_a, hits_a, bw_a), (host_b, hits_b, bw_b)| {
+                    hits_b
+                        .cmp(hits_a)
+                        .then_with(|| bw_b.cmp(bw_a))
+                        .then_with(|| host_a.cmp(host_b))
+                });
                 entries.truncate(self.top_n);
             }
 
             let mut out = TopNHosts::new(entries.len());
-            for (host, hits, bw, cc, cn) in entries {
-                out.add_hits_bw(host, hits, bw, cc, cn);
+            for (host, hits, bw) in entries {
+                out.add_hits_bw(host, hits, bw);
             }
             filtered.insert(Arc::clone(period), out);
         }
@@ -258,19 +279,17 @@ impl Processor {
 
             let mut entries: Vec<_> = hosts.iter().collect();
             if entries.len() > self.top_n {
-                entries.sort_unstable_by(
-                    |(host_a, hits_a, bw_a, _, _), (host_b, hits_b, bw_b, _, _)| {
-                        bw_b.cmp(bw_a)
-                            .then_with(|| hits_b.cmp(hits_a))
-                            .then_with(|| host_a.cmp(host_b))
-                    },
-                );
+                entries.sort_unstable_by(|(host_a, hits_a, bw_a), (host_b, hits_b, bw_b)| {
+                    bw_b.cmp(bw_a)
+                        .then_with(|| hits_b.cmp(hits_a))
+                        .then_with(|| host_a.cmp(host_b))
+                });
                 entries.truncate(self.top_n);
             }
 
             let mut out = TopNHostsByBandwidth::new(entries.len());
-            for (host, hits, bw, cc, cn) in entries {
-                out.add_hits_bw(host, hits, bw, cc, cn);
+            for (host, hits, bw) in entries {
+                out.add_hits_bw(host, hits, bw);
             }
             filtered.insert(Arc::clone(period), out);
         }
@@ -351,16 +370,16 @@ impl Processor {
 
     fn clone_top_hosts(&self, src: &TopNHosts) -> TopNHosts {
         let mut out = TopNHosts::new(src.iter().count());
-        for (key, hits, bw, cc, cn) in src.iter() {
-            out.add_hits_bw(key, hits, bw, cc, cn);
+        for (key, hits, bw) in src.iter() {
+            out.add_hits_bw(key, hits, bw);
         }
         out
     }
 
     fn clone_top_hosts_bw(&self, src: &TopNHostsByBandwidth) -> TopNHostsByBandwidth {
         let mut out = TopNHostsByBandwidth::new(src.iter().count());
-        for (key, hits, bw, cc, cn) in src.iter() {
-            out.add_hits_bw(key, hits, bw, cc, cn);
+        for (key, hits, bw) in src.iter() {
+            out.add_hits_bw(key, hits, bw);
         }
         out
     }

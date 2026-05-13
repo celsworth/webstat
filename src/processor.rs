@@ -18,9 +18,8 @@ use crate::logging;
 use crate::progress::print_dir_progress;
 use crate::run_accumulators::RunAccumulators;
 use crate::topn::{
-    CountryHitsMap, PeriodCountMap, TopHostsByBandwidth, TopHostsByHits,
-    TopNCount, TopNHosts, TopNHostsByBandwidth, TopNUrls, TopNUrlsByBandwidth, TopUrlsByBandwidth,
-    TopUrlsByHits,
+    CountryHitsMap, PeriodCountMap, TopHostsByBandwidth, TopHostsByHits, TopNCount, TopNHosts,
+    TopNHostsByBandwidth, TopNUrls, TopNUrlsByBandwidth, TopUrlsByBandwidth, TopUrlsByHits,
 };
 use crate::ua::UaParser;
 use crate::util::{

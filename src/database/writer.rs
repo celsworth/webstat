@@ -20,6 +20,7 @@ impl Database {
             &empty_urls_bw,
             top_hosts,
             &empty_hosts_bw,
+            &AHashMap::new(),
             top_refs,
             top_agents,
             top_countries,
@@ -57,6 +58,7 @@ impl Database {
             &empty_urls_bw,
             top_hosts,
             &empty_hosts_bw,
+            &AHashMap::new(),
             top_refs,
             top_agents,
             top_countries,
@@ -79,6 +81,7 @@ impl Database {
         top_urls_bw: &TopUrlsByBandwidth,
         top_hosts: &TopHostsByHits,
         top_hosts_bw: &TopHostsByBandwidth,
+        host_geo: &AHashMap<String, (Arc<str>, Arc<str>)>,
         top_refs: &PeriodCountMap,
         top_agents: &PeriodCountMap,
         top_countries: &CountryHitsMap,
@@ -156,6 +159,8 @@ impl Database {
             }
         }
 
+        let unknown_geo: (Arc<str>, Arc<str>) = (Arc::from("--"), Arc::from("Unknown"));
+
         // top_hosts
         {
             let sql = "INSERT INTO top_hosts \
@@ -168,7 +173,8 @@ impl Database {
             let mut stmt = tx.prepare_cached(sql)?;
             let mut all_hosts = AHashSet::new();
             for (period, hosts) in top_hosts {
-                for (host, hits, bw, cc, _cn) in hosts.iter() {
+                for (host, hits, bw) in hosts.iter() {
+                    let (cc, _cn) = host_geo.get(host).unwrap_or(&unknown_geo);
                     let host_key = encode_host_key(host);
                     stmt.execute(params![
                         period.as_ref(),
@@ -210,7 +216,8 @@ impl Database {
                                                  country_code=COALESCE(NULLIF(excluded.country_code,'--'),country_code)";
             let mut stmt = tx.prepare_cached(sql)?;
             for (period, hosts) in top_hosts {
-                for (host, hits, bw, cc, _cn) in hosts.iter() {
+                for (host, hits, bw) in hosts.iter() {
+                    let (cc, _cn) = host_geo.get(host).unwrap_or(&unknown_geo);
                     let host_key = encode_host_key(host);
                     stmt.execute(params![
                         period.as_ref(),
@@ -237,7 +244,8 @@ impl Database {
                                                  country_code=COALESCE(NULLIF(excluded.country_code,'--'),country_code)";
             let mut stmt = tx.prepare_cached(sql)?;
             for (period, hosts) in top_hosts_bw {
-                for (host, hits, bw, cc, _cn) in hosts.iter() {
+                for (host, hits, bw) in hosts.iter() {
+                    let (cc, _cn) = host_geo.get(host).unwrap_or(&unknown_geo);
                     let host_key = encode_host_key(host);
                     stmt.execute(params![
                         period.as_ref(),
@@ -263,15 +271,8 @@ impl Database {
                            ELSE country_code_names.country_name
                          END";
             let mut stmt = tx.prepare_cached(sql)?;
-            for hosts in top_hosts.values() {
-                for (_, _, _, cc, cn) in hosts.iter() {
-                    stmt.execute(params![cc.as_ref(), cn.as_ref()])?;
-                }
-            }
-            for hosts in top_hosts_bw.values() {
-                for (_, _, _, cc, cn) in hosts.iter() {
-                    stmt.execute(params![cc.as_ref(), cn.as_ref()])?;
-                }
+            for (cc, cn) in host_geo.values() {
+                stmt.execute(params![cc.as_ref(), cn.as_ref()])?;
             }
         }
 
