@@ -2,6 +2,8 @@ use super::merge_max;
 use super::messages::OwnedLogEntry;
 use super::*;
 use crate::method_proto::{method_index, proto_index, METHOD_COUNT, PROTO_COUNT};
+use std::hash::{Hash, Hasher};
+use ahash::AHasher;
 
 impl Processor {
     fn visit_state_key(ip: &str) -> VisitStateKey {
@@ -63,7 +65,9 @@ impl Processor {
             .or_default()
             .entry(hour)
             .or_default();
-        h.ip_set.insert(ip_id);
+        let mut hasher = AHasher::default();
+        ip_id.hash(&mut hasher);
+        h.ip_set.add_hash(hasher.finish());
         let stats = &mut h.stats;
 
         if let Some(ts) = request_ts {

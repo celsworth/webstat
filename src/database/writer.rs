@@ -113,7 +113,7 @@ impl Database {
             let mut stmt = tx.prepare_cached(sql)?;
             for (date, hours) in hourly {
                 for (hr, s) in hours {
-                    let sites = s.ip_set.len() as i64;
+                    let sites = s.ip_set.estimate() as i64;
                     stmt.execute(params![
                         date.as_ref(),
                         *hr as i64,
