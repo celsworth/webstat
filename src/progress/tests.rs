@@ -3,140 +3,6 @@ use super::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicU64;
-
-    fn make_shared<'a>(
-        bytes_done: &'a AtomicU64,
-        lines_done: &'a AtomicU64,
-        gz_comp: &'a AtomicU64,
-        gz_dec: &'a AtomicU64,
-        is_compressed: bool,
-        compressed_bytes: u64,
-    ) -> SharedProgress<'a> {
-        SharedProgress {
-            bytes_done,
-            lines_done,
-            gz_comp_done: gz_comp,
-            gz_decoded_done: gz_dec,
-            is_compressed,
-            compressed_bytes,
-        }
-    }
-
-    #[test]
-    fn flush_shared_none_is_noop() {
-        let mut rb = 0u64;
-        let mut rl = 0u64;
-        let mut last = Instant::now();
-        flush_shared_progress(None, 100, 10, &mut rb, &mut rl, &mut last, true, false);
-        assert_eq!(rb, 0);
-        assert_eq!(rl, 0);
-    }
-
-    #[test]
-    fn flush_shared_force_flushes_immediately() {
-        let bd = AtomicU64::new(0);
-        let ld = AtomicU64::new(0);
-        let gc = AtomicU64::new(0);
-        let gd = AtomicU64::new(0);
-        let shared = make_shared(&bd, &ld, &gc, &gd, false, 0);
-        let mut rb = 0u64;
-        let mut rl = 0u64;
-        let mut last = Instant::now();
-
-        flush_shared_progress(
-            Some(&shared),
-            500,
-            50,
-            &mut rb,
-            &mut rl,
-            &mut last,
-            true,
-            false,
-        );
-        assert_eq!(bd.load(Ordering::Relaxed), 500);
-        assert_eq!(ld.load(Ordering::Relaxed), 50);
-        assert_eq!(rb, 500);
-        assert_eq!(rl, 50);
-    }
-
-    #[test]
-    fn flush_shared_below_threshold_does_not_flush() {
-        let bd = AtomicU64::new(0);
-        let ld = AtomicU64::new(0);
-        let gc = AtomicU64::new(0);
-        let gd = AtomicU64::new(0);
-        let shared = make_shared(&bd, &ld, &gc, &gd, false, 0);
-        let mut rb = 0u64;
-        let mut rl = 0u64;
-        // Set last_flush to just-now so the 1 s timer doesn't fire.
-        let mut last = Instant::now();
-
-        // Only 100 bytes — well below the 8 MB threshold.
-        flush_shared_progress(
-            Some(&shared),
-            100,
-            5,
-            &mut rb,
-            &mut rl,
-            &mut last,
-            false,
-            false,
-        );
-        assert_eq!(bd.load(Ordering::Relaxed), 0);
-    }
-
-    #[test]
-    fn flush_shared_gzip_force_without_completion_does_not_mark_comp_done() {
-        let bd = AtomicU64::new(0);
-        let ld = AtomicU64::new(0);
-        let gc = AtomicU64::new(0);
-        let gd = AtomicU64::new(0);
-        let shared = make_shared(&bd, &ld, &gc, &gd, true, 12_345);
-        let mut rb = 0u64;
-        let mut rl = 0u64;
-        let mut last = Instant::now();
-
-        flush_shared_progress(
-            Some(&shared),
-            500,
-            50,
-            &mut rb,
-            &mut rl,
-            &mut last,
-            true,
-            false,
-        );
-
-        assert_eq!(gd.load(Ordering::Relaxed), 0);
-        assert_eq!(gc.load(Ordering::Relaxed), 0);
-    }
-
-    #[test]
-    fn flush_shared_gzip_force_with_completion_marks_comp_done() {
-        let bd = AtomicU64::new(0);
-        let ld = AtomicU64::new(0);
-        let gc = AtomicU64::new(0);
-        let gd = AtomicU64::new(0);
-        let shared = make_shared(&bd, &ld, &gc, &gd, true, 12_345);
-        let mut rb = 0u64;
-        let mut rl = 0u64;
-        let mut last = Instant::now();
-
-        flush_shared_progress(
-            Some(&shared),
-            500,
-            50,
-            &mut rb,
-            &mut rl,
-            &mut last,
-            true,
-            true,
-        );
-
-        assert_eq!(gd.load(Ordering::Relaxed), 500);
-        assert_eq!(gc.load(Ordering::Relaxed), 12_345);
-    }
 
     #[test]
     fn format_lines_formats_correctly() {
@@ -211,5 +77,89 @@ mod tests {
     #[test]
     fn checkpoint_status_due_after_interval_from_last_checkpoint() {
         assert_eq!(format_checkpoint_status(700, 300, 300), "checkpoint due");
+    }
+
+    #[test]
+    fn checkpoint_status_disabled_when_interval_is_zero() {
+        assert_eq!(
+            format_checkpoint_status(100, 0, CHECKPOINT_NONE),
+            "checkpoint disabled"
+        );
+    }
+
+    #[test]
+    fn format_elapsed_seconds() {
+        assert_eq!(format_elapsed(0), "0s");
+        assert_eq!(format_elapsed(30), "30s");
+        assert_eq!(format_elapsed(59), "59s");
+    }
+
+    #[test]
+    fn format_elapsed_minutes() {
+        assert_eq!(format_elapsed(60), "1m0s");
+        assert_eq!(format_elapsed(125), "2m5s");
+        assert_eq!(format_elapsed(3599), "59m59s");
+    }
+
+    #[test]
+    fn format_elapsed_hours() {
+        assert_eq!(format_elapsed(3600), "1h0m");
+        assert_eq!(format_elapsed(7325), "2h2m");
+        assert_eq!(format_elapsed(86399), "23h59m");
+    }
+
+    #[test]
+    fn format_eta_hours() {
+        // 36000 bytes remaining at 1 b/s = 36000 s = 10h0m
+        assert_eq!(format_eta(0, 36000, 1.0), "10h0m to go");
+    }
+
+    #[test]
+    fn format_eta_done_when_bytes_exceed_total() {
+        assert_eq!(format_eta(150, 100, 10.0), "done");
+    }
+
+    #[test]
+    fn format_eta_negative_bps_treated_as_unknown() {
+        assert_eq!(format_eta(50, 100, -5.0), "--");
+    }
+
+    #[test]
+    fn format_lps_larger_values() {
+        assert_eq!(format_lps(1_000), "1k l/s");
+        assert_eq!(format_lps(10_000), "10k l/s");
+        assert_eq!(format_lps(999_999), "1000k l/s");
+        assert_eq!(format_lps(1_000_000), "1.0M l/s");
+        assert_eq!(format_lps(10_000_000), "10.0M l/s");
+    }
+
+    #[test]
+    fn format_lines_edge_cases() {
+        assert_eq!(format_lines(999_999), "1000k");
+        assert_eq!(format_lines(9_999_999), "10.00M");
+    }
+
+    #[test]
+    fn checkpoint_status_with_zero_elapsed() {
+        assert_eq!(
+            format_checkpoint_status(0, 300, CHECKPOINT_NONE),
+            "no checkpoint yet"
+        );
+    }
+
+    #[test]
+    fn checkpoint_status_large_interval() {
+        assert_eq!(
+            format_checkpoint_status(500, 3600, CHECKPOINT_NONE),
+            "no checkpoint yet"
+        );
+    }
+
+    #[test]
+    fn checkpoint_status_recent_checkpoint_age() {
+        assert_eq!(
+            format_checkpoint_status(365, 300, 300),
+            "checkpoint 1m5s ago"
+        );
     }
 }

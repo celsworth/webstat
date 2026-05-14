@@ -1,28 +1,69 @@
 use std::ops::Range;
 
-/// A single parsed nginx combined-log entry.
 #[derive(Debug)]
-pub struct ParsedEntry {
-    pub ip: Range<usize>,
-    pub time: Range<usize>,
-    pub method: Range<usize>,
-    pub path: Range<usize>,
-    pub proto: Range<usize>,
-    pub referer: Range<usize>,
-    pub user_agent: Range<usize>,
+pub struct OwnedLogEntry {
+    raw: Box<str>,
+
+    ip: Range<usize>,
+    time: Range<usize>,
+    method: Range<usize>,
+    path: Range<usize>,
+    proto: Range<usize>,
+    referer: Range<usize>,
+    user_agent: Range<usize>,
 
     pub month_num: u8,
     pub status: u16,
     pub bytes: u64,
 }
 
-/// Parse one line of nginx combined-log format into a `LogEntry`.
+impl OwnedLogEntry {
+    pub fn parse(line: String) -> Option<Self> {
+        parse_line(&line)
+    }
+
+    #[inline]
+    fn slice(&self, r: Range<usize>) -> &str {
+        &self.raw[r]
+    }
+
+    pub fn ip(&self) -> &str {
+        self.slice(self.ip.clone())
+    }
+
+    pub fn path(&self) -> &str {
+        self.slice(self.path.clone())
+    }
+
+    pub fn method(&self) -> &str {
+        self.slice(self.method.clone())
+    }
+
+    pub fn proto(&self) -> &str {
+        self.slice(self.proto.clone())
+    }
+
+    pub fn referer(&self) -> &str {
+        self.slice(self.referer.clone())
+    }
+
+    pub fn user_agent(&self) -> &str {
+        self.slice(self.user_agent.clone())
+    }
+
+    pub fn time_str(&self) -> &str {
+        self.slice(self.time.clone())
+    }
+}
+
+/// Parse one line of nginx combined-log format into an owned entry.
 ///
 /// Nginx combined format:
 ///   IP IDENT USER [TIMESTAMP] "REQUEST" STATUS BYTES "REFERER" "UA"
 ///
 /// Returns `None` for blank or malformed lines.
-pub fn parse_line(line: &str) -> Option<ParsedEntry> {
+pub fn parse_line(line: &str) -> Option<OwnedLogEntry> {
+    let raw: Box<str> = line.into();
     let b = line.as_bytes();
     let len = b.len();
 
@@ -74,6 +115,11 @@ pub fn parse_line(line: &str) -> Option<ParsedEntry> {
         return None;
     }
 
+    // Timestamp must be at least 26 chars: "DD/Mon/YYYY:HH:MM:SS ±HHMM"
+    if time.len() < 26 {
+        return None;
+    }
+
     let month_num = month_num(&b.get(time_start + 3..time_start + 6)?)?;
 
     i += 2; // "] "
@@ -97,6 +143,11 @@ pub fn parse_line(line: &str) -> Option<ParsedEntry> {
     let request = req_start..req_end;
 
     let req_b = &b[request.clone()];
+
+    // reject non-ASCII characters in request
+    if req_b.iter().any(|&c| c > 127) {
+        return None;
+    }
 
     // reject non-HTTP / TLS / garbage
     if !(req_b.starts_with(b"GET ")
@@ -162,7 +213,7 @@ pub fn parse_line(line: &str) -> Option<ParsedEntry> {
     while i < len && b[i] != b'"' {
         i += 1;
     }
-    if i >= len || i <= ref_start {
+    if i >= len {
         return None;
     }
 
@@ -184,7 +235,7 @@ pub fn parse_line(line: &str) -> Option<ParsedEntry> {
     while i < len && b[i] != b'"' {
         i += 1;
     }
-    if i >= len || i <= ua_start {
+    if i >= len {
         return None;
     }
 
@@ -223,7 +274,8 @@ pub fn parse_line(line: &str) -> Option<ParsedEntry> {
 
     let proto = request.start + j..request.end;
 
-    Some(ParsedEntry {
+    Some(OwnedLogEntry {
+        raw,
         ip,
         time,
         method,

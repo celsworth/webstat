@@ -46,128 +46,6 @@ fn arcstr(s: &str) -> Arc<str> {
     Arc::<str>::from(s)
 }
 
-// ── Generic TopN core ─────────────────────────────────────────────────────────
-
-trait TopNValue: Sized {
-    fn sort_key(&self) -> u64;
-    fn merge_into(&mut self, other: Self);
-    fn on_evict(self, evicted_key: u64) -> Self;
-}
-
-struct TopN<V> {
-    map: AHashMap<Arc<str>, V>,
-    min_heap: BinaryHeap<Reverse<(u64, Arc<str>)>>,
-    capacity: usize,
-}
-
-impl<V: TopNValue> TopN<V> {
-    fn new(capacity: usize) -> Self {
-        Self {
-            map: AHashMap::with_capacity(capacity),
-            min_heap: BinaryHeap::with_capacity(capacity),
-            capacity,
-        }
-    }
-
-    #[inline]
-    fn add(&mut self, key: &str, val: V) {
-        if self.capacity == 0 {
-            return;
-        }
-
-        if let Some(existing) = self.map.get_mut(key) {
-            existing.merge_into(val);
-            return;
-        }
-
-        let sort_key = val.sort_key();
-
-        if self.map.len() < self.capacity {
-            let key_arc = arcstr(key);
-            self.map.insert(Arc::clone(&key_arc), val);
-            self.min_heap.push(Reverse((sort_key, key_arc)));
-            return;
-        }
-
-        let (min_key, min_sort_key) = self.resolve_min_entry();
-        self.map.remove(min_key.as_ref());
-
-        let new_val = val.on_evict(min_sort_key);
-        let new_sort_key = new_val.sort_key();
-        let key_arc = arcstr(key);
-        self.map.insert(Arc::clone(&key_arc), new_val);
-        self.min_heap.push(Reverse((new_sort_key, key_arc)));
-    }
-
-    #[cold]
-    fn resolve_min_entry(&mut self) -> (Arc<str>, u64) {
-        loop {
-            while let Some(Reverse((sort_key, key))) = self.min_heap.pop() {
-                if let Some(v) = self.map.get(key.as_ref()) {
-                    if v.sort_key() == sort_key {
-                        return (key, sort_key);
-                    }
-                }
-            }
-
-            self.min_heap.reserve(self.map.len());
-            for (key, val) in &self.map {
-                self.min_heap
-                    .push(Reverse((val.sort_key(), Arc::clone(key))));
-            }
-        }
-    }
-
-    fn iter(&self) -> impl Iterator<Item = (&Arc<str>, &V)> + '_ {
-        self.map.iter()
-    }
-}
-
-// ── Value types ───────────────────────────────────────────────────────────────
-
-struct CountVal(u64);
-
-impl TopNValue for CountVal {
-    fn sort_key(&self) -> u64 {
-        self.0
-    }
-    fn merge_into(&mut self, other: Self) {
-        self.0 += other.0;
-    }
-    fn on_evict(self, evicted_key: u64) -> Self {
-        CountVal(evicted_key + self.0)
-    }
-}
-
-struct UrlByHitsVal(u64, u64); // (hits, bw)
-
-impl TopNValue for UrlByHitsVal {
-    fn sort_key(&self) -> u64 {
-        self.0
-    }
-    fn merge_into(&mut self, other: Self) {
-        self.0 += other.0;
-        self.1 += other.1;
-    }
-    fn on_evict(self, evicted_key: u64) -> Self {
-        UrlByHitsVal(evicted_key + self.0, self.1)
-    }
-}
-
-struct UrlByBwVal(u64, u64); // (hits, bw)
-
-impl TopNValue for UrlByBwVal {
-    fn sort_key(&self) -> u64 {
-        self.1
-    }
-    fn merge_into(&mut self, other: Self) {
-        self.0 += other.0;
-        self.1 += other.1;
-    }
-    fn on_evict(self, evicted_key: u64) -> Self {
-        UrlByBwVal(self.0, evicted_key + self.1)
-    }
-}
 
 // ── Count-Min Sketch ──────────────────────────────────────────────────────────
 
@@ -369,64 +247,64 @@ impl CmsTopN {
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
-pub struct TopNCount(TopN<CountVal>);
+pub struct TopNCount(AHashMap<Arc<str>, u64>);
 
 impl TopNCount {
-    pub fn new(capacity: usize) -> Self {
-        Self(TopN::new(capacity))
+    pub fn new(_capacity: usize) -> Self {
+        Self(AHashMap::new())
     }
 
     #[inline]
     pub fn add(&mut self, key: &str, delta: u64) {
-        self.0.add(key, CountVal(delta));
+        *self.0.entry(arcstr(key)).or_insert(0) += delta;
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, u64)> + '_ {
-        self.0.iter().map(|(k, v)| (k.as_ref(), v.0))
+        self.0.iter().map(|(k, &v)| (k.as_ref(), v))
     }
 }
 
-pub struct TopNUrls(TopN<UrlByHitsVal>);
+pub struct TopNUrls(CmsTopN);
 
 impl TopNUrls {
     pub fn new(capacity: usize) -> Self {
-        Self(TopN::new(capacity))
+        Self(CmsTopN::new(capacity, SortBy::Hits))
     }
 
     #[inline]
     pub fn add(&mut self, url: &str, bw: u64) {
-        self.0.add(url, UrlByHitsVal(1, bw));
+        self.0.add(url, 1, bw);
     }
 
     #[inline]
     pub fn add_hits_bw(&mut self, url: &str, hits: u64, bw: u64) {
-        self.0.add(url, UrlByHitsVal(hits, bw));
+        self.0.add(url, hits, bw);
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, u64, u64)> + '_ {
-        self.0.iter().map(|(k, v)| (k.as_ref(), v.0, v.1))
+        self.0.iter()
     }
 }
 
-pub struct TopNUrlsByBandwidth(TopN<UrlByBwVal>);
+pub struct TopNUrlsByBandwidth(CmsTopN);
 
 impl TopNUrlsByBandwidth {
     pub fn new(capacity: usize) -> Self {
-        Self(TopN::new(capacity))
+        Self(CmsTopN::new(capacity, SortBy::Bandwidth))
     }
 
     #[inline]
     pub fn add(&mut self, url: &str, bw: u64) {
-        self.0.add(url, UrlByBwVal(1, bw));
+        self.0.add(url, 1, bw);
     }
 
     #[inline]
     pub fn add_hits_bw(&mut self, url: &str, hits: u64, bw: u64) {
-        self.0.add(url, UrlByBwVal(hits, bw));
+        self.0.add(url, hits, bw);
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, u64, u64)> + '_ {
-        self.0.iter().map(|(k, v)| (k.as_ref(), v.0, v.1))
+        self.0.iter()
     }
 }
 

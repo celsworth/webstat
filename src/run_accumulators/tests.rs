@@ -3,10 +3,7 @@ use super::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::method_proto::{
-        METHOD_COUNT, METHOD_GET, METHOD_OTHER, METHOD_POST, PROTO_1_1, PROTO_2_0, PROTO_COUNT,
-        PROTO_OTHER,
-    };
+    use crate::method_proto::{METHOD_COUNT, METHOD_GET, PROTO_1_1, PROTO_COUNT};
     use crate::topn::{HourlyAcc, TopNCount, TopNHosts, TopNUrls};
 
     fn arc(s: &str) -> Arc<str> {
@@ -52,230 +49,104 @@ mod tests {
     }
 
     #[test]
-    fn merge_from_adds_method_counts_element_wise() {
-        let mut left = RunAccumulators::new(8, 12, false, false, false);
-        let mut right = RunAccumulators::new(8, 12, false, false, false);
-        let period = arc("2026-05");
-
-        let mut lm = [0u64; METHOD_COUNT];
-        lm[METHOD_GET] = 10;
-        lm[METHOD_POST] = 3;
-        left.method_counts.insert(Arc::clone(&period), lm);
-
-        let mut rm = [0u64; METHOD_COUNT];
-        rm[METHOD_GET] = 5;
-        rm[METHOD_OTHER] = 2;
-        right.method_counts.insert(Arc::clone(&period), rm);
-
-        left.merge_from(right, 12, 10);
-
-        let merged = left.method_counts.get("2026-05").unwrap();
-        assert_eq!(merged[METHOD_GET], 15);
-        assert_eq!(merged[METHOD_POST], 3);
-        assert_eq!(merged[METHOD_OTHER], 2);
-    }
-
-    #[test]
-    fn merge_from_adds_proto_counts_element_wise() {
-        let mut left = RunAccumulators::new(8, 12, false, false, false);
-        let mut right = RunAccumulators::new(8, 12, false, false, false);
-        let period = arc("2026-05");
-
-        let mut lp = [0u64; PROTO_COUNT];
-        lp[PROTO_1_1] = 100;
-        left.proto_counts.insert(Arc::clone(&period), lp);
-
-        let mut rp = [0u64; PROTO_COUNT];
-        rp[PROTO_1_1] = 50;
-        rp[PROTO_2_0] = 20;
-        right.proto_counts.insert(Arc::clone(&period), rp);
-
-        left.merge_from(right, 12, 10);
-
-        let merged = left.proto_counts.get("2026-05").unwrap();
-        assert_eq!(merged[PROTO_1_1], 150);
-        assert_eq!(merged[PROTO_2_0], 20);
-        assert_eq!(merged[PROTO_OTHER], 0);
-    }
-
-    #[test]
-    fn merge_from_creates_new_period_entries_when_absent_in_left() {
-        let mut left = RunAccumulators::new(8, 12, false, false, false);
-        let mut right = RunAccumulators::new(8, 12, false, false, false);
-
-        let mut rm = [0u64; METHOD_COUNT];
-        rm[METHOD_GET] = 7;
-        right.method_counts.insert(arc("2026-06"), rm);
-
-        let mut rp = [0u64; PROTO_COUNT];
-        rp[PROTO_2_0] = 4;
-        right.proto_counts.insert(arc("2026-06"), rp);
-
-        left.merge_from(right, 12, 10);
-
-        assert_eq!(left.method_counts.get("2026-06").unwrap()[METHOD_GET], 7);
-        assert_eq!(left.proto_counts.get("2026-06").unwrap()[PROTO_2_0], 4);
-    }
-
-    #[test]
-    fn merge_from_combines_all_tracked_data() {
-        let mut left = RunAccumulators::new(8, 12, true, true, true);
-        let mut right = RunAccumulators::new(8, 12, true, true, true);
-
-        let date = arc("2026-05-10");
-        let period = arc("2026-05");
-
-        // Hourly merge: stats and unique-ip set should combine.
-        let mut left_hour = HourlyAcc::default();
-        left_hour.stats.hits = 2;
-        left_hour.ip_set.insert(1);
-        left.hourly
-            .entry(Arc::clone(&date))
+    fn hourly_populated_bucket_makes_is_empty_false() {
+        let mut acc = RunAccumulators::new(16, 12, false, false, false);
+        let mut hourly_acc = HourlyAcc::default();
+        hourly_acc.stats.hits = 1;
+        acc.hourly
+            .entry(arc("2026-05-10"))
             .or_default()
-            .insert(10, left_hour);
+            .insert(10, hourly_acc);
+        assert!(!acc.is_empty());
+    }
 
-        let mut right_hour = HourlyAcc::default();
-        right_hour.stats.hits = 3;
-        right_hour.ip_set.insert(2);
-        right
-            .hourly
-            .entry(Arc::clone(&date))
-            .or_default()
-            .insert(10, right_hour);
+    #[test]
+    fn top_urls_populated_bucket_makes_is_empty_false() {
+        let mut acc = RunAccumulators::new(16, 12, true, false, false);
+        let mut urls = TopNUrls::new(10);
+        urls.add_hits_bw("/index.html", 5, 1024);
+        acc.top_urls.insert(arc("2026-05"), urls);
+        assert!(!acc.is_empty());
+    }
 
-        // Top URLs / refs / agents / countries.
-        let mut left_urls = TopNUrls::new(10);
-        left_urls.add_hits_bw("/a", 1, 100);
-        left.top_urls.insert(Arc::clone(&period), left_urls);
+    #[test]
+    fn top_urls_bw_populated_bucket_makes_is_empty_false() {
+        let mut acc = RunAccumulators::new(16, 12, true, false, false);
+        let mut urls_bw = crate::topn::TopNUrlsByBandwidth::new(10);
+        urls_bw.add_hits_bw("/download.zip", 2, 5000);
+        acc.top_urls_bw.insert(arc("2026-05"), urls_bw);
+        assert!(!acc.is_empty());
+    }
 
-        let mut right_urls = TopNUrls::new(10);
-        right_urls.add_hits_bw("/a", 2, 50);
-        right.top_urls.insert(Arc::clone(&period), right_urls);
+    #[test]
+    fn top_hosts_populated_bucket_makes_is_empty_false() {
+        let mut acc = RunAccumulators::new(16, 12, false, true, false);
+        let mut hosts = TopNHosts::new(10);
+        hosts.add_hits_bw("1.2.3.4", 3, 512);
+        acc.top_hosts.insert(arc("2026-05"), hosts);
+        assert!(!acc.is_empty());
+    }
 
-        let mut left_refs = TopNCount::new(10);
-        left_refs.add("google.com", 1);
-        left.top_refs.insert(Arc::clone(&period), left_refs);
+    #[test]
+    fn top_hosts_bw_populated_bucket_makes_is_empty_false() {
+        let mut acc = RunAccumulators::new(16, 12, false, true, false);
+        let mut hosts_bw = crate::topn::TopNHostsByBandwidth::new(10);
+        hosts_bw.add_hits_bw("5.6.7.8", 1, 8192);
+        acc.top_hosts_bw.insert(arc("2026-05"), hosts_bw);
+        assert!(!acc.is_empty());
+    }
 
-        let mut right_refs = TopNCount::new(10);
-        right_refs.add("google.com", 2);
-        right.top_refs.insert(Arc::clone(&period), right_refs);
+    #[test]
+    fn top_refs_populated_bucket_makes_is_empty_false() {
+        let mut acc = RunAccumulators::new(16, 12, false, false, true);
+        let mut refs = TopNCount::new(10);
+        refs.add("https://example.com/", 7);
+        acc.top_refs.insert(arc("2026-05"), refs);
+        assert!(!acc.is_empty());
+    }
 
-        let mut left_agents = TopNCount::new(10);
-        left_agents.add("Firefox", 1);
-        left.top_agents.insert(Arc::clone(&period), left_agents);
+    #[test]
+    fn top_agents_populated_bucket_makes_is_empty_false() {
+        let mut acc = RunAccumulators::new(16, 12, false, false, false);
+        let mut agents = TopNCount::new(10);
+        agents.add("Mozilla/5.0", 4);
+        acc.top_agents.insert(arc("2026-05"), agents);
+        assert!(!acc.is_empty());
+    }
 
-        let mut right_agents = TopNCount::new(10);
-        right_agents.add("Firefox", 3);
-        right.top_agents.insert(Arc::clone(&period), right_agents);
+    #[test]
+    fn top_countries_populated_bucket_makes_is_empty_false() {
+        let mut acc = RunAccumulators::new(16, 12, false, false, false);
+        let mut countries = AHashMap::new();
+        countries.insert("US".to_string(), 100u64);
+        acc.top_countries.insert(arc("2026-05"), countries);
+        assert!(!acc.is_empty());
+    }
 
-        let mut left_countries = AHashMap::new();
-        left_countries.insert("US".to_string(), 1);
-        left.top_countries
-            .insert(Arc::clone(&period), left_countries);
+    #[test]
+    fn hll_site_counts_populated_bucket_makes_is_empty_false() {
+        let mut acc = RunAccumulators::new(16, 12, false, false, false);
+        let mut hll = HyperLogLog::new(12);
+        hll.add_hash(12345);
+        acc.hll_site_counts.insert(arc("2026-05"), hll);
+        assert!(!acc.is_empty());
+    }
 
-        let mut right_countries = AHashMap::new();
-        right_countries.insert("US".to_string(), 4);
-        right
-            .top_countries
-            .insert(Arc::clone(&period), right_countries);
+    #[test]
+    fn new_with_all_features_enabled_has_nonzero_capacities() {
+        let acc = RunAccumulators::new(32, 14, true, true, true);
+        assert!(acc.top_urls.capacity() > 0);
+        assert!(acc.top_urls_bw.capacity() > 0);
+        assert!(acc.top_hosts.capacity() > 0);
+        assert!(acc.top_hosts_bw.capacity() > 0);
+        assert!(acc.top_refs.capacity() > 0);
+    }
 
-        // Top hosts.
-        let cc = arc("US");
-        let cn = arc("United States");
-        let mut left_hosts = TopNHosts::new(10);
-        left_hosts.add_hits_bw("1.2.3.4", 1, 100, &cc, &cn);
-        left.top_hosts.insert(Arc::clone(&period), left_hosts);
-
-        let mut right_hosts = TopNHosts::new(10);
-        right_hosts.add_hits_bw("1.2.3.4", 2, 50, &cc, &cn);
-        right.top_hosts.insert(Arc::clone(&period), right_hosts);
-
-        // Status codes.
-        let mut left_codes = AHashMap::new();
-        left_codes.insert(200u16, 2u64);
-        left.status_codes.insert(Arc::clone(&period), left_codes);
-
-        let mut right_codes = AHashMap::new();
-        right_codes.insert(200u16, 3u64);
-        right.status_codes.insert(Arc::clone(&period), right_codes);
-
-        // HLL sketches.
-        let mut left_hll = HyperLogLog::new(12);
-        left_hll.add_hash(123);
-        left.hll_site_counts.insert(Arc::clone(&period), left_hll);
-
-        let mut right_hll = HyperLogLog::new(12);
-        right_hll.add_hash(456);
-        right.hll_site_counts.insert(Arc::clone(&period), right_hll);
-
-        if let Some(all_time) = left.hll_all_time.as_mut() {
-            all_time.add_hash(777);
-        }
-        if let Some(all_time) = right.hll_all_time.as_mut() {
-            all_time.add_hash(888);
-        }
-
-        left.merge_from(right, 12, 10);
-
-        let hour = left.hourly.get("2026-05-10").unwrap().get(&10).unwrap();
-        assert_eq!(hour.stats.hits, 5);
-        assert_eq!(hour.ip_set.len(), 2);
-
-        let urls = left.top_urls.get("2026-05").unwrap();
-        let url_row = urls
-            .iter()
-            .find(|(k, _, _)| *k == "/a")
-            .map(|(_, h, bw)| (h, bw))
-            .unwrap();
-        assert_eq!(url_row.0, 3);
-        assert_eq!(url_row.1, 150);
-
-        assert_eq!(
-            left.top_refs
-                .get("2026-05")
-                .unwrap()
-                .iter()
-                .find(|(k, _)| *k == "google.com")
-                .map(|(_, v)| v),
-            Some(3)
-        );
-        assert_eq!(
-            left.top_agents
-                .get("2026-05")
-                .unwrap()
-                .iter()
-                .find(|(k, _)| *k == "Firefox")
-                .map(|(_, v)| v),
-            Some(4)
-        );
-        assert_eq!(
-            *left
-                .top_countries
-                .get("2026-05")
-                .unwrap()
-                .get("US")
-                .unwrap(),
-            5
-        );
-
-        let host_hits = left
-            .top_hosts
-            .get("2026-05")
-            .unwrap()
-            .iter()
-            .find(|(h, _, _, _, _)| *h == "1.2.3.4")
-            .map(|(_, hits, bw, _, _)| (hits, bw))
-            .unwrap();
-        assert_eq!(host_hits.0, 3);
-        assert_eq!(host_hits.1, 150);
-
-        assert_eq!(
-            left.status_codes.get("2026-05").unwrap().get(&200).copied(),
-            Some(5)
-        );
-
-        // Not checking exact estimate because HLL is approximate, just merged/non-empty.
-        assert!(left.hll_site_counts.get("2026-05").unwrap().estimate() > 0);
-        assert!(left.hll_all_time.as_ref().unwrap().estimate() > 0);
+    #[test]
+    fn new_with_features_disabled_has_zero_capacity() {
+        let acc = RunAccumulators::new(32, 14, false, false, false);
+        assert_eq!(acc.top_urls.capacity(), 0);
+        assert_eq!(acc.top_hosts.capacity(), 0);
+        assert_eq!(acc.top_refs.capacity(), 0);
     }
 }

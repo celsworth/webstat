@@ -3,6 +3,7 @@ use super::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
     use crate::database::Database;
     use crate::geo::Geo;
     use crate::processor::{Processor, ProcessorConfig};
@@ -43,9 +44,6 @@ mod tests {
             db,
             geo,
             ua,
-            cfg.database.clone(),
-            cfg.geoip_db.clone(),
-            cfg.file_workers,
             ProcessorConfig {
                 top_n: cfg.top_n,
                 vacuum_after_prune: cfg.vacuum_after_prune,

@@ -27,6 +27,7 @@ mod tests {
             &AHashMap::new(),
             &AHashMap::new(),
             &AHashMap::new(),
+            &AHashMap::new(),
             None,
             &[],
             &[],
@@ -273,16 +274,14 @@ mod tests {
         let status_codes: StatusHitsMap = AHashMap::new();
 
         let mut first_hosts: TopHostsByHits = AHashMap::new();
-        let us = Arc::<str>::from("US");
-        let us_name = Arc::<str>::from("United States");
         let mut month_hosts = TopNHosts::new(200);
-        month_hosts.add("site-a", 100, &us, &us_name);
-        month_hosts.add("site-b", 100, &us, &us_name);
+        month_hosts.add("site-a", 100);
+        month_hosts.add("site-b", 100);
         first_hosts.insert(Arc::<str>::from("2026-05"), month_hosts);
 
         let mut year_hosts = TopNHosts::new(200);
-        year_hosts.add("site-a", 100, &us, &us_name);
-        year_hosts.add("site-a", 100, &us, &us_name);
+        year_hosts.add("site-a", 100);
+        year_hosts.add("site-a", 100);
         first_hosts.insert(Arc::<str>::from("2026"), year_hosts);
 
         db.flush_all(
@@ -304,8 +303,8 @@ mod tests {
 
         let mut second_hosts: TopHostsByHits = AHashMap::new();
         let mut next_month_hosts = TopNHosts::new(200);
-        next_month_hosts.add("site-b", 100, &us, &us_name);
-        next_month_hosts.add("site-c", 100, &us, &us_name);
+        next_month_hosts.add("site-b", 100);
+        next_month_hosts.add("site-c", 100);
         second_hosts.insert(Arc::<str>::from("2026-06"), next_month_hosts);
 
         db.flush_all(
