@@ -337,8 +337,142 @@ mod tests {
         t.add_hits_bw("192.168.1.1", 1, 9999);
         t.add_hits_bw("192.168.1.100", 100, 1);
         t.add_hits_bw("192.168.1.101", 1, 500);
-        // Host with high bandwidth should be kept
         assert!(t.iter().find(|(h, _, _)| *h == "192.168.1.1").is_some());
-        // Host with high hits but low bandwidth might be evicted
+    }
+
+    // ── TopNIps ───────────────────────────────────────────────────────────────
+
+    fn get_ip(t: &TopNIps, ip: u32) -> Option<(u64, u64)> {
+        t.iter().find(|(k, _, _)| *k == ip).map(|(_, h, bw)| (h, bw))
+    }
+
+    fn get_ip_bw(t: &TopNIpsByBandwidth, ip: u32) -> Option<(u64, u64)> {
+        t.iter().find(|(k, _, _)| *k == ip).map(|(_, h, bw)| (h, bw))
+    }
+
+    #[test]
+    fn topn_ips_add_accumulates_hits_and_bandwidth() {
+        let mut t = TopNIps::new(5);
+        t.add(0x0102_0304, 1000);
+        t.add(0x0102_0304, 500);
+        t.add(0x0506_0708, 200);
+        let entry = get_ip(&t, 0x0102_0304).unwrap();
+        assert_eq!(entry.0, 2);    // hits
+        assert_eq!(entry.1, 1500); // bandwidth
+    }
+
+    #[test]
+    fn topn_ips_zero_capacity_ignores_all() {
+        let mut t = TopNIps::new(0);
+        t.add(0x0102_0304, 1000);
+        assert_eq!(t.iter().count(), 0);
+    }
+
+    #[test]
+    fn topn_ips_capacity_limited() {
+        let mut t = TopNIps::new(3);
+        for i in 0u32..100 {
+            if i < 50 {
+                t.add_hits_bw(0x0101_0101, 1, 10);
+            } else if i < 75 {
+                t.add_hits_bw(0x0202_0202, 1, 10);
+            } else {
+                t.add_hits_bw(i, 1, 10);
+            }
+        }
+        assert!(t.iter().count() <= 3);
+        assert!(get_ip(&t, 0x0101_0101).is_some());
+    }
+
+    #[test]
+    fn topn_ips_single_capacity() {
+        let mut t = TopNIps::new(1);
+        t.add_hits_bw(1, 50, 500);
+        assert_eq!(t.iter().count(), 1);
+        t.add_hits_bw(2, 1, 1);
+        assert!(t.iter().count() <= 1);
+    }
+
+    #[test]
+    fn topn_ips_sorted_by_hits_not_bandwidth() {
+        let mut t = TopNIps::new(10);
+        t.add_hits_bw(0xAAAA_AAAA, 1, 99999);
+        for _ in 0..200 {
+            t.add_hits_bw(0xBBBB_BBBB, 1, 1);
+        }
+        assert!(get_ip(&t, 0xBBBB_BBBB).unwrap().0 >= 200);
+    }
+
+    // ── TopNIpsByBandwidth ────────────────────────────────────────────────────
+
+    #[test]
+    fn topn_ips_bw_add_accumulates_hits_and_bandwidth() {
+        let mut t = TopNIpsByBandwidth::new(5);
+        t.add(0x0102_0304, 1000);
+        t.add(0x0102_0304, 500);
+        t.add(0x0506_0708, 200);
+        let entry = get_ip_bw(&t, 0x0102_0304).unwrap();
+        assert_eq!(entry.0, 2);    // hits
+        assert_eq!(entry.1, 1500); // bandwidth
+    }
+
+    #[test]
+    fn topn_ips_bw_zero_capacity_ignores_all() {
+        let mut t = TopNIpsByBandwidth::new(0);
+        t.add(0x0102_0304, 9999);
+        assert_eq!(t.iter().count(), 0);
+    }
+
+    #[test]
+    fn topn_ips_bw_capacity_limited() {
+        let mut t = TopNIpsByBandwidth::new(3);
+        for i in 0u32..100 {
+            if i < 50 {
+                t.add_hits_bw(0x0101_0101, 1, 1000);
+            } else if i < 75 {
+                t.add_hits_bw(0x0202_0202, 1, 100);
+            } else {
+                t.add_hits_bw(i, 1, 1);
+            }
+        }
+        assert!(t.iter().count() <= 3);
+        assert!(get_ip_bw(&t, 0x0101_0101).is_some());
+    }
+
+    #[test]
+    fn topn_ips_bw_single_capacity() {
+        let mut t = TopNIpsByBandwidth::new(1);
+        t.add_hits_bw(1, 1, 9999);
+        assert_eq!(t.iter().count(), 1);
+        t.add_hits_bw(2, 1, 1);
+        assert!(t.iter().count() <= 1);
+    }
+
+    #[test]
+    fn topn_ips_bw_sorted_by_bandwidth_not_hits() {
+        let mut t = TopNIpsByBandwidth::new(10);
+        for _ in 0..200 {
+            t.add_hits_bw(0xAAAA_AAAA, 1, 1);
+        }
+        t.add_hits_bw(0xBBBB_BBBB, 1, 99999);
+        let entry = get_ip_bw(&t, 0xBBBB_BBBB);
+        assert!(entry.is_some());
+        assert!(entry.unwrap().1 >= 99999);
+    }
+
+    // ── TopNCount edge cases ──────────────────────────────────────────────────
+
+    #[test]
+    fn topn_count_zero_delta_stored() {
+        let mut t = TopNCount::new(5);
+        t.add("key", 0);
+        assert_eq!(get_count(&t, "key"), Some(0));
+    }
+
+    #[test]
+    fn topn_count_empty_key() {
+        let mut t = TopNCount::new(5);
+        t.add("", 42);
+        assert_eq!(get_count(&t, ""), Some(42));
     }
 }

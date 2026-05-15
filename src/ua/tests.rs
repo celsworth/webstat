@@ -111,12 +111,54 @@ mod tests {
     #[test]
     fn unknown_ua_returns_unknown_family() {
         let mut parser = UaParser::new();
-
         let unknown_uas = vec!["SomeRandomUA", "???"];
-
         for ua in unknown_uas {
             let result = parser.parse(ua);
             assert_eq!(result.family.as_ref(), "Unknown");
         }
+    }
+
+    #[test]
+    fn dash_ua_is_not_a_bot() {
+        let mut parser = UaParser::new();
+        let result = parser.parse("-");
+        assert!(!result.is_bot, "dash '-' UA should not be flagged as bot");
+    }
+
+    #[test]
+    fn monitor_keyword_triggers_bot_regex() {
+        let mut parser = UaParser::new();
+        // "monitor" is in the regex pattern
+        let result = parser.parse("StatusMonitor/2.0 uptime-checker");
+        assert!(result.is_bot);
+    }
+
+    #[test]
+    fn slurp_keyword_triggers_bot_regex() {
+        let mut parser = UaParser::new();
+        // "slurp" is in the regex pattern (case-insensitive flag (?i) is set)
+        let result = parser.parse("Yahoo! Slurp/3.1");
+        assert!(result.is_bot);
+    }
+
+    #[test]
+    fn validator_keyword_triggers_bot_regex() {
+        let mut parser = UaParser::new();
+        let result = parser.parse("W3C_Validator/1.3");
+        assert!(result.is_bot);
+    }
+
+    #[test]
+    fn indexer_keyword_triggers_bot_regex() {
+        let mut parser = UaParser::new();
+        let result = parser.parse("SiteIndexer/1.0");
+        assert!(result.is_bot);
+    }
+
+    #[test]
+    fn fetcher_keyword_triggers_bot_regex() {
+        let mut parser = UaParser::new();
+        let result = parser.parse("ContentFetcher/2.0");
+        assert!(result.is_bot);
     }
 }

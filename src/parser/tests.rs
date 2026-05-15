@@ -551,8 +551,48 @@ mod tests {
 
     #[test]
     fn rejects_non_ascii_in_request() {
-        // Non-ASCII chars (bytes > 126) in the request field are rejected
         let line = "1.2.3.4 - user [08/May/2026:14:23:01 +0000] \"GET /café HTTP/1.1\" 200 100 \"-\" \"-\"";
         assert!(parse_line(line).is_none());
+    }
+
+    // ── Less-common but allowed methods ──────────────────────────────────────
+
+    #[test]
+    fn propfind_method() {
+        let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "PROPFIND /dav/resource HTTP/1.1" 207 500 "-" "cadaver/0.23.3""#;
+        let entry = parse_line(line).expect("should parse");
+        assert_eq!(entry.method(), "PROPFIND");
+        assert_eq!(entry.path(), "/dav/resource");
+    }
+
+    #[test]
+    fn pri_method_http2_preface() {
+        let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "PRI * HTTP/2.0" 200 0 "-" "-""#;
+        let entry = parse_line(line).expect("should parse");
+        assert_eq!(entry.method(), "PRI");
+        assert_eq!(entry.path(), "*");
+    }
+
+    // ── Proto field ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn proto_http11_captured() {
+        let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-""#;
+        let entry = parse_line(line).expect("should parse");
+        assert_eq!(entry.proto(), "HTTP/1.1");
+    }
+
+    #[test]
+    fn proto_http10_captured() {
+        let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.0" 200 100 "-" "-""#;
+        let entry = parse_line(line).expect("should parse");
+        assert_eq!(entry.proto(), "HTTP/1.0");
+    }
+
+    #[test]
+    fn proto_http20_captured() {
+        let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/2.0" 200 100 "-" "-""#;
+        let entry = parse_line(line).expect("should parse");
+        assert_eq!(entry.proto(), "HTTP/2.0");
     }
 }
