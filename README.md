@@ -4,6 +4,32 @@ Webstat is a single-binary Rust web log analyzer, inspired by Webalizer.
 
 It parses nginx access logs incrementally into SQLite, then generates static HTML reports from that database using Tera templates and Chart.js.
 
+## Program Flow
+
+### `process` command
+
+- Parse CLI args and load config — `src/main.rs`, `src/config.rs`
+- Initialise logging (verbosity globals, progress-line coordination) — `src/logging.rs`
+- Open SQLite database and initialise schema — `src/database.rs`
+- Expand glob patterns into a file list — `src/processor.rs` (`process_globs`)
+- For each file, fingerprint it and decide what to skip/resume — `src/fingerprint.rs`, `src/processor/resume_policy.rs`
+- Seed initial progress counters from already-processed offsets so the display starts accurate — `src/processor/progress_seed.rs`
+- Spawn a progress display thread — `src/processor.rs`, `src/progress.rs`
+- Dispatch files to parallel worker threads — `src/processor/parallel.rs` (via `processor.rs`)
+- Each worker runs a three-stage pipeline per file, communicating via typed channel messages — `src/processor/messages.rs`:
+  - **Loader** — reads raw bytes, decompresses if needed, emits line batches — `src/processor/loader.rs`, `src/compression.rs`
+  - **Parser** — parses combined-log-format lines into structured entries, classifying HTTP method and protocol — `src/processor/parser_stage.rs`, `src/parser.rs`, `src/method_proto.rs`
+  - **Aggregator** — consumes parsed entries, looks up GeoIP and UA, updates in-memory accumulators using Space-Saving sketches for top-N tables and HyperLogLog for unique-visitor counts — `src/processor/pipeline.rs`, `src/processor/aggregation.rs`, `src/geo.rs`, `src/ua.rs`, `src/topn.rs`, `src/hll.rs`, `src/util.rs`
+- Periodically (and on completion) flush accumulators to SQLite — `src/processor/flush.rs`, `src/run_accumulators.rs`, `src/database.rs`
+- Update per-file parse state in SQLite for resume tracking — `src/database.rs`
+- Prune stale top-N rows from SQLite — `src/database.rs`
+
+### `generate` command
+
+- Query aggregated data from SQLite — `src/database.rs`
+- Render Tera templates into static HTML — `src/reports.rs`
+- Write HTML and copy bundled assets to `output_dir` — `src/reports.rs`
+
 ## Repository Layout
 
 - `src/` Rust source (ingestion, aggregation, report rendering)
