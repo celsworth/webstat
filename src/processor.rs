@@ -1,32 +1,19 @@
 use std::collections::BTreeSet;
-use std::fs::File;
-use std::hash::Hasher;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ahash::AHashMap;
 use anyhow::Result;
-use rayon::prelude::*;
-use twox_hash::XxHash3_64;
 
 use crate::compression::CompressionType;
 use crate::database::{Database, ParseStateUpdate, VisitStateKey, VisitStateUpdate};
 use crate::fingerprint::compute_fingerprints;
 use crate::geo::Geo;
-use crate::hll::HyperLogLog;
 use crate::logging;
-use crate::parser;
-use crate::progress::{flush_shared_progress, print_dir_progress, SharedProgress};
+use crate::progress::print_dir_progress;
 use crate::run_accumulators::RunAccumulators;
-use crate::topn::{
-    CountryHitsMap, HourlyMap, PeriodCountMap, StatusHitsMap, TopHostsByBandwidth, TopHostsByHits,
-    TopNCount, TopNHosts, TopNHostsByBandwidth, TopNUrls, TopNUrlsByBandwidth, TopUrlsByBandwidth,
-    TopUrlsByHits,
-};
-use crate::ua::UaParser;
 use crate::util::{
     days_from_civil, extract_host_from_url, file_ext, parse_ipv4_u32, parse_ipv6_u128, strip_query,
     FILE_EXTS,
@@ -34,28 +21,19 @@ use crate::util::{
 
 mod aggregation;
 mod flush;
-mod parallel;
+mod loader;
+mod messages;
+mod parser_stage;
+mod pipeline;
 mod progress_seed;
-mod readers;
 mod resume_policy;
 
-// Minimum plain-text bytes before enabling per-file range parallelism.
-const RANGE_PARALLEL_MIN_BYTES: u64 = 64 * 1024 * 1024;
+pub(super) const LOADER_BATCH_SIZE: usize = 256;
+pub(super) const PARSER_BATCH_SIZE: usize = 256;
+pub(super) const CHANNEL_CAPACITY: usize = 64;
+
 const VISIT_TIMEOUT_SECONDS: i64 = 30 * 60;
 const DEFAULT_GZ_RATIO: f64 = 5.0;
-
-struct WorkResult {
-    file_idx: usize,
-    file_completed: bool,
-    lines_processed: u64,
-    run_acc: RunAccumulators,
-    pending_parse_states: Vec<ParseStateUpdate>,
-}
-
-struct ProcessWithProgressResult {
-    lines_processed: u64,
-    file_completed: bool,
-}
 
 struct ResolutionOutcome {
     plan: Option<FileResumePlan>,
@@ -81,44 +59,19 @@ struct FileResumePlan {
 pub struct Processor {
     db: Database,
     geo: Geo,
-    ua: UaParser,
-    db_path: String,
-    geoip_db: Option<String>,
-    file_workers: usize,
     top_n: usize,
     vacuum_after_prune: bool,
-    enable_pruner: bool,
     bot_filter: bool,
     site_host: Option<String>,
     enable_top_urls: bool,
     enable_top_hosts: bool,
     enable_top_refs: bool,
-    hll_precision: u8,
-    topn_k: usize,
     checkpoint_every: Option<Duration>,
-    /// Memoised time-period strings keyed by `year*1_000_000 + mon*10_000 + day*100 + hour`.
-    /// Values are `Arc<str>` so cloning them in the hot loop is a single atomic increment.
-    time_cache: AHashMap<u32, (Arc<str>, Arc<str>, Arc<str>)>,
-    /// Memoised host extracted from a full referrer URL.
+    time_cache: AHashMap<u32, (Arc<str>, Arc<str>)>,
     referer_cache: AHashMap<String, Arc<str>>,
-    /// Interning table for IPv4 addresses used by hourly unique-site sets.
-    ip_ids_v4: AHashMap<u32, u32>,
-    /// Interning table for IPv6 addresses used by hourly unique-site sets.
-    ip_ids_v6: AHashMap<u128, u32>,
-    /// Fallback interning table for malformed/unexpected address tokens.
-    ip_ids_other: AHashMap<String, u32>,
-    next_ip_id: u32,
-    /// Last-seen timestamp per IP, persisted across checkpoints and restarts.
+    geo_cache: AHashMap<String, (Arc<str>, Arc<str>)>,
     visit_last_seen: AHashMap<VisitStateKey, i64>,
-    /// Dirty visit-state rows to flush at checkpoints/end-of-run.
     visit_state_dirty: AHashMap<VisitStateKey, i64>,
-    /// Set by dispatch_parallel_files so workers read shared last-seen state
-    /// through the Arc instead of cloning the full map at each file pickup.
-    /// None in single-worker / coordinator contexts.
-    pub(crate) shared_visit_last_seen: Option<Arc<RwLock<AHashMap<VisitStateKey, i64>>>>,
-    /// GeoIP lookup cache keyed by ip_id for efficient lookups without string allocation.
-    geo_cache: AHashMap<u32, (Arc<str>, Arc<str>)>,
-    /// Max timestamp seen in this run to anchor state pruning.
     visit_max_seen_ts: i64,
 }
 
@@ -126,70 +79,32 @@ pub struct Processor {
 pub struct ProcessorConfig {
     pub top_n: usize,
     pub vacuum_after_prune: bool,
-    pub enable_pruner: bool,
     pub bot_filter: bool,
     pub site_host: Option<String>,
     pub enable_top_urls: bool,
     pub enable_top_hosts: bool,
     pub enable_top_refs: bool,
-    pub hll_precision: u8,
-    pub topn_k: usize,
 }
 
 impl Processor {
-    pub fn new(
-        db: Database,
-        geo: Geo,
-        ua: UaParser,
-        db_path: String,
-        geoip_db: Option<String>,
-        file_workers: usize,
-        config: ProcessorConfig,
-    ) -> Self {
+    pub fn new(db: Database, geo: Geo, config: ProcessorConfig) -> Self {
         Self {
             db,
             geo,
-            ua,
-            db_path,
-            geoip_db,
-            file_workers,
             top_n: config.top_n,
             vacuum_after_prune: config.vacuum_after_prune,
-            enable_pruner: config.enable_pruner,
             bot_filter: config.bot_filter,
             site_host: config.site_host,
             enable_top_urls: config.enable_top_urls,
             enable_top_hosts: config.enable_top_hosts,
             enable_top_refs: config.enable_top_refs,
-            hll_precision: config.hll_precision,
-            topn_k: config.topn_k,
             checkpoint_every: None,
             time_cache: AHashMap::with_capacity(8_192),
             referer_cache: AHashMap::with_capacity(8_192),
-            ip_ids_v4: AHashMap::with_capacity(262_144),
-            ip_ids_v6: AHashMap::with_capacity(32_768),
-            ip_ids_other: AHashMap::with_capacity(256),
-            next_ip_id: 1,
+            geo_cache: AHashMap::with_capacity(262_144),
             visit_last_seen: AHashMap::with_capacity(262_144),
             visit_state_dirty: AHashMap::with_capacity(262_144),
-            shared_visit_last_seen: None,
-            geo_cache: AHashMap::with_capacity(262_144),
             visit_max_seen_ts: 0,
-        }
-    }
-
-    pub(super) fn worker_config(&self) -> ProcessorConfig {
-        ProcessorConfig {
-            top_n: self.top_n,
-            vacuum_after_prune: self.vacuum_after_prune,
-            enable_pruner: self.enable_pruner,
-            bot_filter: self.bot_filter,
-            site_host: self.site_host.clone(),
-            enable_top_urls: self.enable_top_urls,
-            enable_top_hosts: self.enable_top_hosts,
-            enable_top_refs: self.enable_top_refs,
-            hll_precision: self.hll_precision,
-            topn_k: self.topn_k,
         }
     }
 
@@ -264,8 +179,6 @@ impl Processor {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /// Process every log file matching comma-separated glob patterns.
-    /// Returns total new lines processed.
     pub fn process_globs(&mut self, glob_list: &str) -> Result<u64> {
         let patterns: Vec<&str> = glob_list
             .split(',')
@@ -280,7 +193,7 @@ impl Processor {
             }
         }
 
-        let files: Vec<String> = files_set.into_iter().collect();
+        let mut files: Vec<String> = files_set.into_iter().collect();
 
         if files.is_empty() {
             logging::log(&format!(
@@ -289,9 +202,17 @@ impl Processor {
             return Ok(0);
         }
 
+        // Sort by the timestamp on the first parseable log line in each file so
+        // files are processed in chronological order regardless of mtime.
+        files.sort_by_key(|f| first_line_timestamp(f).unwrap_or_else(|| {
+            std::fs::metadata(f).map(|m| m.mtime()).unwrap_or(0)
+        }));
+
         let dir_started = Instant::now();
 
         self.load_visit_state_from_db()?;
+
+        let initial_month = self.db.get_meta("current_month")?.unwrap_or_default();
 
         logging::log(&format!(
             "Found {} file(s) across {} pattern(s)",
@@ -300,10 +221,6 @@ impl Processor {
         ));
         let count = files.len();
 
-        let workers = self.file_workers.max(1);
-        logging::log_debug_at(1, &format!("Processing files with {} worker(s)", workers));
-
-        // Pre-compute raw compressed sizes for each file.
         let file_sizes_and_inodes: Vec<(u64, u64)> = files
             .iter()
             .map(|f| {
@@ -312,14 +229,8 @@ impl Processor {
                     .unwrap_or((0, 0))
             })
             .collect();
-        let raw_file_sizes: Vec<u64> = file_sizes_and_inodes
-            .iter()
-            .map(|(size, _)| *size)
-            .collect();
-        let current_inodes: Vec<u64> = file_sizes_and_inodes
-            .iter()
-            .map(|(_, inode)| *inode)
-            .collect();
+        let raw_file_sizes: Vec<u64> = file_sizes_and_inodes.iter().map(|(s, _)| *s).collect();
+        let current_inodes: Vec<u64> = file_sizes_and_inodes.iter().map(|(_, i)| *i).collect();
         let is_compressed_vec: Vec<bool> = files
             .iter()
             .map(|f| CompressionType::from_path(f).is_compressed())
@@ -341,15 +252,14 @@ impl Processor {
             &is_compressed_vec,
         )?;
 
-        // Shared progress counters.
-        // bytes_done = plain bytes read + gz decoded bytes (actual, not estimated).
         let files_done = Arc::new(AtomicUsize::new(0));
         let bytes_done = Arc::new(AtomicU64::new(seeded.bytes_done));
         let lines_done = Arc::new(AtomicU64::new(0));
-        // gz_comp_done / gz_decoded_done let us refine the compression-ratio estimate.
         let gz_comp_done = Arc::new(AtomicU64::new(seeded.gz_comp_done));
         let gz_decoded_done = Arc::new(AtomicU64::new(seeded.gz_decoded_done));
         let checkpoint_last_elapsed = Arc::new(AtomicU64::new(u64::MAX));
+        let current_month_progress: Arc<std::sync::Mutex<String>> =
+            Arc::new(std::sync::Mutex::new(String::new()));
         let progress_enabled = Arc::new(AtomicBool::new(false));
         let pause_progress = Arc::new(AtomicBool::new(false));
         let rendering_progress = Arc::new(AtomicBool::new(false));
@@ -361,6 +271,7 @@ impl Processor {
         let final_gz_comp_done = gz_comp_done.clone();
         let final_gz_decoded_done = gz_decoded_done.clone();
         let final_checkpoint_last_elapsed = checkpoint_last_elapsed.clone();
+        let final_current_month = current_month_progress.clone();
         let final_progress_enabled = progress_enabled.clone();
 
         let progress_thread = self.spawn_progress_thread(
@@ -370,6 +281,7 @@ impl Processor {
             gz_comp_done.clone(),
             gz_decoded_done.clone(),
             checkpoint_last_elapsed.clone(),
+            current_month_progress.clone(),
             progress_enabled.clone(),
             pause_progress.clone(),
             rendering_progress.clone(),
@@ -381,20 +293,18 @@ impl Processor {
             dir_started,
         );
 
-        let result = self.dispatch_parallel_files(
+        progress_enabled.store(true, Ordering::Relaxed);
+
+        let result = self.run_pipeline(
             &files,
-            &raw_file_sizes,
-            &is_compressed_vec,
-            workers,
+            initial_month,
+            files_done,
             bytes_done,
             lines_done,
             gz_comp_done,
             gz_decoded_done,
-            files_done,
             checkpoint_last_elapsed,
-            progress_enabled,
-            pause_progress,
-            rendering_progress,
+            current_month_progress,
             dir_started,
         );
 
@@ -402,6 +312,7 @@ impl Processor {
         let _ = progress_thread.join();
 
         if result.is_ok() && final_progress_enabled.load(Ordering::Relaxed) {
+            let month_snap = final_current_month.lock().unwrap().clone();
             print_dir_progress(
                 final_files_done.load(Ordering::Relaxed),
                 count,
@@ -417,6 +328,7 @@ impl Processor {
                 0.0,
                 self.checkpoint_every.map(|d| d.as_secs()).unwrap_or(0),
                 final_checkpoint_last_elapsed.load(Ordering::Relaxed),
+                &month_snap,
             );
         }
         eprintln!();
@@ -437,315 +349,11 @@ impl Processor {
             total_elapsed, lps
         ));
 
-        // Keep top_* tables bounded, even if no new lines were imported.
-        self.prune_top_tables()?;
+        if self.vacuum_after_prune {
+            self.db.vacuum()?;
+        }
 
         Ok(total)
-    }
-
-    /// Run top-table pruning immediately.
-    pub fn prune_top_tables(&mut self) -> Result<()> {
-        if !self.enable_pruner {
-            logging::log(
-                "Pruner disabled; skipping top-N table pruning (database may grow larger)",
-            );
-            return Ok(());
-        }
-
-        logging::log_debug_at(2, "Pruning top_n tables…");
-        let prune_started = std::time::Instant::now();
-        self.db
-            .trim_top_tables(self.top_n, self.topn_k, true, self.vacuum_after_prune)?;
-        logging::log_debug_at(
-            1,
-            &format!(
-                "Pruning top_n tables complete ({:.2}s)",
-                prune_started.elapsed().as_secs_f64()
-            ),
-        );
-        Ok(())
-    }
-
-    fn process_with_progress(
-        &mut self,
-        filepath: &str,
-        file_num: usize,
-        file_count: usize,
-        plan: FileResumePlan,
-        progress: Option<SharedProgress<'_>>,
-        checkpoint_requested: Option<&AtomicBool>,
-        run_acc: &mut RunAccumulators,
-        pending_parse_states: &mut Vec<ParseStateUpdate>,
-        progress_flush_last: &mut Instant,
-    ) -> Result<ProcessWithProgressResult> {
-        let FileResumePlan {
-            current_inode,
-            stat_size,
-            mtime_ns,
-            compression,
-            offset,
-            mut skip_decoded_prefix_bytes,
-            uncompressed_size,
-            compressed_head_fingerprint,
-            uncompressed_head_fingerprint,
-        } = plan;
-        let is_compressed = compression.is_compressed();
-
-        let total_bytes: Option<u64> = if !is_compressed && stat_size > offset {
-            Some(stat_size - offset)
-        } else {
-            None
-        };
-
-        if false
-            && !is_compressed
-            && self.file_workers > 1
-            && total_bytes.unwrap_or(0) >= RANGE_PARALLEL_MIN_BYTES
-        {
-            logging::log(&format!(
-                "Processing single file in {} parallel ranges",
-                self.file_workers
-            ));
-            logging::log("Range-parallel mode processes file in parallel byte ranges");
-
-            let range_started = Instant::now();
-
-            let (lines_processed, range_acc) =
-                self.process_plain_in_parallel_ranges(filepath, offset, stat_size)?;
-            run_acc.merge_from(range_acc, self.hll_precision, self.topn_k);
-
-            pending_parse_states.push(ParseStateUpdate {
-                filepath: filepath.to_string(),
-                inode: current_inode,
-                compressed_size: 0,
-                uncompressed_size: uncompressed_size.unwrap_or(stat_size),
-                compressed_head_fingerprint: None,
-                uncompressed_head_fingerprint,
-                compressed_offset: 0,
-                uncompressed_offset: stat_size,
-                mtime_ns,
-                completed: true,
-            });
-            let sec = range_started.elapsed().as_secs_f64();
-            let lps = if sec > 0.0 {
-                (lines_processed as f64 / sec).round() as u64
-            } else {
-                0
-            };
-
-            logging::log(&format!(
-                "Processed [{}/{}] {} lines via range parallelism ({:.1}s, {} l/s)",
-                file_num, file_count, lines_processed, sec, lps
-            ));
-            return Ok(ProcessWithProgressResult {
-                lines_processed,
-                file_completed: true,
-            });
-        }
-
-        let mut lines_processed: u64 = 0;
-        let mut bytes_read: u64 = 0;
-        let mut decoded_bytes_read: u64 = 0;
-        let mut reported_bytes: u64 = 0;
-        let mut reported_lines: u64 = 0;
-        let mut checkpoint_ticker: u32 = 2_048;
-        let mut interrupted_for_checkpoint = false;
-        let skipped_decoded_prefix_initial = if is_compressed {
-            skip_decoded_prefix_bytes
-        } else {
-            0
-        };
-
-        // ── Read file ─────────────────────────────────────────────────────────
-        if is_compressed {
-            let file = File::open(filepath)?;
-            let decoder: Box<dyn Read> = match compression {
-                CompressionType::Gz => Box::new(flate2::read::MultiGzDecoder::new(file)),
-                CompressionType::Bz2 => Box::new(bzip2::read::MultiBzDecoder::new(file)),
-                CompressionType::Plain => unreachable!(),
-            };
-            let mut reader = BufReader::with_capacity(1 << 20, decoder);
-            let mut line = String::new();
-            loop {
-                line.clear();
-                let n = reader.read_line(&mut line)?;
-                if n == 0 {
-                    break;
-                }
-                decoded_bytes_read += n as u64;
-                if skip_decoded_prefix_bytes > 0 {
-                    let consumed = (n as u64).min(skip_decoded_prefix_bytes);
-                    skip_decoded_prefix_bytes -= consumed;
-                    if skip_decoded_prefix_bytes > 0 || consumed == n as u64 {
-                        continue;
-                    }
-                }
-                if let Some(entry) = parser::parse_line(&line) {
-                    self.aggregate_entry(
-                        entry,
-                        &mut run_acc.hourly,
-                        &mut run_acc.top_urls,
-                        &mut run_acc.top_urls_bw,
-                        &mut run_acc.top_hosts,
-                        &mut run_acc.top_hosts_bw,
-                        &mut run_acc.top_refs,
-                        &mut run_acc.top_agents,
-                        &mut run_acc.top_countries,
-                        &mut run_acc.status_codes,
-                        &mut run_acc.hll_site_counts,
-                        run_acc.hll_all_time.as_mut(),
-                        &mut run_acc.method_counts,
-                        &mut run_acc.proto_counts,
-                    );
-                    lines_processed += 1;
-                }
-                let current_bytes =
-                    decoded_bytes_read.saturating_sub(skipped_decoded_prefix_initial);
-                flush_shared_progress(
-                    progress.as_ref(),
-                    current_bytes,
-                    lines_processed,
-                    &mut reported_bytes,
-                    &mut reported_lines,
-                    progress_flush_last,
-                    false,
-                    false,
-                );
-                if let Some(requested) = checkpoint_requested {
-                    checkpoint_ticker -= 1;
-                    if checkpoint_ticker == 0 {
-                        checkpoint_ticker = 2_048;
-                        if requested.load(Ordering::Relaxed) {
-                            interrupted_for_checkpoint = true;
-                            break;
-                        }
-                    }
-                }
-            }
-        } else {
-            let mut file = File::open(filepath)?;
-            if offset > 0 {
-                use std::io::Seek;
-                file.seek(std::io::SeekFrom::Start(offset))?;
-            }
-            let mut reader = BufReader::with_capacity(1 << 20, file);
-            let mut line = String::new();
-            loop {
-                line.clear();
-                let n = reader.read_line(&mut line)?;
-                if n == 0 {
-                    break;
-                }
-                bytes_read += n as u64;
-                if let Some(entry) = parser::parse_line(&line) {
-                    self.aggregate_entry(
-                        entry,
-                        &mut run_acc.hourly,
-                        &mut run_acc.top_urls,
-                        &mut run_acc.top_urls_bw,
-                        &mut run_acc.top_hosts,
-                        &mut run_acc.top_hosts_bw,
-                        &mut run_acc.top_refs,
-                        &mut run_acc.top_agents,
-                        &mut run_acc.top_countries,
-                        &mut run_acc.status_codes,
-                        &mut run_acc.hll_site_counts,
-                        run_acc.hll_all_time.as_mut(),
-                        &mut run_acc.method_counts,
-                        &mut run_acc.proto_counts,
-                    );
-                    lines_processed += 1;
-                }
-                let current_bytes = bytes_read;
-                flush_shared_progress(
-                    progress.as_ref(),
-                    current_bytes,
-                    lines_processed,
-                    &mut reported_bytes,
-                    &mut reported_lines,
-                    progress_flush_last,
-                    false,
-                    false,
-                );
-                if let Some(requested) = checkpoint_requested {
-                    checkpoint_ticker -= 1;
-                    if checkpoint_ticker == 0 {
-                        checkpoint_ticker = 2_048;
-                        if requested.load(Ordering::Relaxed) {
-                            interrupted_for_checkpoint = true;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        let final_bytes = if is_compressed {
-            decoded_bytes_read.saturating_sub(skipped_decoded_prefix_initial)
-        } else {
-            bytes_read
-        };
-        let completed = if interrupted_for_checkpoint {
-            false
-        } else if lines_processed > 0 {
-            if is_compressed {
-                true
-            } else {
-                offset + bytes_read >= stat_size
-            }
-        } else {
-            true
-        };
-        flush_shared_progress(
-            progress.as_ref(),
-            final_bytes,
-            lines_processed,
-            &mut reported_bytes,
-            &mut reported_lines,
-            progress_flush_last,
-            true,
-            completed,
-        );
-
-        let new_offset = if is_compressed {
-            if interrupted_for_checkpoint {
-                0
-            } else {
-                stat_size
-            }
-        } else {
-            offset + bytes_read
-        };
-        let new_logical_offset = if is_compressed {
-            decoded_bytes_read
-        } else {
-            new_offset
-        };
-
-        pending_parse_states.push(ParseStateUpdate {
-            filepath: filepath.to_string(),
-            inode: current_inode,
-            compressed_size: if is_compressed { stat_size } else { 0 },
-            uncompressed_size: if is_compressed {
-                new_logical_offset
-            } else {
-                uncompressed_size.unwrap_or(stat_size)
-            },
-            compressed_head_fingerprint: if is_compressed {
-                compressed_head_fingerprint
-            } else {
-                None
-            },
-            uncompressed_head_fingerprint,
-            compressed_offset: if is_compressed { new_offset } else { 0 },
-            uncompressed_offset: new_logical_offset,
-            mtime_ns,
-            completed,
-        });
-        Ok(ProcessWithProgressResult {
-            lines_processed,
-            file_completed: completed,
-        })
     }
 
     #[inline]
@@ -778,8 +386,8 @@ impl Processor {
         };
 
         if let Some(cutoff) = prune_before {
-            self.visit_last_seen.retain(|_, ts| *ts >= cutoff);
-            self.visit_state_dirty.retain(|_, ts| *ts >= cutoff);
+            self.visit_last_seen = self.visit_last_seen.drain().filter(|(_, ts)| *ts >= cutoff).collect();
+            self.visit_state_dirty = self.visit_state_dirty.drain().filter(|(_, ts)| *ts >= cutoff).collect();
         }
 
         let mut updates = Vec::with_capacity(self.visit_state_dirty.len());
@@ -792,6 +400,152 @@ impl Processor {
 
         (updates, prune_before)
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn spawn_progress_thread(
+        &self,
+        files_done: Arc<AtomicUsize>,
+        bytes_done: Arc<AtomicU64>,
+        lines_done: Arc<AtomicU64>,
+        gz_comp_done: Arc<AtomicU64>,
+        gz_decoded_done: Arc<AtomicU64>,
+        checkpoint_last_elapsed: Arc<AtomicU64>,
+        current_month: Arc<std::sync::Mutex<String>>,
+        progress_enabled: Arc<AtomicBool>,
+        pause_progress: Arc<AtomicBool>,
+        rendering_progress: Arc<AtomicBool>,
+        stop_progress: Arc<AtomicBool>,
+        count: usize,
+        seeded_bytes_done: u64,
+        total_plain: u64,
+        total_gz_comp: u64,
+        dir_started: Instant,
+    ) -> std::thread::JoinHandle<()> {
+        let checkpoint_interval_secs = self.checkpoint_every.map(|d| d.as_secs()).unwrap_or(0);
+        std::thread::spawn(move || {
+            const EMA_TAU_SECS: f64 = 30.0;
+            let mut ema_bytes_per_sec: f64 = 0.0;
+            let mut last_tick_bytes: u64 = bytes_done.load(Ordering::Relaxed);
+            let mut last_tick_time = Instant::now();
+
+            while !stop_progress.load(Ordering::Relaxed) {
+                if !progress_enabled.load(Ordering::Relaxed) {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    continue;
+                }
+                if pause_progress.load(Ordering::Relaxed) {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    continue;
+                }
+
+                let now = Instant::now();
+                let current_bytes_done = bytes_done.load(Ordering::Relaxed);
+
+                let dt = now.duration_since(last_tick_time).as_secs_f64();
+                if dt > 0.0 {
+                    let instant_rate =
+                        current_bytes_done.saturating_sub(last_tick_bytes) as f64 / dt;
+                    let alpha = 1.0 - (-dt / EMA_TAU_SECS).exp();
+                    ema_bytes_per_sec = if ema_bytes_per_sec == 0.0 && instant_rate > 0.0 {
+                        instant_rate
+                    } else {
+                        alpha * instant_rate + (1.0 - alpha) * ema_bytes_per_sec
+                    };
+                    last_tick_bytes = current_bytes_done;
+                    last_tick_time = now;
+                }
+
+                let month_snap = current_month.lock().unwrap().clone();
+                rendering_progress.store(true, Ordering::Relaxed);
+                print_dir_progress(
+                    files_done.load(Ordering::Relaxed),
+                    count,
+                    current_bytes_done,
+                    seeded_bytes_done,
+                    total_plain,
+                    total_gz_comp,
+                    gz_comp_done.load(Ordering::Relaxed),
+                    gz_decoded_done.load(Ordering::Relaxed),
+                    lines_done.load(Ordering::Relaxed),
+                    dir_started,
+                    DEFAULT_GZ_RATIO,
+                    ema_bytes_per_sec,
+                    checkpoint_interval_secs,
+                    checkpoint_last_elapsed.load(Ordering::Relaxed),
+                    &month_snap,
+                );
+                rendering_progress.store(false, Ordering::Relaxed);
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        })
+    }
+}
+
+/// Read up to 20 lines of `path` (decompressing if needed) and return the
+/// Unix timestamp of the first parseable log entry, or `None` on failure.
+fn first_line_timestamp(path: &str) -> Option<i64> {
+    use std::io::{BufRead, BufReader};
+
+    let file = std::fs::File::open(path).ok()?;
+    let reader: Box<dyn std::io::Read> = match CompressionType::from_path(path) {
+        CompressionType::Gz => Box::new(flate2::read::MultiGzDecoder::new(file)),
+        CompressionType::Bz2 => Box::new(bzip2::read::MultiBzDecoder::new(file)),
+        CompressionType::Plain => Box::new(file),
+    };
+    let mut buf = BufReader::new(reader);
+    let mut line = String::new();
+    for _ in 0..20 {
+        line.clear();
+        if buf.read_line(&mut line).ok()? == 0 {
+            break;
+        }
+        if let Some(entry) = crate::parser::OwnedLogEntry::parse(line.trim_end_matches('\n').to_string()) {
+            if let Some(ts) = parse_entry_timestamp(entry.time_str(), entry.month_num) {
+                return Some(ts);
+            }
+        }
+    }
+    None
+}
+
+/// Parse a Unix timestamp from a combined-log time string and month number.
+fn parse_entry_timestamp(time_str: &str, mon_num: u8) -> Option<i64> {
+    let b = time_str.as_bytes();
+    if b.len() < 26 {
+        return None;
+    }
+    let day: u32 = std::str::from_utf8(&b[0..2]).ok()?.parse().ok()?;
+    let year: i32 = std::str::from_utf8(&b[7..11]).ok()?.parse().ok()?;
+    let hour: i64 = std::str::from_utf8(&b[12..14]).ok()?.parse().ok()?;
+    let minute: i64 = std::str::from_utf8(&b[15..17]).ok()?.parse().ok()?;
+    let second: i64 = std::str::from_utf8(&b[18..20]).ok()?.parse().ok()?;
+    let sign = b[21];
+    let tz_hour: i64 = std::str::from_utf8(&b[22..24]).ok()?.parse().ok()?;
+    let tz_min: i64 = std::str::from_utf8(&b[24..26]).ok()?.parse().ok()?;
+    let offset = tz_hour * 3600 + tz_min * 60;
+    let offset = match sign {
+        b'+' => offset,
+        b'-' => -offset,
+        _ => return None,
+    };
+    Some(
+        days_from_civil(year, mon_num as u32, day) * 86_400
+            + hour * 3_600
+            + minute * 60
+            + second
+            - offset,
+    )
+}
+
+/// Update a map keeping only the maximum timestamp per key.
+pub(super) fn merge_max(map: &mut AHashMap<VisitStateKey, i64>, key: VisitStateKey, ts: i64) {
+    map.entry(key)
+        .and_modify(|v| {
+            if ts > *v {
+                *v = ts;
+            }
+        })
+        .or_insert(ts);
 }
 
 #[cfg(test)]

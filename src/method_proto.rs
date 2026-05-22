@@ -1,6 +1,3 @@
-use std::sync::Arc;
-
-use ahash::AHashMap;
 
 pub const METHOD_COUNT: usize = 8;
 pub const METHOD_GET: usize = 0;
@@ -25,10 +22,6 @@ pub const PROTO_OTHER: usize = 4;
 
 pub const PROTO_NAMES: [&str; PROTO_COUNT] = ["1.0", "1.1", "2.0", "3.0", "other"];
 
-/// period → per-method hit counts (indexed by METHOD_* constants)
-pub type MethodCountsMap = AHashMap<Arc<str>, [u64; METHOD_COUNT]>;
-/// period → per-proto hit counts (indexed by PROTO_* constants)
-pub type ProtoCountsMap = AHashMap<Arc<str>, [u64; PROTO_COUNT]>;
 
 #[inline]
 pub fn method_index(method: &str) -> usize {

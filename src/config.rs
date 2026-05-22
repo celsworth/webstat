@@ -25,25 +25,10 @@ pub struct Config {
     pub enable_top_refs: bool,
     /// Run SQLite VACUUM after pruning top tables.
     pub vacuum_after_prune: bool,
-    /// When false, top-table pruning is skipped after imports.
-    pub enable_pruner: bool,
     pub bot_filter: bool,
     /// Hostname of the site being analysed; referrers matching this host are
     /// excluded from `top_refs`.
     pub site_host: Option<String>,
-    /// HyperLogLog precision for unique-visitor (Sites) counting.
-    /// Valid range: 4–16 (higher = more accurate, more RAM; precision 14 uses ~16 KiB per period).
-    ///
-    /// WARNING: This value is baked into the HLL register blobs stored in SQLite.
-    /// Changing it on an existing database will cause the new sketches to be incompatible
-    /// with the stored ones and will corrupt unique-visitor counts. Only change this
-    /// before the first `process` run, or after wiping the database.
-    pub hll_precision: u8,
-    /// Space-Saving algorithm capacity (k) for approximate top tables
-    /// (URLs, hosts, referrers, user-agents).
-    /// A higher k improves accuracy at the cost of more memory per period.
-    /// Set to 0 to auto-derive from `top_n × 100` (the default).
-    pub topn_k: usize,
     /// Periodic database checkpoint interval in minutes.
     /// `0` disables checkpointing (flush only at end of run/file).
     pub checkpoint_minutes: u64,
@@ -63,11 +48,8 @@ impl Default for Config {
             enable_top_hosts: true,
             enable_top_refs: true,
             vacuum_after_prune: false,
-            enable_pruner: true,
             bot_filter: true,
             site_host: None,
-            hll_precision: 14,
-            topn_k: 0,
             checkpoint_minutes: 0,
         }
     }

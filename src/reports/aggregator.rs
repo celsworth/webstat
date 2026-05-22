@@ -116,7 +116,7 @@ pub(super) fn monthly_summary(
     let status_codes = status_codes(conn, &period, compact_counts)?;
     let proto_codes = proto_codes(conn, &period, compact_counts)?;
     let method_codes = method_codes(conn, &period, compact_counts)?;
-    let daily_avg_max = daily_avg_max(conn, year, month, compact_counts)?;
+    let daily_avg_max = daily_avg_max_from_rows(&daily, compact_counts);
     let hourly_avg_max = hourly_avg_max(conn, year, month, compact_counts)?;
 
     Ok(MonthlySummary {
@@ -269,6 +269,19 @@ fn daily_stats(
     let prefix = format!("{year:04}-{month:02}");
     let like = format!("{prefix}-%");
 
+    // Batch-fetch daily IP counts in one query instead of one per day.
+    let mut ip_stmt = conn.prepare(
+        "SELECT date, COUNT(*) FROM daily_ip_log WHERE date LIKE ?1 GROUP BY date",
+    )?;
+    let ip_rows = ip_stmt.query_map(params![like], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+    })?;
+    let mut daily_sites: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    for row in ip_rows {
+        let (date, count) = row?;
+        daily_sites.insert(date, count);
+    }
+
     let mut stmt = conn.prepare(
         "SELECT date,
                 SUM(hits) AS hits,
@@ -296,7 +309,7 @@ fn daily_stats(
     let mut out = Vec::new();
     for row in rows.by_ref() {
         let (date, hits, visits, files, pages, bandwidth) = row?;
-        let sites = site_count_for_scope(conn, &date)?;
+        let sites = daily_sites.get(&date).copied().unwrap_or(0);
         out.push(DailyRow {
             is_weekend: is_weekend_date(&date),
             date,
@@ -343,8 +356,7 @@ fn hourly_distribution(
                 SUM(visits) AS visits,
                 SUM(files) AS files,
                 SUM(pages) AS pages,
-                SUM(bandwidth) AS bandwidth,
-                SUM(sites) AS sites
+                SUM(bandwidth) AS bandwidth
          FROM hourly_stats
          WHERE date LIKE ?1
          GROUP BY hour
@@ -359,20 +371,20 @@ fn hourly_distribution(
             row.get::<_, i64>(3)? as u64,
             row.get::<_, i64>(4)? as u64,
             row.get::<_, i64>(5)? as u64,
-            row.get::<_, i64>(6)? as u64,
         ))
     })?;
 
-    let mut by_hour = BTreeMap::<u8, (u64, u64, u64, u64, u64, u64)>::new();
+    let mut by_hour = BTreeMap::<u8, (u64, u64, u64, u64, u64)>::new();
     for row in rows {
-        let (hour, hits, visits, files, pages, bandwidth, sites) = row?;
-        by_hour.insert(hour, (hits, visits, files, pages, bandwidth, sites));
+        let (hour, hits, visits, files, pages, bandwidth) = row?;
+        by_hour.insert(hour, (hits, visits, files, pages, bandwidth));
     }
 
     let mut out = Vec::with_capacity(24);
     for hour in 0u8..24u8 {
-        let (hits, visits, files, pages, bandwidth, sites) =
-            by_hour.get(&hour).copied().unwrap_or((0, 0, 0, 0, 0, 0));
+        let (hits, visits, files, pages, bandwidth) =
+            by_hour.get(&hour).copied().unwrap_or((0, 0, 0, 0, 0));
+        let sites = 0u64;
         out.push(HourlyRow {
             hour,
             label: format!("{hour:02}:00"),
@@ -410,7 +422,6 @@ fn monthly_totals(
         "SELECT COALESCE(SUM(hits), 0),
                 COALESCE(SUM(visits), 0),
                 COALESCE(SUM(files), 0),
-                COALESCE(SUM(sites), 0),
                 COALESCE(SUM(pages), 0),
                 COALESCE(SUM(bandwidth), 0)
          FROM hourly_stats
@@ -424,7 +435,6 @@ fn monthly_totals(
             row.get::<_, i64>(2)? as u64,
             row.get::<_, i64>(3)? as u64,
             row.get::<_, i64>(4)? as u64,
-            row.get::<_, i64>(5)? as u64,
         ))
     })?;
 
@@ -435,8 +445,8 @@ fn monthly_totals(
         row.1,
         row.2,
         sites,
+        row.3,
         row.4,
-        row.5,
         compact_counts,
     ))
 }
@@ -446,7 +456,6 @@ fn yearly_totals(conn: &Connection, year: i32, compact_counts: bool) -> Result<T
         "SELECT COALESCE(SUM(hits), 0),
                 COALESCE(SUM(visits), 0),
                 COALESCE(SUM(files), 0),
-                COALESCE(SUM(sites), 0),
                 COALESCE(SUM(pages), 0),
                 COALESCE(SUM(bandwidth), 0)
          FROM hourly_stats
@@ -460,7 +469,6 @@ fn yearly_totals(conn: &Connection, year: i32, compact_counts: bool) -> Result<T
             row.get::<_, i64>(2)? as u64,
             row.get::<_, i64>(3)? as u64,
             row.get::<_, i64>(4)? as u64,
-            row.get::<_, i64>(5)? as u64,
         ))
     })?;
 
@@ -471,8 +479,8 @@ fn yearly_totals(conn: &Connection, year: i32, compact_counts: bool) -> Result<T
         row.1,
         row.2,
         sites,
+        row.3,
         row.4,
-        row.5,
         compact_counts,
     ))
 }
@@ -631,60 +639,33 @@ fn overall_totals(conn: &Connection, compact_counts: bool) -> Result<TotalsView>
 }
 
 fn site_count_for_scope(conn: &Connection, scope: &str) -> Result<u64> {
-    // Try HLL estimate first
-    let mut hll_stmt = conn.prepare(
-        "SELECT estimate
-         FROM site_counts_hll
-         WHERE scope = ?1",
-    )?;
-    let stored = hll_stmt.query_row(params![scope], |row| row.get::<_, i64>(0));
-    match stored {
-        Ok(sites) => return Ok(sites as u64),
-        Err(rusqlite::Error::QueryReturnedNoRows) => {}
-        Err(err) => return Err(err.into()),
+    match scope.len() {
+        10 => {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM daily_ip_log WHERE date = ?1",
+                params![scope],
+                |row| row.get(0),
+            )?;
+            Ok(count as u64)
+        }
+        7 | 4 => {
+            // Use precomputed cache written by finalize_month; falls back to 0
+            // for in-progress months that haven't been finalized yet.
+            let count: i64 = conn.query_row(
+                "SELECT COALESCE((SELECT count FROM site_count_cache WHERE period = ?1), 0)",
+                params![scope],
+                |row| row.get(0),
+            )?;
+            Ok(count as u64)
+        }
+        _ => Ok(0),
     }
-
-    // Fallback to top_hosts_hits count for scopes that don't have HLL yet
-    let mut fallback = conn.prepare(
-        "SELECT COUNT(*)
-            FROM top_hosts_hits
-         WHERE period = ?1",
-    )?;
-    let sites = fallback.query_row(params![scope], |row| row.get::<_, i64>(0))? as u64;
-    Ok(sites)
 }
 
 fn all_time_site_count(conn: &Connection) -> Result<u64> {
-    // Try HLL estimate first
-    let mut stmt = conn.prepare(
-        "SELECT estimate
-         FROM site_counts_hll
-         WHERE scope = '__all__'",
-    )?;
-    let stored = stmt.query_row([], |row| row.get::<_, i64>(0));
-    match stored {
-        Ok(sites) => return Ok(sites as u64),
-        Err(rusqlite::Error::QueryReturnedNoRows) => {}
-        Err(err) => return Err(err.into()),
-    }
-
-    // Fallback to all_time_hosts count
-    let mut stmt = conn.prepare("SELECT COUNT(*) FROM all_time_hosts")?;
-    let sites = stmt.query_row([], |row| row.get::<_, i64>(0))? as u64;
-    if sites > 0 {
-        return Ok(sites);
-    }
-
-    // Final fallback to top_hosts_hits
-    let mut fallback = conn.prepare(
-        "SELECT COUNT(*) FROM (
-             SELECT host_kind, host_hi, host_lo, host_text
-             FROM top_hosts_hits
-             GROUP BY host_kind, host_hi, host_lo, host_text
-         )",
-    )?;
-    let fallback_sites = fallback.query_row([], |row| row.get::<_, i64>(0))?;
-    Ok(fallback_sites as u64)
+    let count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM all_time_hosts", [], |row| row.get(0))?;
+    Ok(count as u64)
 }
 
 fn top_urls_hits(
@@ -693,7 +674,7 @@ fn top_urls_hits(
     top_n: usize,
     compact_counts: bool,
 ) -> Result<Vec<TopUrlRow>> {
-    top_urls_from_table(conn, "top_urls_hits", period, top_n, compact_counts, "hits")
+    top_urls_from_table(conn, "monthly_urls_hits", period, top_n, compact_counts, "hits")
 }
 
 fn top_urls_bandwidth(
@@ -704,7 +685,7 @@ fn top_urls_bandwidth(
 ) -> Result<Vec<TopUrlRow>> {
     top_urls_from_table(
         conn,
-        "top_urls_bandwidth",
+        "monthly_urls_bandwidth",
         period,
         top_n,
         compact_counts,
@@ -720,15 +701,33 @@ fn top_urls_from_table(
     compact_counts: bool,
     order_metric: &str,
 ) -> Result<Vec<TopUrlRow>> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT url, hits, bandwidth
-         FROM {table}
-         WHERE period = ?1
-         ORDER BY {order_metric} DESC, hits DESC
-         LIMIT ?2"
-    ))?;
+    let (sql, period_param) = if period.len() == 7 {
+        (
+            format!(
+                "SELECT url, hits, bandwidth
+                 FROM {table}
+                 WHERE period = ?1
+                 ORDER BY {order_metric} DESC, hits DESC
+                 LIMIT ?2"
+            ),
+            period.to_string(),
+        )
+    } else {
+        (
+            format!(
+                "SELECT url, SUM(hits) AS hits, SUM(bandwidth) AS bandwidth
+                 FROM {table}
+                 WHERE period LIKE ?1
+                 GROUP BY url
+                 ORDER BY {order_metric} DESC, hits DESC
+                 LIMIT ?2"
+            ),
+            format!("{}-%", period),
+        )
+    };
+    let mut stmt = conn.prepare(&sql)?;
 
-    let rows = stmt.query_map(params![period, top_n as i64], |row| {
+    let rows = stmt.query_map(params![period_param, top_n as i64], |row| {
         Ok(TopUrlRow {
             url: row.get::<_, String>(0)?,
             hits: row.get::<_, i64>(1)? as u64,
@@ -759,7 +758,7 @@ fn top_sites_hits(
 ) -> Result<Vec<TopHostRow>> {
     top_sites_from_table(
         conn,
-        "top_hosts_hits",
+        "monthly_hosts_hits",
         period,
         top_n,
         compact_counts,
@@ -775,7 +774,7 @@ fn top_sites_bandwidth(
 ) -> Result<Vec<TopHostRow>> {
     top_sites_from_table(
         conn,
-        "top_hosts_bandwidth",
+        "monthly_hosts_bandwidth",
         period,
         top_n,
         compact_counts,
@@ -791,23 +790,41 @@ fn top_sites_from_table(
     compact_counts: bool,
     order_metric: &str,
 ) -> Result<Vec<TopHostRow>> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT t.host_kind,
-            t.host_hi,
-            t.host_lo,
-            t.host_text,
-            t.hits,
-            t.bandwidth,
-            COALESCE(t.country_code, '--'),
-            COALESCE(cn.country_name, 'Unknown')
-         FROM {table} t
-         LEFT JOIN country_code_names cn ON cn.country_code = t.country_code
-         WHERE t.period = ?1
-         ORDER BY {order_metric} DESC, hits DESC
-         LIMIT ?2"
-    ))?;
+    let (sql, period_param) = if period.len() == 7 {
+        (
+            format!(
+                "SELECT t.host_kind, t.host_hi, t.host_lo, t.host_text,
+                        t.hits, t.bandwidth,
+                        COALESCE(t.country_code, '--'),
+                        COALESCE(cn.country_name, 'Unknown')
+                 FROM {table} t
+                 LEFT JOIN country_code_names cn ON cn.country_code = t.country_code
+                 WHERE t.period = ?1
+                 ORDER BY {order_metric} DESC, t.hits DESC
+                 LIMIT ?2"
+            ),
+            period.to_string(),
+        )
+    } else {
+        (
+            format!(
+                "SELECT t.host_kind, t.host_hi, t.host_lo, t.host_text,
+                        SUM(t.hits) AS hits, SUM(t.bandwidth) AS bandwidth,
+                        COALESCE(MAX(t.country_code), '--'),
+                        COALESCE(MAX(cn.country_name), 'Unknown')
+                 FROM {table} t
+                 LEFT JOIN country_code_names cn ON cn.country_code = t.country_code
+                 WHERE t.period LIKE ?1
+                 GROUP BY t.host_kind, t.host_hi, t.host_lo, t.host_text
+                 ORDER BY {order_metric} DESC, hits DESC
+                 LIMIT ?2"
+            ),
+            format!("{}-%", period),
+        )
+    };
+    let mut stmt = conn.prepare(&sql)?;
 
-    let rows = stmt.query_map(params![period, top_n as i64], |row| {
+    let rows = stmt.query_map(params![period_param, top_n as i64], |row| {
         let host_kind = row.get::<_, i64>(0)? as u8;
         let host_hi = row.get::<_, i64>(1)? as u64;
         let host_lo = row.get::<_, i64>(2)? as u64;
@@ -867,15 +884,31 @@ fn top_refs(
     top_n: usize,
     compact_counts: bool,
 ) -> Result<Vec<TopRefRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT referrer, hits
-         FROM top_refs
-         WHERE period = ?1
-         ORDER BY hits DESC
-         LIMIT ?2",
-    )?;
+    let (sql, period_param) = if period.len() == 7 {
+        (
+            "SELECT referrer, hits
+             FROM monthly_refs
+             WHERE period = ?1
+             ORDER BY hits DESC
+             LIMIT ?2"
+                .to_string(),
+            period.to_string(),
+        )
+    } else {
+        (
+            "SELECT referrer, SUM(hits) AS hits
+             FROM monthly_refs
+             WHERE period LIKE ?1
+             GROUP BY referrer
+             ORDER BY hits DESC
+             LIMIT ?2"
+                .to_string(),
+            format!("{}-%", period),
+        )
+    };
+    let mut stmt = conn.prepare(&sql)?;
 
-    let rows = stmt.query_map(params![period, top_n as i64], |row| {
+    let rows = stmt.query_map(params![period_param, top_n as i64], |row| {
         Ok(TopRefRow {
             referrer: row.get::<_, String>(0)?,
             hits: row.get::<_, i64>(1)? as u64,
@@ -896,15 +929,31 @@ fn top_refs(
 }
 
 fn top_agents_raw(conn: &Connection, period: &str, top_n: usize) -> Result<Vec<(String, u64)>> {
-    let mut stmt = conn.prepare(
-        "SELECT agent_family, hits
-         FROM top_agents
-         WHERE period = ?1
-         ORDER BY hits DESC
-         LIMIT ?2",
-    )?;
+    let (sql, period_param) = if period.len() == 7 {
+        (
+            "SELECT agent_family, hits
+             FROM monthly_agents
+             WHERE period = ?1
+             ORDER BY hits DESC
+             LIMIT ?2"
+                .to_string(),
+            period.to_string(),
+        )
+    } else {
+        (
+            "SELECT agent_family, SUM(hits) AS hits
+             FROM monthly_agents
+             WHERE period LIKE ?1
+             GROUP BY agent_family
+             ORDER BY hits DESC
+             LIMIT ?2"
+                .to_string(),
+            format!("{}-%", period),
+        )
+    };
+    let mut stmt = conn.prepare(&sql)?;
 
-    let rows = stmt.query_map(params![period, top_n as i64], |row| {
+    let rows = stmt.query_map(params![period_param, top_n as i64], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
     })?;
 
@@ -918,8 +967,7 @@ fn top_agents_raw(conn: &Connection, period: &str, top_n: usize) -> Result<Vec<(
 fn top_agents_all_raw(conn: &Connection, top_n: usize) -> Result<Vec<(String, u64)>> {
     let mut stmt = conn.prepare(
         "SELECT agent_family, SUM(hits) AS hits
-         FROM top_agents
-         WHERE LENGTH(period) = 4
+         FROM monthly_agents
          GROUP BY agent_family
          ORDER BY hits DESC
          LIMIT ?1",
@@ -972,7 +1020,6 @@ fn top_countries_all_raw(conn: &Connection, limit: usize) -> Result<Vec<(String,
         "WITH country_hits AS (
              SELECT country_code, SUM(hits) AS hits
              FROM top_countries
-             WHERE LENGTH(period) = 4
              GROUP BY country_code
          )
          SELECT h.country_code,
@@ -1037,7 +1084,6 @@ fn status_codes_all(conn: &Connection, compact_counts: bool) -> Result<Vec<Statu
     let mut stmt = conn.prepare(
         "SELECT status, SUM(hits) AS hits
          FROM status_codes
-         WHERE LENGTH(period) = 4
          GROUP BY status
          ORDER BY hits DESC",
     )?;
@@ -1134,33 +1180,27 @@ fn method_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result
     Ok(out)
 }
 
-fn daily_avg_max(
-    conn: &Connection,
-    year: i32,
-    month: i32,
-    compact_counts: bool,
-) -> Result<DailyAvgMax> {
-    let daily = daily_stats(conn, year, month, compact_counts)?;
+fn daily_avg_max_from_rows(daily: &[DailyRow], compact_counts: bool) -> DailyAvgMax {
     if daily.is_empty() {
-        return Ok(DailyAvgMax::default());
+        return DailyAvgMax::default();
     }
 
     let days = daily.len() as u64;
 
-    let avg_hits = daily.iter().map(|row| row.hits).sum::<u64>() / days;
-    let max_hits = daily.iter().map(|row| row.hits).max().unwrap_or(0);
-    let avg_visits = daily.iter().map(|row| row.visits).sum::<u64>() / days;
-    let max_visits = daily.iter().map(|row| row.visits).max().unwrap_or(0);
-    let avg_files = daily.iter().map(|row| row.files).sum::<u64>() / days;
-    let max_files = daily.iter().map(|row| row.files).max().unwrap_or(0);
-    let avg_pages = daily.iter().map(|row| row.pages).sum::<u64>() / days;
-    let max_pages = daily.iter().map(|row| row.pages).max().unwrap_or(0);
-    let avg_sites = daily.iter().map(|row| row.sites).sum::<u64>() / days;
-    let max_sites = daily.iter().map(|row| row.sites).max().unwrap_or(0);
-    let avg_bandwidth = daily.iter().map(|row| row.bandwidth).sum::<u64>() / days;
-    let max_bandwidth = daily.iter().map(|row| row.bandwidth).max().unwrap_or(0);
+    let avg_hits = daily.iter().map(|r| r.hits).sum::<u64>() / days;
+    let max_hits = daily.iter().map(|r| r.hits).max().unwrap_or(0);
+    let avg_visits = daily.iter().map(|r| r.visits).sum::<u64>() / days;
+    let max_visits = daily.iter().map(|r| r.visits).max().unwrap_or(0);
+    let avg_files = daily.iter().map(|r| r.files).sum::<u64>() / days;
+    let max_files = daily.iter().map(|r| r.files).max().unwrap_or(0);
+    let avg_pages = daily.iter().map(|r| r.pages).sum::<u64>() / days;
+    let max_pages = daily.iter().map(|r| r.pages).max().unwrap_or(0);
+    let avg_sites = daily.iter().map(|r| r.sites).sum::<u64>() / days;
+    let max_sites = daily.iter().map(|r| r.sites).max().unwrap_or(0);
+    let avg_bandwidth = daily.iter().map(|r| r.bandwidth).sum::<u64>() / days;
+    let max_bandwidth = daily.iter().map(|r| r.bandwidth).max().unwrap_or(0);
 
-    Ok(DailyAvgMax {
+    DailyAvgMax {
         avg_hits,
         max_hits,
         avg_hits_fmt: count_fmt(avg_hits, compact_counts),
@@ -1195,7 +1235,7 @@ fn daily_avg_max(
         max_bandwidth,
         avg_bandwidth_fmt: format_bytes(avg_bandwidth),
         max_bandwidth_fmt: format_bytes(max_bandwidth),
-    })
+    }
 }
 
 fn hourly_avg_max(

@@ -4,6 +4,31 @@ Webstat is a single-binary Rust web log analyzer, inspired by Webalizer.
 
 It parses nginx access logs incrementally into SQLite, then generates static HTML reports from that database using Tera templates and Chart.js.
 
+## Program Flow
+
+### `process` command
+
+- Parse CLI args and load config — `src/main.rs`, `src/config.rs`
+- Initialise logging (verbosity globals) — `src/logging.rs`
+- Open SQLite database and initialise schema — `src/database.rs`
+- Expand glob patterns into a file list, sort by first-line timestamp — `src/processor.rs` (`process_globs`)
+- For each file, fingerprint it and decide what to skip/resume — `src/fingerprint.rs`, `src/processor/resume_policy.rs`
+- Seed initial progress counters from already-processed offsets — `src/processor/progress_seed.rs`
+- Spawn a progress display thread — `src/processor.rs`, `src/progress.rs`
+- Run the 3-stage pipeline — `src/processor/pipeline.rs`:
+  - **Loader thread** — reads raw bytes, decompresses if needed, emits line batches — `src/processor/loader.rs`, `src/compression.rs`
+  - **Parser thread** — parses combined-log-format lines into structured entries, runs UA classification and bot filtering; bots are dropped here — `src/processor/parser_stage.rs`, `src/parser.rs`, `src/ua.rs`
+  - **Aggregator (main thread)** — consumes `ParsedEntry` values, updates in-memory accumulators, detects month boundaries and triggers `finalize_month` — `src/processor/aggregation.rs`, `src/processor/flush.rs`, `src/geo.rs`
+- On month finalisation: prune top-N tables to `top_n` rows, compute and cache unique-IP counts — `src/database/writer.rs`
+- Flush accumulators to SQLite at checkpoints and on completion — `src/processor/flush.rs`, `src/database.rs`
+- Update per-file parse state for resume tracking — `src/database.rs`
+
+### `generate` command
+
+- Query aggregated data from SQLite — `src/database.rs`
+- Render Tera templates into static HTML — `src/reports.rs`
+- Write HTML and copy bundled assets to `output_dir` — `src/reports.rs`
+
 ## Repository Layout
 
 - `src/` Rust source (ingestion, aggregation, report rendering)
@@ -44,7 +69,6 @@ Binary path:
   --output-dir /var/www/webstat \
   --site-name "My Site" \
   -v
-
 ```
 
 Global flags:
@@ -62,10 +86,7 @@ Global flags:
 - `--file-workers <N>`
 - `--checkpoint-minutes <N>` (`0` disables periodic checkpoints)
 - `--top-n <N>`
-- `--topn-k <N>` (`0` means auto from `top_n × 100`)
-- `--hll-precision <4..16>`
 - `--vacuum-after-prune <true|false>`
-- `--enable-pruner <true|false>`
 - `--enable-top-urls <true|false>`
 - `--enable-top-hosts <true|false>`
 - `--enable-top-refs <true|false>`
@@ -97,54 +118,35 @@ cp webstat.yml.example webstat.yml
 
 - **`geoip_db`** — Path to MaxMind GeoLite2-Country `.mmdb` file. Leave unset to skip GeoIP lookups. Can be relative.
 
-- **`file_workers`** — Number of parallel worker threads for processing multiple log files. Default: `1`.
-  - Set to `2`–`4` for faster multi-file ingestion (e.g., in `log_dir` mode).
-  - Increases memory use; benchmark on your machine.
+- **`file_workers`** — Number of parallel worker threads. Default: `1`. (Multi-file parallel dispatch is not yet wired; this setting is accepted but currently has no effect.)
 
 - **`checkpoint_minutes`** — Periodic SQLite checkpoint interval in minutes. Default: `0` (disabled).
   - Set to a positive value to flush partial aggregates and parse progress during long runs.
   - Helps reduce lost work if processing is interrupted.
 
 - **`top_n`** — Number of rows to keep in top-N tables (URLs, hosts, referrers, agents, countries). Default: `20`.
-  - Smaller values reduce DB size; larger values preserve more history for reports.
-
-- **`topn_k`** — Space-Saving algorithm capacity (k) for approximate top tables (URLs, hosts, referrers, user-agents). Default: `0` (auto-derives as `top_n × 100`).
-  - Higher values improve accuracy at the cost of more in-memory sketch size per period. The default is already conservative; most deployments can leave this unset.
+  - When a month is finalised, each top-N table is pruned to this many rows per period.
 
 - **`vacuum_after_prune`** — Run `VACUUM` on the database after pruning old top-N rows. Default: `false`.
   - Reclaims disk space but is expensive on large databases.
 
-- **`enable_pruner`** — Enable top-N table pruning after imports. Default: `true`.
-  - Set to `false` during initial backfills when data cannot be imported strictly in date order.
-  - Disabling pruning can significantly increase SQLite database size.
-
-- **`bot_filter`** — Exclude known bots/crawlers from primary statistics. Default: `true`.
-  - Bots are still recorded but in separate tracking; reports focus on human traffic.
+- **`bot_filter`** — Exclude known bots/crawlers from all statistics. Default: `true`.
+  - Bot detection runs in the parser thread; filtered entries are discarded before reaching the aggregator and are not counted anywhere.
 
 - **`enable_top_urls`** — Enable tracking of top URLs. Default: `true`.
-  - Set to `false` to skip URL heavy-hitter tracking and reduce processing CPU/memory if you do not use top-URLs reports.
 
 - **`enable_top_hosts`** — Enable tracking of top hosts/IPs. Default: `true`.
-  - Set to `false` to skip host heavy-hitter tracking and reduce processing CPU/memory if host ranking is not needed.
 
 - **`enable_top_refs`** — Enable tracking of top referrers. Default: `true`.
-  - Set to `false` to skip referrer heavy-hitter tracking and reduce processing CPU/memory if referrer analysis is not important.
 
 - **`site_host`** — Hostname of the site (e.g., `"example.com"`). Optional.
-  - If set, referrers matching this host are excluded from `top_refs` to reduce noise.
-
-- **`hll_precision`** — HyperLogLog precision for unique-visitor (Sites) counting. Valid range: 4–16. Default: `14` (~16 KiB RAM per period, ~1–2% typical error).
-  - Higher values reduce error but increase memory and SQLite blob size.
-  - **WARNING:** This value is baked into the HLL register blobs stored in SQLite. Do **not** change it on an existing database — doing so corrupts unique-visitor counts. Only set this before the first `process` run, or after wiping the database.
-
+  - If set, referrers matching this host are excluded from `top_refs`.
 
 ### Backfill Order Requirement
 
 If you are doing the initial population of a new database across multiple import runs, run those imports strictly in date order (oldest to newest).
 
-Out-of-order backfills can cause pruning and period snapshot behavior to retain or freeze the wrong periods, which can produce unexpected aggregates.
-
-If strict ordering is not possible, set `enable_pruner: false` (or pass `--enable-pruner false`) during initial imports, then re-enable pruning afterwards. Note that this can significantly increase SQLite database size while pruning is disabled.
+Out-of-order backfills can cause period snapshot behavior to retain or freeze the wrong periods, which can produce unexpected aggregates.
 
 ### File Change Detection
 
@@ -152,8 +154,8 @@ Webstat makes significant efforts not to re-import duplicates. To do this, it tr
 
 - `inode` is the primary identity signal. If the same inode appears under a new name (file rename), Webstat treats it as the same stream and does not reprocess it.
 - `file_size` and `mtime_ns` are stored for the last processed view of the file.
-- A head fingerprint and a tail fingerprint are stored from the content stream using first/last 8 KiB samples.
-  For plain logs this is raw file bytes; for `.gz` logs this is decompressed bytes.
+- A head fingerprint is stored from the content stream using first 8 KiB samples.
+  For plain logs this is raw file bytes; for `.gz`/`.bz2` logs this is decompressed bytes.
 - A content fingerprint is stored when a file is fully processed, which allows exact skip of already-seen content.
 
 For plain text logs:
@@ -176,9 +178,7 @@ log_glob: logs/access.log,logs/access.log.*
 database: webstat.db
 output_dir: output
 geoip_db: GeoLite2-Country.mmdb
-file_workers: 2
 top_n: 20
-enable_pruner: true
 bot_filter: true
 ```
 
@@ -190,23 +190,18 @@ bot_filter: true
 
 ## Assumptions and Limitations
 
-### Unique visitor counts are approximate
+### Unique visitor counts are exact
 
-Unique visitor counts (displayed as "Sites" in reports) are estimated using a custom [HyperLogLog](https://algo.inria.fr/flajolet/Publications/FlFuGaMe07.pdf) sketch per time period, stored as a compact byte blob in SQLite. HLL is a probabilistic cardinality estimator: it uses a small fixed amount of memory (16 KiB at precision 14) regardless of traffic volume, at the cost of a typical error rate of around 1–2%. The estimates are unbiased — they are equally likely to be slightly high as slightly low — and are accurate enough for web analytics purposes.
+Unique visitor counts (displayed as "Sites" in reports) are counted exactly. Every unique IP address seen on a given day is recorded in the `daily_ip_log` table; the composite primary key `(date, ip_kind, ip_hi, ip_lo)` deduplicates naturally via `INSERT OR IGNORE`. Monthly and yearly unique-IP counts are precomputed into `site_count_cache` using `SELECT DISTINCT` when each month is finalised.
 
-The sketches are mergeable: per-day sketches are combined into monthly and yearly counts without re-reading raw IP data.
+IPv4 and IPv6 addresses are stored in decomposed numeric form (`ip_hi`/`ip_lo` as integers), not as text, for efficient deduplication and compact storage.
 
 ### Visits Metric Tradeoff
 
 Webstat defines a visit using a 30-minute inactivity window per remote host.
 
-To preserve multi-file parsing throughput, visit continuity is tracked within each processed file stream and is not stitched across different files. This means a single visit that crosses a logfile boundary may be counted as two visits.
+Visit state is loaded from SQLite at the start of each run and written back on completion. This means visit continuity is correctly maintained across separate process invocations, but a single visit that crosses a logfile boundary within a single run may be counted as two visits if files are not processed in strict chronological order.
 
-This is an intentional speed-vs-accuracy tradeoff for multi-file parallel ingestion and in practise shouldn't matter much.
+### Top tables
 
-### Top tables and approximation
-
-URL, hostname, referrer, and user-agent tables are maintained using the [Space-Saving algorithm](https://www.cs.ucsb.edu/research/tech-reports/2005-23) (also known as the "frequent items" algorithm). Space-Saving guarantees that every item whose true count exceeds `1/k` of the total is tracked, and that stored counts overestimate true counts by at most `ε × N` where `ε = 1/k` and `N` is the stream length. In practice the overcount is tiny and the top items are exact. The only approximation is at the margins: items near the eviction threshold may be slightly over- or under-counted relative to one another.
-
-The capacity `k` defaults to `top_n × 100`, and can be adjusted in the config.
-
+URL, hostname, referrer, user-agent, and country tables accumulate exact counts during ingestion. When a month is finalised, each table is pruned to the `top_n` highest-count rows for that period. Items outside the top N are discarded at finalisation time and are not recoverable.

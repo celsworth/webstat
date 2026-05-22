@@ -1,24 +1,13 @@
 use std::net::IpAddr;
-use std::sync::Arc;
 use std::time::Duration;
 
-use ahash::{AHashMap, AHashSet};
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
-
-use crate::hll::HyperLogLog;
-use crate::method_proto::{MethodCountsMap, ProtoCountsMap};
-#[cfg(test)]
-use crate::topn::TopNHosts;
-use crate::topn::{
-    CountryHitsMap, HourlyMap, PeriodCountMap, StatusHitsMap, TopHostsByBandwidth, TopHostsByHits,
-    TopUrlsByBandwidth, TopUrlsByHits,
-};
 
 mod maintenance;
 mod parse_state;
 mod visit_state;
-mod writer;
+pub(crate) mod writer;
 
 #[derive(Debug, Clone)]
 pub struct ParseState {
@@ -94,70 +83,54 @@ CREATE TABLE IF NOT EXISTS hourly_stats (
     status_3xx INTEGER DEFAULT 0,
     status_4xx INTEGER DEFAULT 0,
     status_5xx INTEGER DEFAULT 0,
-    sites      INTEGER DEFAULT 0,
     PRIMARY KEY (date, hour)
 );
-CREATE TABLE IF NOT EXISTS top_urls_hits (
-    period    TEXT,
-    url       TEXT,
-    hits      INTEGER DEFAULT 0,
-    bandwidth INTEGER DEFAULT 0,
+CREATE TABLE IF NOT EXISTS monthly_urls_hits (
+    period    TEXT NOT NULL,
+    url       TEXT NOT NULL,
+    hits      INTEGER NOT NULL DEFAULT 0,
+    bandwidth INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, url)
 );
-CREATE TABLE IF NOT EXISTS top_urls_bandwidth (
-    period    TEXT,
-    url       TEXT,
-    hits      INTEGER DEFAULT 0,
-    bandwidth INTEGER DEFAULT 0,
+CREATE TABLE IF NOT EXISTS monthly_urls_bandwidth (
+    period    TEXT NOT NULL,
+    url       TEXT NOT NULL,
+    hits      INTEGER NOT NULL DEFAULT 0,
+    bandwidth INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, url)
 );
-CREATE TABLE IF NOT EXISTS top_hosts (
-    period       TEXT,
+CREATE TABLE IF NOT EXISTS monthly_hosts_hits (
+    period       TEXT    NOT NULL,
     host_kind    INTEGER NOT NULL,
     host_hi      INTEGER NOT NULL,
     host_lo      INTEGER NOT NULL,
     host_text    TEXT    NOT NULL DEFAULT '',
-    hits         INTEGER DEFAULT 0,
-    bandwidth    INTEGER DEFAULT 0,
-    country_code TEXT    DEFAULT '--',
+    hits         INTEGER NOT NULL DEFAULT 0,
+    bandwidth    INTEGER NOT NULL DEFAULT 0,
+    country_code TEXT    NOT NULL DEFAULT '--',
     PRIMARY KEY (period, host_kind, host_hi, host_lo, host_text)
 );
-CREATE TABLE IF NOT EXISTS top_hosts_hits (
-    period       TEXT,
+CREATE TABLE IF NOT EXISTS monthly_hosts_bandwidth (
+    period       TEXT    NOT NULL,
     host_kind    INTEGER NOT NULL,
     host_hi      INTEGER NOT NULL,
     host_lo      INTEGER NOT NULL,
     host_text    TEXT    NOT NULL DEFAULT '',
-    hits         INTEGER DEFAULT 0,
-    bandwidth    INTEGER DEFAULT 0,
-    country_code TEXT    DEFAULT '--',
+    hits         INTEGER NOT NULL DEFAULT 0,
+    bandwidth    INTEGER NOT NULL DEFAULT 0,
+    country_code TEXT    NOT NULL DEFAULT '--',
     PRIMARY KEY (period, host_kind, host_hi, host_lo, host_text)
 );
-CREATE TABLE IF NOT EXISTS top_hosts_bandwidth (
-    period       TEXT,
-    host_kind    INTEGER NOT NULL,
-    host_hi      INTEGER NOT NULL,
-    host_lo      INTEGER NOT NULL,
-    host_text    TEXT    NOT NULL DEFAULT '',
-    hits         INTEGER DEFAULT 0,
-    bandwidth    INTEGER DEFAULT 0,
-    country_code TEXT    DEFAULT '--',
-    PRIMARY KEY (period, host_kind, host_hi, host_lo, host_text)
-);
-CREATE TABLE IF NOT EXISTS country_code_names (
-    country_code TEXT PRIMARY KEY,
-    country_name TEXT NOT NULL DEFAULT 'Unknown'
-);
-CREATE TABLE IF NOT EXISTS top_refs (
-    period   TEXT,
-    referrer TEXT,
-    hits     INTEGER DEFAULT 0,
+CREATE TABLE IF NOT EXISTS monthly_refs (
+    period   TEXT NOT NULL,
+    referrer TEXT NOT NULL,
+    hits     INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, referrer)
 );
-CREATE TABLE IF NOT EXISTS top_agents (
-    period       TEXT,
-    agent_family TEXT,
-    hits         INTEGER DEFAULT 0,
+CREATE TABLE IF NOT EXISTS monthly_agents (
+    period       TEXT NOT NULL,
+    agent_family TEXT NOT NULL,
+    hits         INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, agent_family)
 );
 CREATE TABLE IF NOT EXISTS top_countries (
@@ -184,11 +157,25 @@ CREATE TABLE IF NOT EXISTS proto_counts (
     hits   INTEGER DEFAULT 0,
     PRIMARY KEY (period, proto)
 );
-
-CREATE TABLE IF NOT EXISTS site_counts_hll (
-    scope    TEXT PRIMARY KEY,
-    estimate INTEGER DEFAULT 0,
-    sketch   BLOB NOT NULL
+CREATE TABLE IF NOT EXISTS daily_ip_log (
+    date     TEXT    NOT NULL,
+    ip_kind  INTEGER NOT NULL,
+    ip_hi    INTEGER NOT NULL,
+    ip_lo    INTEGER NOT NULL,
+    PRIMARY KEY (date, ip_kind, ip_hi, ip_lo)
+);
+CREATE INDEX IF NOT EXISTS daily_ip_log_date ON daily_ip_log (date);
+CREATE TABLE IF NOT EXISTS site_count_cache (
+    period TEXT PRIMARY KEY,
+    count  INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS country_code_names (
+    country_code TEXT PRIMARY KEY,
+    country_name TEXT NOT NULL DEFAULT 'Unknown'
 );
 CREATE TABLE IF NOT EXISTS all_time_hosts (
     host_kind INTEGER NOT NULL,
@@ -261,23 +248,43 @@ impl Database {
         Ok(db)
     }
 
-    // ── Schema management ─────────────────────────────────────────────────────
-
     fn apply_schema(&mut self) -> Result<()> {
         self.conn.execute_batch(SCHEMA)?;
         Ok(())
     }
+
+    pub fn get_meta(&self, key: &str) -> Result<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT value FROM meta WHERE key = ?1")?;
+        match stmt.query_row(params![key], |row| row.get::<_, String>(0)) {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn set_meta(&mut self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
 }
+
+// ── Host key encoding ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct HostKey {
-    kind: u8,
-    hi: u64,
-    lo: u64,
-    text: String,
+pub(crate) struct HostKey {
+    pub(crate) kind: u8,
+    pub(crate) hi: u64,
+    pub(crate) lo: u64,
+    pub(crate) text: String,
 }
 
-fn encode_host_key(host: &str) -> HostKey {
+pub(crate) fn encode_host_key(host: &str) -> HostKey {
     match host.parse::<IpAddr>() {
         Ok(IpAddr::V4(v4)) => HostKey {
             kind: 1,
