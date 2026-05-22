@@ -1,3 +1,5 @@
+use std::io::{BufRead, BufReader, Read};
+
 use super::*;
 use crate::compression::CompressionType;
 use crate::database::ParseState;
@@ -5,7 +7,105 @@ use crate::fingerprint::{
     compute_compressed_head_fingerprint, compute_decompressed_head_fingerprint,
 };
 
+/// Read the first parseable log line from `filepath` and return its Unix timestamp.
+/// Returns `None` if the file cannot be opened, decompressed, or parsed.
+pub(super) fn read_first_line_ts(filepath: &str) -> Option<i64> {
+    let compression = CompressionType::from_path(filepath);
+    let file = std::fs::File::open(filepath).ok()?;
+    let limited = file.take(8192);
+
+    let reader: Box<dyn Read> = match compression {
+        CompressionType::Plain => Box::new(limited),
+        CompressionType::Gz => Box::new(flate2::read::MultiGzDecoder::new(limited)),
+        CompressionType::Bz2 => Box::new(bzip2::read::MultiBzDecoder::new(limited)),
+    };
+
+    let mut buf_reader = BufReader::new(reader);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match buf_reader.read_line(&mut line) {
+            Ok(0) | Err(_) => return None,
+            Ok(_) => {}
+        }
+        let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+        if let Some(entry) = crate::parser::OwnedLogEntry::parse(trimmed.to_string()) {
+            return crate::util::parse_unix_timestamp(entry.time_str(), entry.month_num);
+        }
+    }
+}
+
 impl Processor {
+    /// Fast per-file pre-check: stat + 2 DB queries + in-memory comparison only.
+    /// Returns `Some(outcome)` (plan=None) if inode+size+mtime match the stored
+    /// completed state, `None` if a full resolve is needed.
+    /// No file I/O beyond stat().
+    pub(super) fn resolve_cheap(&mut self, filepath: &str) -> Result<Option<ResolutionOutcome>> {
+        let meta = std::fs::metadata(filepath)?;
+        let current_inode = meta.ino();
+        let stat_size = meta.len();
+        let mtime_ns = meta.mtime().saturating_mul(1_000_000_000) + meta.mtime_nsec();
+        let compression = CompressionType::from_path(filepath);
+        let is_compressed = compression.is_compressed();
+
+        let state_by_path = self.db.get_parse_state(filepath)?;
+        let state_by_inode = self.db.get_parse_state_by_inode(current_inode)?;
+
+        let mut retired_parse_states = Vec::new();
+        if let Some(state) = state_by_path.as_ref() {
+            let previous_size = if is_compressed {
+                state.compressed_size
+            } else {
+                state.uncompressed_size
+            };
+            if state.inode != current_inode || stat_size < previous_size {
+                retired_parse_states.push(state.into());
+            }
+        }
+        if let Some(state) = state_by_inode.as_ref() {
+            if state.filepath != filepath {
+                retired_parse_states.push(state.into());
+            }
+        }
+
+        let state = match (state_by_path.as_ref(), state_by_inode.as_ref()) {
+            (Some(s), _) if s.inode == current_inode => s,
+            (_, Some(s)) => s,
+            (Some(s), None) => s,
+            (None, None) => return Ok(None),
+        };
+
+        let metadata_exact_match = state.completed
+            && state.inode == current_inode
+            && if is_compressed {
+                state.compressed_offset >= stat_size && state.compressed_size == stat_size
+            } else {
+                state.uncompressed_offset >= stat_size && state.uncompressed_size == stat_size
+            }
+            && state.mtime_ns == mtime_ns;
+
+        if !metadata_exact_match {
+            return Ok(None);
+        }
+
+        Ok(Some(ResolutionOutcome {
+            plan: None,
+            skipped_parse_state: (state.filepath != filepath).then(|| ParseStateUpdate {
+                filepath: filepath.to_string(),
+                inode: current_inode,
+                compressed_size: state.compressed_size,
+                uncompressed_size: state.uncompressed_size,
+                compressed_head_fingerprint: state.compressed_head_fingerprint,
+                uncompressed_head_fingerprint: state.uncompressed_head_fingerprint,
+                compressed_offset: state.compressed_offset,
+                uncompressed_offset: state.uncompressed_offset,
+                mtime_ns,
+                completed: true,
+            }),
+            retired_parse_states,
+        }))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn completed_parse_state_update(
         &self,

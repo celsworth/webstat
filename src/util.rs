@@ -131,11 +131,8 @@ pub fn current_log_timestamp() -> String {
 /// Parse a nginx timestamp (`DD/Mon/YYYY:HH:MM:SS ±HHMM`) into a Unix
 /// timestamp (seconds since epoch, UTC).
 ///
-/// Only used in tests.
-///
 /// Returns `None` on any parse failure.
-#[cfg(test)]
-pub fn parse_unix_timestamp(time_str: &str, month_num: u8) -> Option<i64> {
+pub(crate) fn parse_unix_timestamp(time_str: &str, month_num: u8) -> Option<i64> {
     let b = time_str.as_bytes();
     if b.len() < 26 {
         return None;

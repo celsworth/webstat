@@ -57,9 +57,13 @@ impl Processor {
             visit_state_prune_before_ts,
         })?;
 
+        if self.visit_max_seen_ts > 0 {
+            self.db.set_last_log_ts(self.visit_max_seen_ts)?;
+        }
+
         let flush_elapsed = flush_start.elapsed().as_secs_f64();
         crate::logging::log_debug_at(
-            1,
+            2,
             &format!("Database flush completed in {:.1}s", flush_elapsed),
         );
         Ok(())

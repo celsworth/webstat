@@ -112,11 +112,103 @@ impl Processor {
         let mut retired_parse_states: Vec<ParseStateUpdate> = Vec::with_capacity(count);
         let mut seen_retired: AHashSet<(String, u64)> = AHashSet::new();
 
-        // ── Phase 1: resolve all resume plans ─────────────────────────────────
-        let mut work_files: Vec<(usize, String, FileResumePlan)> = Vec::new();
-        let mut file_plans: AHashMap<usize, (String, FileResumePlan)> = AHashMap::new();
+        // ── Phase 0a: cheap metadata pre-check (stat+DB only, no file I/O) ───────
+        // For each file check inode+size+mtime against stored state. Files that
+        // match are confirmed done with zero file reads. Only the remainder need
+        // the timestamp scan and full fingerprint resolve.
+        let mut pending_indices: Vec<usize> = Vec::new();
+        let t0a = std::time::Instant::now();
 
         for (idx, filepath) in files.iter().enumerate() {
+            match self.resolve_cheap(filepath)? {
+                Some(outcome) => {
+                    self.log_resolution_plan(filepath, &outcome, "cheap");
+                    if let Some(state) = outcome.skipped_parse_state {
+                        pending_parse_states.push(state);
+                    }
+                    for retired in outcome.retired_parse_states {
+                        if seen_retired.insert((retired.filepath.clone(), retired.inode)) {
+                            retired_parse_states.push(retired);
+                        }
+                    }
+                    files_done.fetch_add(1, Ordering::Relaxed);
+                }
+                None => {
+                    pending_indices.push(idx);
+                }
+            }
+        }
+
+        {
+            let cheap_done = files.len() - pending_indices.len();
+            crate::logging::log_debug_at(
+                2,
+                &format!(
+                    "[plan] phase-0a metadata pre-check: {cheap_done}/{} done in {:.1}ms",
+                    files.len(),
+                    t0a.elapsed().as_secs_f64() * 1000.0,
+                ),
+            );
+        }
+
+        // ── Phase 0b: order-based skip (only for pending files) ───────────────
+        // Files are strictly ordered. If pending file[k]'s first-line timestamp
+        // is strictly before last_log_ts, every pending file before k is
+        // guaranteed entirely processed already.
+        let mut order_skip: AHashSet<usize> = AHashSet::new();
+        if pending_indices.len() > 1 {
+            let last_log_ts = self.db.get_last_log_ts().unwrap_or(0);
+            if last_log_ts > 0 {
+                let t0b = std::time::Instant::now();
+                let pending_first_tss: Vec<Option<i64>> = pending_indices
+                    .iter()
+                    .map(|&i| super::resume_policy::read_first_line_ts(&files[i]))
+                    .collect();
+                // Find the rightmost pending file whose first-line ts < last_log_ts.
+                // Every pending file before that position is guaranteed fully processed.
+                if let Some(pos) = pending_first_tss
+                    .iter()
+                    .rposition(|ts| ts.map_or(false, |t| t < last_log_ts))
+                {
+                    for &idx in &pending_indices[..pos] {
+                        order_skip.insert(idx);
+                    }
+                    crate::logging::log_debug_at(2, &format!(
+                        "[plan] order-based skip: {} file(s) before boundary (last_log_ts={last_log_ts})",
+                        order_skip.len()
+                    ));
+                }
+                crate::logging::log_debug_at(
+                    2,
+                    &format!(
+                        "[plan] phase-0b order-skip: {} skipped/{} pending in {:.1}ms",
+                        order_skip.len(),
+                        pending_indices.len(),
+                        t0b.elapsed().as_secs_f64() * 1000.0,
+                    ),
+                );
+            }
+        }
+
+        // ── Phase 1: resolve remaining pending plans ───────────────────────────
+        let mut work_files: Vec<(usize, String, FileResumePlan)> = Vec::new();
+        let mut file_plans: AHashMap<usize, (String, FileResumePlan)> = AHashMap::new();
+        let phase1_total = pending_indices.len() - order_skip.len();
+        let t1 = std::time::Instant::now();
+
+        for idx in pending_indices {
+            if order_skip.contains(&idx) {
+                crate::logging::log_debug_at(
+                    2,
+                    &format!(
+                        "[plan:order_skip] file={} action=skip_order_ts",
+                        &files[idx]
+                    ),
+                );
+                files_done.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+            let filepath = &files[idx];
             let outcome = self.resolve_resume_plan(filepath)?;
             self.log_resolution_plan(filepath, &outcome, "initial");
 
@@ -135,6 +227,17 @@ impl Processor {
                 files_done.fetch_add(1, Ordering::Relaxed);
             }
         }
+
+        crate::logging::log_debug_at(
+            2,
+            &format!(
+                "[plan] phase-1 full resolve: {}/{} to process, {} fingerprint-skipped in {:.1}ms",
+                work_files.len(),
+                phase1_total,
+                phase1_total - work_files.len(),
+                t1.elapsed().as_secs_f64() * 1000.0,
+            ),
+        );
 
         if work_files.is_empty() {
             return Ok((0, run_acc, pending_parse_states, retired_parse_states));
