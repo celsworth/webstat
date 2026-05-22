@@ -1,68 +1,56 @@
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::net::IpAddr;
 
 use ahash::AHashMap;
 
-use crate::hll::HyperLogLog;
-use crate::method_proto::{MethodCountsMap, ProtoCountsMap};
-use crate::topn::{
-    CountryHitsMap, HourlyMap, PeriodCountMap, StatusHitsMap, TopHostsByBandwidth, TopHostsByHits,
-    TopUrlsByBandwidth, TopUrlsByHits,
-};
+use crate::accumulators::HourlyMap;
+use crate::method_proto::{METHOD_COUNT, PROTO_COUNT};
 
 pub(crate) struct RunAccumulators {
+    pub(crate) current_month: String,
     pub(crate) hourly: HourlyMap,
-    pub(crate) top_urls: TopUrlsByHits,
-    pub(crate) top_urls_bw: TopUrlsByBandwidth,
-    pub(crate) top_hosts: TopHostsByHits,
-    pub(crate) top_hosts_bw: TopHostsByBandwidth,
-    pub(crate) top_refs: PeriodCountMap,
-    pub(crate) top_agents: PeriodCountMap,
-    pub(crate) top_countries: CountryHitsMap,
-    pub(crate) status_codes: StatusHitsMap,
-    pub(crate) hll_site_counts: AHashMap<Arc<str>, HyperLogLog>,
-    pub(crate) hll_all_time: Option<HyperLogLog>,
-    pub(crate) method_counts: MethodCountsMap,
-    pub(crate) proto_counts: ProtoCountsMap,
+    pub(crate) urls: AHashMap<String, (u64, u64)>,
+    pub(crate) hosts: AHashMap<String, (u64, u64)>,
+    pub(crate) refs: AHashMap<String, u64>,
+    pub(crate) agents: AHashMap<String, u64>,
+    pub(crate) daily_ips: AHashMap<String, HashSet<IpAddr>>,
+    pub(crate) countries: AHashMap<String, u64>,
+    pub(crate) status_codes: AHashMap<u16, u64>,
+    pub(crate) method_counts: [u64; METHOD_COUNT],
+    pub(crate) proto_counts: [u64; PROTO_COUNT],
 }
 
 impl RunAccumulators {
-    pub(crate) fn new(
-        base_capacity: usize,
-        hll_precision: u8,
-        enable_top_urls: bool,
-        enable_top_hosts: bool,
-        enable_top_refs: bool,
-    ) -> Self {
+    pub(crate) fn new(current_month: String) -> Self {
         Self {
-            hourly: AHashMap::with_capacity(base_capacity),
-            top_urls: AHashMap::with_capacity(if enable_top_urls { base_capacity } else { 0 }),
-            top_urls_bw: AHashMap::with_capacity(if enable_top_urls { base_capacity } else { 0 }),
-            top_hosts: AHashMap::with_capacity(if enable_top_hosts { base_capacity } else { 0 }),
-            top_hosts_bw: AHashMap::with_capacity(if enable_top_hosts { base_capacity } else { 0 }),
-            top_refs: AHashMap::with_capacity(if enable_top_refs { base_capacity } else { 0 }),
-            top_agents: AHashMap::with_capacity(base_capacity),
-            top_countries: AHashMap::with_capacity(base_capacity),
-            status_codes: AHashMap::with_capacity(base_capacity),
-            hll_site_counts: AHashMap::with_capacity(base_capacity),
-            hll_all_time: Some(HyperLogLog::new(hll_precision)),
-            method_counts: AHashMap::with_capacity(base_capacity),
-            proto_counts: AHashMap::with_capacity(base_capacity),
+            current_month,
+            hourly: AHashMap::with_capacity(32),
+            urls: AHashMap::with_capacity(65_536),
+            hosts: AHashMap::with_capacity(65_536),
+            refs: AHashMap::with_capacity(4_096),
+            agents: AHashMap::with_capacity(256),
+            daily_ips: AHashMap::with_capacity(32),
+            countries: AHashMap::with_capacity(256),
+            status_codes: AHashMap::with_capacity(32),
+            method_counts: [0; METHOD_COUNT],
+            proto_counts: [0; PROTO_COUNT],
         }
     }
 
     pub(crate) fn is_empty(&self) -> bool {
         self.hourly.is_empty()
-            && self.top_urls.is_empty()
-            && self.top_urls_bw.is_empty()
-            && self.top_hosts.is_empty()
-            && self.top_hosts_bw.is_empty()
-            && self.top_refs.is_empty()
-            && self.top_agents.is_empty()
-            && self.top_countries.is_empty()
+            && self.urls.is_empty()
+            && self.hosts.is_empty()
+            && self.refs.is_empty()
+            && self.agents.is_empty()
+            && self.countries.is_empty()
             && self.status_codes.is_empty()
-            && self.hll_site_counts.is_empty()
-            && self.method_counts.is_empty()
-            && self.proto_counts.is_empty()
+            && self.method_counts.iter().all(|&c| c == 0)
+            && self.proto_counts.iter().all(|&c| c == 0)
+    }
+
+    pub(crate) fn clear_for_new_month(&mut self, new_month: String) {
+        *self = Self::new(new_month);
     }
 }
 

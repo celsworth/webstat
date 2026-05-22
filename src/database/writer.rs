@@ -1,326 +1,196 @@
+use std::collections::HashSet;
+use std::net::IpAddr;
+use std::sync::Arc;
+
+use ahash::AHashMap;
+use anyhow::Context;
+
 use super::*;
+use crate::accumulators::HourlyMap;
+use crate::method_proto::{METHOD_NAMES, PROTO_NAMES};
+
+pub struct FlushData<'a> {
+    pub period: &'a str,
+    pub hourly: &'a HourlyMap,
+    pub urls: &'a AHashMap<String, (u64, u64)>,
+    pub hosts: &'a AHashMap<String, (u64, u64)>,
+    pub host_geo: &'a AHashMap<String, (Arc<str>, Arc<str>)>,
+    pub refs: &'a AHashMap<String, u64>,
+    pub agents: &'a AHashMap<String, u64>,
+    pub daily_ips: &'a AHashMap<String, HashSet<IpAddr>>,
+    pub countries: &'a AHashMap<String, u64>,
+    pub status_codes: &'a AHashMap<u16, u64>,
+    pub method_counts: &'a [u64],
+    pub proto_counts: &'a [u64],
+    pub parse_states: &'a [ParseStateUpdate],
+    pub retired_parse_states: &'a [ParseStateUpdate],
+    pub visit_states: &'a [VisitStateUpdate],
+    pub visit_state_prune_before_ts: Option<i64>,
+}
 
 impl Database {
-    #[cfg(test)]
-    pub fn flush_all(
-        &mut self,
-        hourly: &HourlyMap,
-        top_urls: &TopUrlsByHits,
-        top_hosts: &TopHostsByHits,
-        top_refs: &PeriodCountMap,
-        top_agents: &PeriodCountMap,
-        top_countries: &CountryHitsMap,
-        status_codes: &StatusHitsMap,
-    ) -> Result<()> {
-        let empty_urls_bw: TopUrlsByBandwidth = AHashMap::new();
-        let empty_hosts_bw: TopHostsByBandwidth = AHashMap::new();
-        self.flush_all_with_parse_states_split(
-            hourly,
-            top_urls,
-            &empty_urls_bw,
-            top_hosts,
-            &empty_hosts_bw,
-            &AHashMap::new(),
-            top_refs,
-            top_agents,
-            top_countries,
-            status_codes,
-            &AHashMap::new(),
-            None,
-            &[],
-            &[],
-            &[],
-            None,
-            &AHashMap::new(),
-            &AHashMap::new(),
-        )
-    }
-
-    #[cfg(test)]
-    pub fn flush_all_with_parse_states(
-        &mut self,
-        hourly: &HourlyMap,
-        top_urls: &TopUrlsByHits,
-        top_hosts: &TopHostsByHits,
-        top_refs: &PeriodCountMap,
-        top_agents: &PeriodCountMap,
-        top_countries: &CountryHitsMap,
-        status_codes: &StatusHitsMap,
-        hll_site_counts: &AHashMap<Arc<str>, HyperLogLog>,
-        hll_all_time: Option<&HyperLogLog>,
-        parse_states: &[ParseStateUpdate],
-    ) -> Result<()> {
-        let empty_urls_bw: TopUrlsByBandwidth = AHashMap::new();
-        let empty_hosts_bw: TopHostsByBandwidth = AHashMap::new();
-        self.flush_all_with_parse_states_split(
-            hourly,
-            top_urls,
-            &empty_urls_bw,
-            top_hosts,
-            &empty_hosts_bw,
-            &AHashMap::new(),
-            top_refs,
-            top_agents,
-            top_countries,
-            status_codes,
-            hll_site_counts,
-            hll_all_time,
-            parse_states,
-            &[],
-            &[],
-            None,
-            &AHashMap::new(),
-            &AHashMap::new(),
-        )
-    }
-
-    pub fn flush_all_with_parse_states_split(
-        &mut self,
-        hourly: &HourlyMap,
-        top_urls: &TopUrlsByHits,
-        top_urls_bw: &TopUrlsByBandwidth,
-        top_hosts: &TopHostsByHits,
-        top_hosts_bw: &TopHostsByBandwidth,
-        host_geo: &AHashMap<String, (Arc<str>, Arc<str>)>,
-        top_refs: &PeriodCountMap,
-        top_agents: &PeriodCountMap,
-        top_countries: &CountryHitsMap,
-        status_codes: &StatusHitsMap,
-        hll_site_counts: &AHashMap<Arc<str>, HyperLogLog>,
-        hll_all_time: Option<&HyperLogLog>,
-        parse_states: &[ParseStateUpdate],
-        retired_parse_states: &[ParseStateUpdate],
-        visit_states: &[VisitStateUpdate],
-        visit_state_prune_before_ts: Option<i64>,
-        method_counts: &MethodCountsMap,
-        proto_counts: &ProtoCountsMap,
-    ) -> Result<()> {
+    pub fn flush(&mut self, data: FlushData<'_>) -> Result<()> {
         let tx = self.conn.transaction()?;
 
         // hourly_stats
         {
             let sql = "INSERT INTO hourly_stats \
-                                             (date,hour,hits,visits,files,pages,bandwidth,status_2xx,status_3xx,status_4xx,status_5xx,sites) \
-                                             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) \
+                       (date,hour,hits,visits,files,pages,bandwidth,\
+                        status_2xx,status_3xx,status_4xx,status_5xx) \
+                       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) \
                        ON CONFLICT (date,hour) DO UPDATE SET \
-                                                 hits=hits+excluded.hits, visits=visits+excluded.visits, files=files+excluded.files, \
-                         pages=pages+excluded.pages, bandwidth=bandwidth+excluded.bandwidth, \
+                         hits=hits+excluded.hits, visits=visits+excluded.visits, \
+                         files=files+excluded.files, pages=pages+excluded.pages, \
+                         bandwidth=bandwidth+excluded.bandwidth, \
                          status_2xx=status_2xx+excluded.status_2xx, \
                          status_3xx=status_3xx+excluded.status_3xx, \
                          status_4xx=status_4xx+excluded.status_4xx, \
-                         status_5xx=status_5xx+excluded.status_5xx, \
-                         sites=sites+excluded.sites";
+                         status_5xx=status_5xx+excluded.status_5xx";
             let mut stmt = tx.prepare_cached(sql)?;
-            for (date, hours) in hourly {
-                for (hr, s) in hours {
-                    let sites = s.ip_set.estimate() as i64;
+            for (date, hours) in data.hourly {
+                for (hr, acc) in hours {
+                    let s = &acc.stats;
                     stmt.execute(params![
                         date.as_ref(),
                         *hr as i64,
-                        s.stats.hits as i64,
-                        s.stats.visits as i64,
-                        s.stats.files as i64,
-                        s.stats.pages as i64,
-                        s.stats.bandwidth as i64,
-                        s.stats.status_2xx as i64,
-                        s.stats.status_3xx as i64,
-                        s.stats.status_4xx as i64,
-                        s.stats.status_5xx as i64,
-                        sites
+                        s.hits as i64,
+                        s.visits as i64,
+                        s.files as i64,
+                        s.pages as i64,
+                        s.bandwidth as i64,
+                        s.status_2xx as i64,
+                        s.status_3xx as i64,
+                        s.status_4xx as i64,
+                        s.status_5xx as i64,
                     ])?;
                 }
             }
         }
 
-        // top_urls_hits
-        {
-            let sql = "INSERT INTO top_urls_hits (period,url,hits,bandwidth) VALUES (?1,?2,?3,?4) \
-                       ON CONFLICT (period,url) DO UPDATE SET \
-                         hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth";
-            let mut stmt = tx.prepare_cached(sql)?;
-            for (period, urls) in top_urls {
-                for (url, hits, bw) in urls.iter() {
-                    stmt.execute(params![period.as_ref(), url, hits as i64, bw as i64])?;
-                }
-            }
-        }
-
-        // top_urls_bandwidth
-        {
-            let sql =
-                "INSERT INTO top_urls_bandwidth (period,url,hits,bandwidth) VALUES (?1,?2,?3,?4) \
-                       ON CONFLICT (period,url) DO UPDATE SET \
-                         hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth";
-            let mut stmt = tx.prepare_cached(sql)?;
-            for (period, urls) in top_urls_bw {
-                for (url, hits, bw) in urls.iter() {
-                    stmt.execute(params![period.as_ref(), url, hits as i64, bw as i64])?;
-                }
+        // monthly_urls_hits and monthly_urls_bandwidth (same data, different tables)
+        if !data.urls.is_empty() {
+            let sql_hits = "INSERT INTO monthly_urls_hits (period,url,hits,bandwidth) \
+                            VALUES (?1,?2,?3,?4) \
+                            ON CONFLICT (period,url) DO UPDATE SET \
+                              hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth";
+            let sql_bw = "INSERT INTO monthly_urls_bandwidth (period,url,hits,bandwidth) \
+                          VALUES (?1,?2,?3,?4) \
+                          ON CONFLICT (period,url) DO UPDATE SET \
+                            hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth";
+            let mut stmt_hits = tx.prepare_cached(sql_hits)?;
+            let mut stmt_bw = tx.prepare_cached(sql_bw)?;
+            for (url, (hits, bw)) in data.urls {
+                stmt_hits.execute(params![data.period, url, *hits as i64, *bw as i64])?;
+                stmt_bw.execute(params![data.period, url, *hits as i64, *bw as i64])?;
             }
         }
 
         let unknown_geo: (Arc<str>, Arc<str>) = (Arc::from("--"), Arc::from("Unknown"));
 
-        // top_hosts
-        {
-            let sql = "INSERT INTO top_hosts \
-                                             (period,host_kind,host_hi,host_lo,host_text,hits,bandwidth,country_code) \
-                                             VALUES (?1,?2,?3,?4,?5,?6,?7,?8) \
-                       ON CONFLICT (period,host_kind,host_hi,host_lo,host_text) DO UPDATE SET \
-                         hits=hits+excluded.hits, \
-                         bandwidth=bandwidth+excluded.bandwidth, \
-                                                 country_code=COALESCE(NULLIF(excluded.country_code,'--'),country_code)";
-            let mut stmt = tx.prepare_cached(sql)?;
-            let mut all_hosts = AHashSet::new();
-            for (period, hosts) in top_hosts {
-                for (host, hits, bw) in hosts.iter() {
-                    let (cc, _cn) = host_geo.get(host).unwrap_or(&unknown_geo);
-                    let host_key = encode_host_key(host);
-                    stmt.execute(params![
-                        period.as_ref(),
-                        host_key.kind as i64,
-                        host_key.hi as i64,
-                        host_key.lo as i64,
-                        &host_key.text,
-                        hits as i64,
-                        bw as i64,
-                        cc.as_ref()
-                    ])?;
-                    all_hosts.insert(host_key);
-                }
-            }
-
-            drop(stmt);
-
-            let mut host_stmt = tx.prepare_cached(
-                "INSERT OR IGNORE INTO all_time_hosts (host_kind, host_hi, host_lo, host_text) VALUES (?1, ?2, ?3, ?4)",
+        // monthly_hosts_hits and monthly_hosts_bandwidth
+        if !data.hosts.is_empty() {
+            let sql_hits = "INSERT INTO monthly_hosts_hits \
+                            (period,host_kind,host_hi,host_lo,host_text,hits,bandwidth,country_code) \
+                            VALUES (?1,?2,?3,?4,?5,?6,?7,?8) \
+                            ON CONFLICT (period,host_kind,host_hi,host_lo,host_text) DO UPDATE SET \
+                              hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth, \
+                              country_code=COALESCE(NULLIF(excluded.country_code,'--'),country_code)";
+            let sql_bw = "INSERT INTO monthly_hosts_bandwidth \
+                          (period,host_kind,host_hi,host_lo,host_text,hits,bandwidth,country_code) \
+                          VALUES (?1,?2,?3,?4,?5,?6,?7,?8) \
+                          ON CONFLICT (period,host_kind,host_hi,host_lo,host_text) DO UPDATE SET \
+                            hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth, \
+                            country_code=COALESCE(NULLIF(excluded.country_code,'--'),country_code)";
+            let mut stmt_hits = tx.prepare_cached(sql_hits)?;
+            let mut stmt_bw = tx.prepare_cached(sql_bw)?;
+            let mut cn_stmt = tx.prepare_cached(
+                "INSERT INTO country_code_names (country_code, country_name) VALUES (?1, ?2)
+                 ON CONFLICT (country_code) DO UPDATE SET
+                   country_name = CASE
+                     WHEN country_code_names.country_name = 'Unknown'
+                          AND excluded.country_name <> 'Unknown'
+                       THEN excluded.country_name
+                     ELSE country_code_names.country_name
+                   END",
             )?;
-            for host in all_hosts {
-                host_stmt.execute(params![
-                    host.kind as i64,
-                    host.hi as i64,
-                    host.lo as i64,
-                    host.text,
+
+            for (host, (hits, bw)) in data.hosts {
+                let (cc, cn) = data.host_geo.get(host).unwrap_or(&unknown_geo);
+                let hk = encode_host_key(host);
+                stmt_hits.execute(params![
+                    data.period,
+                    hk.kind as i64,
+                    hk.hi as i64,
+                    hk.lo as i64,
+                    &hk.text,
+                    *hits as i64,
+                    *bw as i64,
+                    cc.as_ref()
                 ])?;
+                stmt_bw.execute(params![
+                    data.period,
+                    hk.kind as i64,
+                    hk.hi as i64,
+                    hk.lo as i64,
+                    &hk.text,
+                    *hits as i64,
+                    *bw as i64,
+                    cc.as_ref()
+                ])?;
+                cn_stmt.execute(params![cc.as_ref(), cn.as_ref()])?;
             }
         }
 
-        // top_hosts_hits
-        {
-            let sql = "INSERT INTO top_hosts_hits \
-                                             (period,host_kind,host_hi,host_lo,host_text,hits,bandwidth,country_code) \
-                                             VALUES (?1,?2,?3,?4,?5,?6,?7,?8) \
-                       ON CONFLICT (period,host_kind,host_hi,host_lo,host_text) DO UPDATE SET \
-                         hits=hits+excluded.hits, \
-                         bandwidth=bandwidth+excluded.bandwidth, \
-                                                 country_code=COALESCE(NULLIF(excluded.country_code,'--'),country_code)";
-            let mut stmt = tx.prepare_cached(sql)?;
-            for (period, hosts) in top_hosts {
-                for (host, hits, bw) in hosts.iter() {
-                    let (cc, _cn) = host_geo.get(host).unwrap_or(&unknown_geo);
-                    let host_key = encode_host_key(host);
-                    stmt.execute(params![
-                        period.as_ref(),
-                        host_key.kind as i64,
-                        host_key.hi as i64,
-                        host_key.lo as i64,
-                        &host_key.text,
-                        hits as i64,
-                        bw as i64,
-                        cc.as_ref()
-                    ])?;
-                }
-            }
-        }
-
-        // top_hosts_bandwidth
-        {
-            let sql = "INSERT INTO top_hosts_bandwidth \
-                                             (period,host_kind,host_hi,host_lo,host_text,hits,bandwidth,country_code) \
-                                             VALUES (?1,?2,?3,?4,?5,?6,?7,?8) \
-                       ON CONFLICT (period,host_kind,host_hi,host_lo,host_text) DO UPDATE SET \
-                         hits=hits+excluded.hits, \
-                         bandwidth=bandwidth+excluded.bandwidth, \
-                                                 country_code=COALESCE(NULLIF(excluded.country_code,'--'),country_code)";
-            let mut stmt = tx.prepare_cached(sql)?;
-            for (period, hosts) in top_hosts_bw {
-                for (host, hits, bw) in hosts.iter() {
-                    let (cc, _cn) = host_geo.get(host).unwrap_or(&unknown_geo);
-                    let host_key = encode_host_key(host);
-                    stmt.execute(params![
-                        period.as_ref(),
-                        host_key.kind as i64,
-                        host_key.hi as i64,
-                        host_key.lo as i64,
-                        &host_key.text,
-                        hits as i64,
-                        bw as i64,
-                        cc.as_ref()
-                    ])?;
-                }
-            }
-        }
-
-        // country_code_names
-        {
-            let sql = "INSERT INTO country_code_names (country_code, country_name) VALUES (?1, ?2)
-                       ON CONFLICT (country_code) DO UPDATE SET
-                         country_name = CASE
-                           WHEN country_code_names.country_name = 'Unknown' AND excluded.country_name <> 'Unknown'
-                             THEN excluded.country_name
-                           ELSE country_code_names.country_name
-                         END";
-            let mut stmt = tx.prepare_cached(sql)?;
-            for (cc, cn) in host_geo.values() {
-                stmt.execute(params![cc.as_ref(), cn.as_ref()])?;
-            }
-        }
-
-        // top_refs
-        {
-            let sql = "INSERT INTO top_refs (period,referrer,hits) VALUES (?1,?2,?3) \
+        // monthly_refs
+        if !data.refs.is_empty() {
+            let sql = "INSERT INTO monthly_refs (period,referrer,hits) VALUES (?1,?2,?3) \
                        ON CONFLICT (period,referrer) DO UPDATE SET hits=hits+excluded.hits";
             let mut stmt = tx.prepare_cached(sql)?;
-            for (period, refs) in top_refs {
-                for (referrer, hits) in refs.iter() {
-                    stmt.execute(params![period.as_ref(), referrer, hits as i64])?;
-                }
+            for (referrer, hits) in data.refs {
+                stmt.execute(params![data.period, referrer, *hits as i64])?;
             }
         }
 
-        // top_agents
-        {
-            let sql = "INSERT INTO top_agents (period,agent_family,hits) VALUES (?1,?2,?3) \
+        // monthly_agents
+        if !data.agents.is_empty() {
+            let sql = "INSERT INTO monthly_agents (period,agent_family,hits) VALUES (?1,?2,?3) \
                        ON CONFLICT (period,agent_family) DO UPDATE SET hits=hits+excluded.hits";
             let mut stmt = tx.prepare_cached(sql)?;
-            for (period, agents) in top_agents {
-                for (agent, hits) in agents.iter() {
-                    stmt.execute(params![period.as_ref(), agent, hits as i64])?;
+            for (agent, hits) in data.agents {
+                stmt.execute(params![data.period, agent, *hits as i64])?;
+            }
+        }
+
+        // daily_ip_log — INSERT OR IGNORE for deduplication across flushes/resumes
+        if !data.daily_ips.is_empty() {
+            let sql = "INSERT OR IGNORE INTO daily_ip_log (date,ip_kind,ip_hi,ip_lo) \
+                       VALUES (?1,?2,?3,?4)";
+            let mut stmt = tx.prepare_cached(sql)?;
+            for (date, ips) in data.daily_ips {
+                for ip in ips {
+                    let (kind, hi, lo) = encode_ip(*ip);
+                    stmt.execute(params![date, kind as i64, hi as i64, lo as i64])?;
                 }
             }
         }
 
         // top_countries
-        {
+        if !data.countries.is_empty() {
             let sql = "INSERT INTO top_countries (period,country_code,hits) VALUES (?1,?2,?3) \
                        ON CONFLICT (period,country_code) DO UPDATE SET hits=hits+excluded.hits";
             let mut stmt = tx.prepare_cached(sql)?;
-            for (period, countries) in top_countries {
-                for (cc, hits) in countries.iter() {
-                    stmt.execute(params![period.as_ref(), cc, *hits as i64])?;
-                }
+            for (cc, hits) in data.countries {
+                stmt.execute(params![data.period, cc, *hits as i64])?;
             }
         }
 
         // status_codes
-        {
+        if !data.status_codes.is_empty() {
             let sql = "INSERT INTO status_codes (period,status,hits) VALUES (?1,?2,?3) \
                        ON CONFLICT (period,status) DO UPDATE SET hits=hits+excluded.hits";
             let mut stmt = tx.prepare_cached(sql)?;
-            for (period, codes) in status_codes {
-                for (status, hits) in codes {
-                    stmt.execute(params![period.as_ref(), *status as i64, *hits as i64])?;
-                }
+            for (status, hits) in data.status_codes {
+                stmt.execute(params![data.period, *status as i64, *hits as i64])?;
             }
         }
 
@@ -329,15 +199,9 @@ impl Database {
             let sql = "INSERT INTO method_counts (period,method,hits) VALUES (?1,?2,?3) \
                        ON CONFLICT (period,method) DO UPDATE SET hits=hits+excluded.hits";
             let mut stmt = tx.prepare_cached(sql)?;
-            for (period, counts) in method_counts {
-                for (i, &hits) in counts.iter().enumerate() {
-                    if hits > 0 {
-                        stmt.execute(params![
-                            period.as_ref(),
-                            crate::method_proto::METHOD_NAMES[i],
-                            hits as i64
-                        ])?;
-                    }
+            for (i, &hits) in data.method_counts.iter().enumerate() {
+                if hits > 0 {
+                    stmt.execute(params![data.period, METHOD_NAMES[i], hits as i64])?;
                 }
             }
         }
@@ -347,118 +211,192 @@ impl Database {
             let sql = "INSERT INTO proto_counts (period,proto,hits) VALUES (?1,?2,?3) \
                        ON CONFLICT (period,proto) DO UPDATE SET hits=hits+excluded.hits";
             let mut stmt = tx.prepare_cached(sql)?;
-            for (period, counts) in proto_counts {
-                for (i, &hits) in counts.iter().enumerate() {
-                    if hits > 0 {
-                        stmt.execute(params![
-                            period.as_ref(),
-                            crate::method_proto::PROTO_NAMES[i],
-                            hits as i64
-                        ])?;
-                    }
+            for (i, &hits) in data.proto_counts.iter().enumerate() {
+                if hits > 0 {
+                    stmt.execute(params![data.period, PROTO_NAMES[i], hits as i64])?;
                 }
             }
         }
 
-        if !retired_parse_states.is_empty() {
+        // retired parse_states → archive
+        if !data.retired_parse_states.is_empty() {
             let mut archive_stmt = tx.prepare_cached(
-                "INSERT INTO parse_state_archive (filepath, inode, compressed_size, uncompressed_size, compressed_head_fingerprint, uncompressed_head_fingerprint, compressed_offset, uncompressed_offset, mtime_ns, completed)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                 ON CONFLICT (filepath, inode) DO UPDATE SET
-                   inode = ?2,
-                   compressed_size = ?3,
-                   uncompressed_size = ?4,
-                   compressed_head_fingerprint = ?5,
-                   uncompressed_head_fingerprint = ?6,
-                   compressed_offset = ?7,
-                   uncompressed_offset = ?8,
-                   mtime_ns = ?9,
-                   completed = ?10",
+                "INSERT INTO parse_state_archive \
+                 (filepath,inode,compressed_size,uncompressed_size,\
+                  compressed_head_fingerprint,uncompressed_head_fingerprint,\
+                  compressed_offset,uncompressed_offset,mtime_ns,completed) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) \
+                 ON CONFLICT (filepath,inode) DO UPDATE SET \
+                   inode=?2, compressed_size=?3, uncompressed_size=?4, \
+                   compressed_head_fingerprint=?5, uncompressed_head_fingerprint=?6, \
+                   compressed_offset=?7, uncompressed_offset=?8, \
+                   mtime_ns=?9, completed=?10",
             )?;
-            let mut delete_stmt =
-                tx.prepare_cached("DELETE FROM parse_state WHERE filepath = ?1 AND inode = ?2")?;
-            for state in retired_parse_states {
+            let mut del_stmt =
+                tx.prepare_cached("DELETE FROM parse_state WHERE filepath=?1 AND inode=?2")?;
+            for s in data.retired_parse_states {
                 archive_stmt.execute(params![
-                    &state.filepath,
-                    state.inode as i64,
-                    state.compressed_size as i64,
-                    state.uncompressed_size as i64,
-                    state.compressed_head_fingerprint.map(|f| f as i64),
-                    state.uncompressed_head_fingerprint.map(|f| f as i64),
-                    state.compressed_offset as i64,
-                    state.uncompressed_offset as i64,
-                    state.mtime_ns,
-                    state.completed as i64,
+                    &s.filepath,
+                    s.inode as i64,
+                    s.compressed_size as i64,
+                    s.uncompressed_size as i64,
+                    s.compressed_head_fingerprint.map(|f| f as i64),
+                    s.uncompressed_head_fingerprint.map(|f| f as i64),
+                    s.compressed_offset as i64,
+                    s.uncompressed_offset as i64,
+                    s.mtime_ns,
+                    s.completed as i64,
                 ])?;
-                delete_stmt.execute(params![&state.filepath, state.inode as i64])?;
+                del_stmt.execute(params![&s.filepath, s.inode as i64])?;
             }
         }
 
-        if !parse_states.is_empty() {
+        // active parse_states
+        if !data.parse_states.is_empty() {
             let mut stmt = tx.prepare_cached(
-                "INSERT INTO parse_state (filepath, inode, compressed_size, uncompressed_size, compressed_head_fingerprint, uncompressed_head_fingerprint, compressed_offset, uncompressed_offset, mtime_ns, completed)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                 ON CONFLICT (filepath) DO UPDATE SET
-                   inode = ?2,
-                   compressed_size = ?3,
-                   uncompressed_size = ?4,
-                   compressed_head_fingerprint = ?5,
-                   uncompressed_head_fingerprint = ?6,
-                   compressed_offset = ?7,
-                   uncompressed_offset = ?8,
-                   mtime_ns = ?9,
-                   completed = ?10",
+                "INSERT INTO parse_state \
+                 (filepath,inode,compressed_size,uncompressed_size,\
+                  compressed_head_fingerprint,uncompressed_head_fingerprint,\
+                  compressed_offset,uncompressed_offset,mtime_ns,completed) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) \
+                 ON CONFLICT (filepath) DO UPDATE SET \
+                   inode=?2, compressed_size=?3, uncompressed_size=?4, \
+                   compressed_head_fingerprint=?5, uncompressed_head_fingerprint=?6, \
+                   compressed_offset=?7, uncompressed_offset=?8, \
+                   mtime_ns=?9, completed=?10",
             )?;
-            for state in parse_states {
+            for s in data.parse_states {
                 stmt.execute(params![
-                    &state.filepath,
-                    state.inode as i64,
-                    state.compressed_size as i64,
-                    state.uncompressed_size as i64,
-                    state.compressed_head_fingerprint.map(|f| f as i64),
-                    state.uncompressed_head_fingerprint.map(|f| f as i64),
-                    state.compressed_offset as i64,
-                    state.uncompressed_offset as i64,
-                    state.mtime_ns,
-                    state.completed as i64,
+                    &s.filepath,
+                    s.inode as i64,
+                    s.compressed_size as i64,
+                    s.uncompressed_size as i64,
+                    s.compressed_head_fingerprint.map(|f| f as i64),
+                    s.uncompressed_head_fingerprint.map(|f| f as i64),
+                    s.compressed_offset as i64,
+                    s.uncompressed_offset as i64,
+                    s.mtime_ns,
+                    s.completed as i64,
                 ])?;
             }
         }
 
-        if !hll_site_counts.is_empty() || hll_all_time.is_some() {
-            Self::upsert_site_count_hlls(&tx, hll_site_counts, hll_all_time)?;
-        }
-
-        if !visit_states.is_empty() {
+        // visit_state
+        if !data.visit_states.is_empty() {
             let mut stmt = tx.prepare_cached(
-                "INSERT INTO visit_state (ip_kind, ip_hi, ip_lo, ip_text, last_seen_ts)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT (ip_kind, ip_hi, ip_lo, ip_text) DO UPDATE SET
-                   last_seen_ts = CASE
-                     WHEN excluded.last_seen_ts > visit_state.last_seen_ts
-                       THEN excluded.last_seen_ts
-                     ELSE visit_state.last_seen_ts
+                "INSERT INTO visit_state (ip_kind,ip_hi,ip_lo,ip_text,last_seen_ts) \
+                 VALUES (?1,?2,?3,?4,?5) \
+                 ON CONFLICT (ip_kind,ip_hi,ip_lo,ip_text) DO UPDATE SET \
+                   last_seen_ts = CASE \
+                     WHEN excluded.last_seen_ts > visit_state.last_seen_ts \
+                       THEN excluded.last_seen_ts \
+                     ELSE visit_state.last_seen_ts \
                    END",
             )?;
-            for state in visit_states {
+            for vs in data.visit_states {
                 stmt.execute(params![
-                    state.key.ip_kind as i64,
-                    state.key.ip_hi as i64,
-                    state.key.ip_lo as i64,
-                    &state.key.ip_text,
-                    state.last_seen_ts,
+                    vs.key.ip_kind as i64,
+                    vs.key.ip_hi as i64,
+                    vs.key.ip_lo as i64,
+                    &vs.key.ip_text,
+                    vs.last_seen_ts,
                 ])?;
             }
         }
 
-        if let Some(prune_before_ts) = visit_state_prune_before_ts {
+        if let Some(prune_ts) = data.visit_state_prune_before_ts {
             tx.execute(
                 "DELETE FROM visit_state WHERE last_seen_ts < ?1",
-                params![prune_before_ts],
+                params![prune_ts],
             )?;
         }
 
         tx.commit().context("Failed to commit flush transaction")?;
         Ok(())
+    }
+
+    /// Finalize a completed month: populate all_time_hosts, prune monthly
+    /// tables to top_n rows, mark month complete in meta.
+    pub fn finalize_month(&mut self, period: &str, top_n: usize) -> Result<()> {
+        let tx = self.conn.transaction()?;
+
+        let like_pattern = format!("{}-%", period);
+        tx.execute(
+            "INSERT OR IGNORE INTO all_time_hosts (host_kind,host_hi,host_lo,host_text) \
+             SELECT ip_kind, ip_hi, ip_lo, '' FROM daily_ip_log WHERE date LIKE ?1",
+            params![like_pattern],
+        )?;
+
+        // Cache monthly unique-IP count so reports don't need to run DISTINCT at query time.
+        tx.execute(
+            "INSERT OR REPLACE INTO site_count_cache (period, count) \
+             SELECT ?1, COUNT(*) FROM (
+               SELECT DISTINCT ip_kind, ip_hi, ip_lo FROM daily_ip_log WHERE date LIKE ?2
+             )",
+            params![period, like_pattern],
+        )?;
+
+        // Also update the yearly cached count since this month may have added new IPs.
+        let year = &period[..4];
+        let year_like = format!("{}-%" , year);
+        tx.execute(
+            "INSERT OR REPLACE INTO site_count_cache (period, count) \
+             SELECT ?1, COUNT(*) FROM (
+               SELECT DISTINCT ip_kind, ip_hi, ip_lo FROM daily_ip_log WHERE date LIKE ?2
+             )",
+            params![year, year_like],
+        )?;
+
+        for (table, col) in [
+            ("monthly_urls_hits", "hits"),
+            ("monthly_urls_bandwidth", "bandwidth"),
+            ("monthly_hosts_hits", "hits"),
+            ("monthly_hosts_bandwidth", "bandwidth"),
+            ("monthly_refs", "hits"),
+            ("monthly_agents", "hits"),
+        ] {
+            Self::prune_monthly_table(&tx, table, period, col, top_n)?;
+        }
+
+        tx.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, '1') \
+             ON CONFLICT (key) DO UPDATE SET value = '1'",
+            params![format!("month_{}_complete", period)],
+        )?;
+
+        tx.commit()
+            .context("Failed to commit finalize_month transaction")?;
+        Ok(())
+    }
+
+    fn prune_monthly_table(
+        tx: &rusqlite::Transaction<'_>,
+        table: &str,
+        period: &str,
+        order_col: &str,
+        top_n: usize,
+    ) -> Result<()> {
+        let sql = format!(
+            "DELETE FROM {table} \
+             WHERE period = ?1 \
+             AND rowid NOT IN ( \
+               SELECT rowid FROM {table} \
+               WHERE period = ?1 \
+               ORDER BY {order_col} DESC \
+               LIMIT ?2 \
+             )"
+        );
+        tx.execute(&sql, params![period, top_n as i64])?;
+        Ok(())
+    }
+}
+
+fn encode_ip(ip: IpAddr) -> (u8, u64, u64) {
+    match ip {
+        IpAddr::V4(v4) => (1, 0, u32::from(v4) as u64),
+        IpAddr::V6(v6) => {
+            let n = u128::from(v6);
+            (2, (n >> 64) as u64, n as u64)
+        }
     }
 }

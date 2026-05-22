@@ -375,7 +375,7 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
         &format!("Generating reports for {} year(s)", years.len()),
     );
 
-    let compact_counts = should_use_compact_counts(cfg.hll_precision);
+    let compact_counts = false;
 
     for year in &years {
         let year_start = std::time::Instant::now();
@@ -744,12 +744,6 @@ fn compact_3sf(n: u64) -> String {
     format!("{}{}", num, UNITS[unit_idx])
 }
 
-fn should_use_compact_counts(hll_precision: u8) -> bool {
-    // HyperLogLog relative standard error is approximately 1.04/sqrt(m), where m=2^p.
-    let m = (1usize << hll_precision) as f64;
-    let rse = 1.04 / m.sqrt();
-    rse > 0.001
-}
 
 fn format_bytes(n: u64) -> String {
     if n < 1_024 {

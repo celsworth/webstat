@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::hash::Hasher;
 use std::os::unix::fs::MetadataExt;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -7,21 +6,14 @@ use std::time::{Duration, Instant};
 
 use ahash::AHashMap;
 use anyhow::Result;
-use twox_hash::XxHash3_64;
 
 use crate::compression::CompressionType;
 use crate::database::{Database, ParseStateUpdate, VisitStateKey, VisitStateUpdate};
 use crate::fingerprint::compute_fingerprints;
 use crate::geo::Geo;
-use crate::hll::HyperLogLog;
 use crate::logging;
 use crate::progress::print_dir_progress;
 use crate::run_accumulators::RunAccumulators;
-use crate::topn::{
-    CountryHitsMap, PeriodCountMap, TopHostsByBandwidth, TopHostsByHits, TopNCount, TopNHosts,
-    TopNHostsByBandwidth, TopNUrls, TopNUrlsByBandwidth, TopUrlsByBandwidth, TopUrlsByHits,
-};
-use crate::ua::UaParser;
 use crate::util::{
     days_from_civil, extract_host_from_url, file_ext, parse_ipv4_u32, parse_ipv6_u128, strip_query,
     FILE_EXTS,
@@ -67,27 +59,19 @@ struct FileResumePlan {
 pub struct Processor {
     db: Database,
     geo: Geo,
-    ua: UaParser,
     top_n: usize,
     vacuum_after_prune: bool,
-    enable_pruner: bool,
     bot_filter: bool,
     site_host: Option<String>,
     enable_top_urls: bool,
     enable_top_hosts: bool,
     enable_top_refs: bool,
-    hll_precision: u8,
-    topn_k: usize,
     checkpoint_every: Option<Duration>,
-    time_cache: AHashMap<u32, (Arc<str>, Arc<str>, Arc<str>)>,
+    time_cache: AHashMap<u32, (Arc<str>, Arc<str>)>,
     referer_cache: AHashMap<String, Arc<str>>,
-    ip_ids_v4: AHashMap<u32, u32>,
-    ip_ids_v6: AHashMap<u128, u32>,
-    ip_ids_other: AHashMap<String, u32>,
-    next_ip_id: u32,
+    geo_cache: AHashMap<String, (Arc<str>, Arc<str>)>,
     visit_last_seen: AHashMap<VisitStateKey, i64>,
     visit_state_dirty: AHashMap<VisitStateKey, i64>,
-    geo_cache: AHashMap<u32, (Arc<str>, Arc<str>)>,
     visit_max_seen_ts: i64,
 }
 
@@ -95,42 +79,31 @@ pub struct Processor {
 pub struct ProcessorConfig {
     pub top_n: usize,
     pub vacuum_after_prune: bool,
-    pub enable_pruner: bool,
     pub bot_filter: bool,
     pub site_host: Option<String>,
     pub enable_top_urls: bool,
     pub enable_top_hosts: bool,
     pub enable_top_refs: bool,
-    pub hll_precision: u8,
-    pub topn_k: usize,
 }
 
 impl Processor {
-    pub fn new(db: Database, geo: Geo, ua: UaParser, config: ProcessorConfig) -> Self {
+    pub fn new(db: Database, geo: Geo, config: ProcessorConfig) -> Self {
         Self {
             db,
             geo,
-            ua,
             top_n: config.top_n,
             vacuum_after_prune: config.vacuum_after_prune,
-            enable_pruner: config.enable_pruner,
             bot_filter: config.bot_filter,
             site_host: config.site_host,
             enable_top_urls: config.enable_top_urls,
             enable_top_hosts: config.enable_top_hosts,
             enable_top_refs: config.enable_top_refs,
-            hll_precision: config.hll_precision,
-            topn_k: config.topn_k,
             checkpoint_every: None,
             time_cache: AHashMap::with_capacity(8_192),
             referer_cache: AHashMap::with_capacity(8_192),
-            ip_ids_v4: AHashMap::with_capacity(262_144),
-            ip_ids_v6: AHashMap::with_capacity(32_768),
-            ip_ids_other: AHashMap::with_capacity(256),
-            next_ip_id: 1,
+            geo_cache: AHashMap::with_capacity(262_144),
             visit_last_seen: AHashMap::with_capacity(262_144),
             visit_state_dirty: AHashMap::with_capacity(262_144),
-            geo_cache: AHashMap::with_capacity(262_144),
             visit_max_seen_ts: 0,
         }
     }
@@ -229,12 +202,17 @@ impl Processor {
             return Ok(0);
         }
 
-        // Sort oldest-first so visit-state is accumulated in chronological order.
-        files.sort_by_key(|f| std::fs::metadata(f).map(|m| m.mtime()).unwrap_or(0));
+        // Sort by the timestamp on the first parseable log line in each file so
+        // files are processed in chronological order regardless of mtime.
+        files.sort_by_key(|f| first_line_timestamp(f).unwrap_or_else(|| {
+            std::fs::metadata(f).map(|m| m.mtime()).unwrap_or(0)
+        }));
 
         let dir_started = Instant::now();
 
         self.load_visit_state_from_db()?;
+
+        let initial_month = self.db.get_meta("current_month")?.unwrap_or_default();
 
         logging::log(&format!(
             "Found {} file(s) across {} pattern(s)",
@@ -280,6 +258,8 @@ impl Processor {
         let gz_comp_done = Arc::new(AtomicU64::new(seeded.gz_comp_done));
         let gz_decoded_done = Arc::new(AtomicU64::new(seeded.gz_decoded_done));
         let checkpoint_last_elapsed = Arc::new(AtomicU64::new(u64::MAX));
+        let current_month_progress: Arc<std::sync::Mutex<String>> =
+            Arc::new(std::sync::Mutex::new(String::new()));
         let progress_enabled = Arc::new(AtomicBool::new(false));
         let pause_progress = Arc::new(AtomicBool::new(false));
         let rendering_progress = Arc::new(AtomicBool::new(false));
@@ -291,6 +271,7 @@ impl Processor {
         let final_gz_comp_done = gz_comp_done.clone();
         let final_gz_decoded_done = gz_decoded_done.clone();
         let final_checkpoint_last_elapsed = checkpoint_last_elapsed.clone();
+        let final_current_month = current_month_progress.clone();
         let final_progress_enabled = progress_enabled.clone();
 
         let progress_thread = self.spawn_progress_thread(
@@ -300,6 +281,7 @@ impl Processor {
             gz_comp_done.clone(),
             gz_decoded_done.clone(),
             checkpoint_last_elapsed.clone(),
+            current_month_progress.clone(),
             progress_enabled.clone(),
             pause_progress.clone(),
             rendering_progress.clone(),
@@ -311,17 +293,18 @@ impl Processor {
             dir_started,
         );
 
-        // Enable progress display only once planning has found work to do.
         progress_enabled.store(true, Ordering::Relaxed);
 
         let result = self.run_pipeline(
             &files,
+            initial_month,
             files_done,
             bytes_done,
             lines_done,
             gz_comp_done,
             gz_decoded_done,
             checkpoint_last_elapsed,
+            current_month_progress,
             dir_started,
         );
 
@@ -329,6 +312,7 @@ impl Processor {
         let _ = progress_thread.join();
 
         if result.is_ok() && final_progress_enabled.load(Ordering::Relaxed) {
+            let month_snap = final_current_month.lock().unwrap().clone();
             print_dir_progress(
                 final_files_done.load(Ordering::Relaxed),
                 count,
@@ -344,6 +328,7 @@ impl Processor {
                 0.0,
                 self.checkpoint_every.map(|d| d.as_secs()).unwrap_or(0),
                 final_checkpoint_last_elapsed.load(Ordering::Relaxed),
+                &month_snap,
             );
         }
         eprintln!();
@@ -364,31 +349,11 @@ impl Processor {
             total_elapsed, lps
         ));
 
-        self.prune_top_tables()?;
-
-        Ok(total)
-    }
-
-    pub fn prune_top_tables(&mut self) -> Result<()> {
-        if !self.enable_pruner {
-            logging::log(
-                "Pruner disabled; skipping top-N table pruning (database may grow larger)",
-            );
-            return Ok(());
+        if self.vacuum_after_prune {
+            self.db.vacuum()?;
         }
 
-        logging::log_debug_at(2, "Pruning top_n tables…");
-        let prune_started = std::time::Instant::now();
-        self.db
-            .trim_top_tables(self.top_n, self.topn_k, true, self.vacuum_after_prune)?;
-        logging::log_debug_at(
-            1,
-            &format!(
-                "Pruning top_n tables complete ({:.2}s)",
-                prune_started.elapsed().as_secs_f64()
-            ),
-        );
-        Ok(())
+        Ok(total)
     }
 
     #[inline]
@@ -421,8 +386,8 @@ impl Processor {
         };
 
         if let Some(cutoff) = prune_before {
-            self.visit_last_seen.retain(|_, ts| *ts >= cutoff);
-            self.visit_state_dirty.retain(|_, ts| *ts >= cutoff);
+            self.visit_last_seen = self.visit_last_seen.drain().filter(|(_, ts)| *ts >= cutoff).collect();
+            self.visit_state_dirty = self.visit_state_dirty.drain().filter(|(_, ts)| *ts >= cutoff).collect();
         }
 
         let mut updates = Vec::with_capacity(self.visit_state_dirty.len());
@@ -445,6 +410,7 @@ impl Processor {
         gz_comp_done: Arc<AtomicU64>,
         gz_decoded_done: Arc<AtomicU64>,
         checkpoint_last_elapsed: Arc<AtomicU64>,
+        current_month: Arc<std::sync::Mutex<String>>,
         progress_enabled: Arc<AtomicBool>,
         pause_progress: Arc<AtomicBool>,
         rendering_progress: Arc<AtomicBool>,
@@ -489,6 +455,7 @@ impl Processor {
                     last_tick_time = now;
                 }
 
+                let month_snap = current_month.lock().unwrap().clone();
                 rendering_progress.store(true, Ordering::Relaxed);
                 print_dir_progress(
                     files_done.load(Ordering::Relaxed),
@@ -505,12 +472,69 @@ impl Processor {
                     ema_bytes_per_sec,
                     checkpoint_interval_secs,
                     checkpoint_last_elapsed.load(Ordering::Relaxed),
+                    &month_snap,
                 );
                 rendering_progress.store(false, Ordering::Relaxed);
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
         })
     }
+}
+
+/// Read up to 20 lines of `path` (decompressing if needed) and return the
+/// Unix timestamp of the first parseable log entry, or `None` on failure.
+fn first_line_timestamp(path: &str) -> Option<i64> {
+    use std::io::{BufRead, BufReader};
+
+    let file = std::fs::File::open(path).ok()?;
+    let reader: Box<dyn std::io::Read> = match CompressionType::from_path(path) {
+        CompressionType::Gz => Box::new(flate2::read::MultiGzDecoder::new(file)),
+        CompressionType::Bz2 => Box::new(bzip2::read::MultiBzDecoder::new(file)),
+        CompressionType::Plain => Box::new(file),
+    };
+    let mut buf = BufReader::new(reader);
+    let mut line = String::new();
+    for _ in 0..20 {
+        line.clear();
+        if buf.read_line(&mut line).ok()? == 0 {
+            break;
+        }
+        if let Some(entry) = crate::parser::OwnedLogEntry::parse(line.trim_end_matches('\n').to_string()) {
+            if let Some(ts) = parse_entry_timestamp(entry.time_str(), entry.month_num) {
+                return Some(ts);
+            }
+        }
+    }
+    None
+}
+
+/// Parse a Unix timestamp from a combined-log time string and month number.
+fn parse_entry_timestamp(time_str: &str, mon_num: u8) -> Option<i64> {
+    let b = time_str.as_bytes();
+    if b.len() < 26 {
+        return None;
+    }
+    let day: u32 = std::str::from_utf8(&b[0..2]).ok()?.parse().ok()?;
+    let year: i32 = std::str::from_utf8(&b[7..11]).ok()?.parse().ok()?;
+    let hour: i64 = std::str::from_utf8(&b[12..14]).ok()?.parse().ok()?;
+    let minute: i64 = std::str::from_utf8(&b[15..17]).ok()?.parse().ok()?;
+    let second: i64 = std::str::from_utf8(&b[18..20]).ok()?.parse().ok()?;
+    let sign = b[21];
+    let tz_hour: i64 = std::str::from_utf8(&b[22..24]).ok()?.parse().ok()?;
+    let tz_min: i64 = std::str::from_utf8(&b[24..26]).ok()?.parse().ok()?;
+    let offset = tz_hour * 3600 + tz_min * 60;
+    let offset = match sign {
+        b'+' => offset,
+        b'-' => -offset,
+        _ => return None,
+    };
+    Some(
+        days_from_civil(year, mon_num as u32, day) * 86_400
+            + hour * 3_600
+            + minute * 60
+            + second
+            - offset,
+    )
 }
 
 /// Update a map keeping only the maximum timestamp per key.

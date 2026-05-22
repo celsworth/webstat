@@ -26,6 +26,7 @@ pub fn print_dir_progress(
     recent_bytes_per_sec: f64,
     checkpoint_interval_secs: u64,
     checkpoint_last_elapsed_secs: u64,
+    current_month: &str,
 ) {
     let gz_ratio = if gz_comp_done > 0 {
         gz_decoded_done as f64 / gz_comp_done as f64
@@ -71,9 +72,15 @@ pub fn print_dir_progress(
     );
     let ts = current_log_timestamp();
 
+    let month_part = if current_month.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", current_month)
+    };
+
     let msg = format!(
-        "{} [{}/{} files] [{}] [{:.0}%] [{}] [{}] [{}]",
-        ts, files_done, files_total, lines_part, pct, lps_str, eta_str, checkpoint_status
+        "{}{} [{}/{} files] [{}] [{:.0}%] [{}] [{}] [{}]",
+        ts, month_part, files_done, files_total, lines_part, pct, lps_str, eta_str, checkpoint_status
     );
     write_progress_line(&msg);
 }

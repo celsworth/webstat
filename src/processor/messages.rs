@@ -1,11 +1,21 @@
 pub use crate::parser::OwnedLogEntry;
 
+use std::sync::Arc;
+
+/// A parsed log entry with its UA family already resolved.
+/// Bot entries are filtered out in the parser stage and never reach the aggregator.
+pub(super) struct ParsedEntry {
+    pub entry: OwnedLogEntry,
+    pub ua_family: Arc<str>,
+}
+
 pub(super) enum LoaderMsg {
     FileStart {
         file_idx: usize,
     },
     Lines {
-        batch: Vec<String>,
+        /// Each line paired with its start byte offset in the (decoded) file.
+        batch: Vec<(String, u64)>,
         /// Byte offset after the last line in this batch.
         /// Plain files: absolute file position; compressed: total decoded bytes.
         current_offset: u64,
@@ -23,8 +33,9 @@ pub(super) enum ParserMsg {
         file_idx: usize,
     },
     Entries {
-        batch: Vec<OwnedLogEntry>,
-        /// Same meaning as LoaderMsg::Lines::current_offset.
+        /// Each parsed entry paired with its start byte offset in the (decoded) file.
+        batch: Vec<(ParsedEntry, u64)>,
+        /// Byte offset after the last entry in this batch.
         current_offset: u64,
     },
     FileDone {

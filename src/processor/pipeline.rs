@@ -91,12 +91,14 @@ impl Processor {
     pub(super) fn run_pipeline(
         &mut self,
         files: &[String],
+        initial_month: String,
         files_done: Arc<AtomicUsize>,
         bytes_done: Arc<AtomicU64>,
         lines_done: Arc<AtomicU64>,
         gz_comp_done: Arc<AtomicU64>,
         gz_decoded_done: Arc<AtomicU64>,
         checkpoint_last_elapsed: Arc<AtomicU64>,
+        current_month_progress: Arc<std::sync::Mutex<String>>,
         dir_started: Instant,
     ) -> Result<(
         u64,
@@ -105,13 +107,7 @@ impl Processor {
         Vec<ParseStateUpdate>,
     )> {
         let count = files.len();
-        let mut run_acc = RunAccumulators::new(
-            64,
-            self.hll_precision,
-            self.enable_top_urls,
-            self.enable_top_hosts,
-            self.enable_top_refs,
-        );
+        let mut run_acc = RunAccumulators::new(initial_month);
         let mut pending_parse_states: Vec<ParseStateUpdate> = Vec::with_capacity(count);
         let mut retired_parse_states: Vec<ParseStateUpdate> = Vec::with_capacity(count);
         let mut seen_retired: AHashSet<(String, u64)> = AHashSet::new();
@@ -165,9 +161,13 @@ impl Processor {
             })?;
 
         let lines_done2 = lines_done.clone();
+        let ua = crate::ua::UaParser::new();
+        let bot_filter = self.bot_filter;
         let parser_handle = std::thread::Builder::new()
             .name("parser".into())
-            .spawn(move || parser_stage::run_parser(parser_rx, parser_tx, lines_done2))?;
+            .spawn(move || {
+                parser_stage::run_parser(parser_rx, parser_tx, lines_done2, ua, bot_filter)
+            })?;
 
         // ── Phase 4: aggregator loop (runs on this thread) ─────────────────────
         let mut total = 0u64;
@@ -199,8 +199,47 @@ impl Processor {
                         af.last_offset = current_offset;
                     }
                     total += batch.len() as u64;
-                    for entry in batch {
-                        self.aggregate_entry(entry, &mut run_acc);
+                    for (parsed, entry_offset) in batch {
+                        // Month boundary detection: when the entry's month differs
+                        // from the current accumulator month, finalize the old month.
+                        if let Some(entry_month) =
+                            Self::entry_month(parsed.entry.time_str(), parsed.entry.month_num)
+                        {
+                            if !run_acc.current_month.is_empty()
+                                && entry_month != run_acc.current_month
+                            {
+                                // Use this entry's start offset, not the batch end offset.
+                                // Everything before entry_offset is already flushed; on
+                                // resume we seek here and re-read this M2 entry correctly.
+                                let partial = active.as_ref().map(|af| {
+                                    let mut ps = af.partial_parse_state();
+                                    ps.uncompressed_offset = entry_offset;
+                                    ps
+                                });
+                                let mut ps = pending_parse_states.clone();
+                                if let Some(p) = partial {
+                                    ps.push(p);
+                                }
+                                let new_month = entry_month.clone();
+                                self.finalize_and_advance_month(
+                                    &mut run_acc,
+                                    &ps,
+                                    &retired_parse_states,
+                                    new_month.clone(),
+                                )?;
+                                *current_month_progress.lock().unwrap() = new_month;
+                                pending_parse_states.clear();
+                                retired_parse_states.clear();
+                                last_checkpoint = Instant::now();
+                                checkpoint_last_elapsed
+                                    .store(dir_started.elapsed().as_secs(), Ordering::Relaxed);
+                            } else if run_acc.current_month.is_empty() {
+                                run_acc.current_month = entry_month.clone();
+                                *current_month_progress.lock().unwrap() = entry_month;
+                                self.db.set_meta("current_month", &run_acc.current_month)?;
+                            }
+                        }
+                        self.aggregate_entry(parsed, &mut run_acc);
                     }
 
                     if self.checkpoint_due(&last_checkpoint) {
@@ -208,13 +247,10 @@ impl Processor {
                             pending_parse_states.push(af.partial_parse_state());
                         }
                         self.flush_run(&run_acc, &pending_parse_states, &retired_parse_states)?;
-                        run_acc = RunAccumulators::new(
-                            64,
-                            self.hll_precision,
-                            self.enable_top_urls,
-                            self.enable_top_hosts,
-                            self.enable_top_refs,
-                        );
+                        let month = run_acc.current_month.clone();
+                        run_acc.clear_for_new_month(month);
+                        self.geo_cache = AHashMap::new();
+                        self.referer_cache = AHashMap::new();
                         pending_parse_states.clear();
                         retired_parse_states.clear();
                         last_checkpoint = Instant::now();

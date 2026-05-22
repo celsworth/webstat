@@ -3,54 +3,52 @@ use super::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::method_proto::{
-        METHOD_COUNT, METHOD_GET, METHOD_POST, PROTO_1_1, PROTO_2_0, PROTO_COUNT,
-    };
+    use crate::method_proto::{METHOD_COUNT, METHOD_GET, METHOD_POST, PROTO_1_1, PROTO_2_0, PROTO_COUNT};
+    use std::collections::HashSet;
 
     fn open_test_db() -> Database {
         Database::open(":memory:").expect("open in-memory db")
     }
 
-    fn empty_flush(
-        db: &mut Database,
-        method_counts: &MethodCountsMap,
-        proto_counts: &ProtoCountsMap,
-    ) {
-        db.flush_all_with_parse_states_split(
-            &AHashMap::new(),
-            &AHashMap::new(),
-            &AHashMap::new(),
-            &AHashMap::new(),
-            &AHashMap::new(),
-            &AHashMap::new(),
-            &AHashMap::new(),
-            &AHashMap::new(),
-            &AHashMap::new(),
-            &AHashMap::new(),
-            &AHashMap::new(),
-            None,
-            &[],
-            &[],
-            &[],
-            None,
+    fn empty_flush(db: &mut Database, period: &str, method_counts: &[u64], proto_counts: &[u64]) {
+        let empty_hourly = ahash::AHashMap::new();
+        let empty_urls = ahash::AHashMap::new();
+        let empty_hosts = ahash::AHashMap::new();
+        let empty_host_geo = ahash::AHashMap::new();
+        let empty_refs = ahash::AHashMap::new();
+        let empty_agents = ahash::AHashMap::new();
+        let empty_ips = ahash::AHashMap::new();
+        let empty_countries = ahash::AHashMap::new();
+        let empty_status = ahash::AHashMap::new();
+        db.flush(crate::database::writer::FlushData {
+            period,
+            hourly: &empty_hourly,
+            urls: &empty_urls,
+            hosts: &empty_hosts,
+            host_geo: &empty_host_geo,
+            refs: &empty_refs,
+            agents: &empty_agents,
+            daily_ips: &empty_ips,
+            countries: &empty_countries,
+            status_codes: &empty_status,
             method_counts,
             proto_counts,
-        )
+            parse_states: &[],
+            retired_parse_states: &[],
+            visit_states: &[],
+            visit_state_prune_before_ts: None,
+        })
         .expect("flush");
     }
 
     #[test]
     fn method_counts_stored_with_correct_names_and_values() {
         let mut db = open_test_db();
-        let period = Arc::<str>::from("2026-05");
 
         let mut counts = [0u64; METHOD_COUNT];
         counts[METHOD_GET] = 100;
         counts[METHOD_POST] = 42;
-        let mut method_counts = AHashMap::new();
-        method_counts.insert(Arc::clone(&period), counts);
-
-        empty_flush(&mut db, &method_counts, &AHashMap::new());
+        empty_flush(&mut db, "2026-05", &counts, &[0u64; PROTO_COUNT]);
 
         let get_hits: i64 = db
             .conn
@@ -76,14 +74,10 @@ mod tests {
     #[test]
     fn method_counts_zero_slots_are_not_stored() {
         let mut db = open_test_db();
-        let period = Arc::<str>::from("2026-05");
 
         let mut counts = [0u64; METHOD_COUNT];
-        counts[METHOD_GET] = 5; // only GET is non-zero
-        let mut method_counts = AHashMap::new();
-        method_counts.insert(Arc::clone(&period), counts);
-
-        empty_flush(&mut db, &method_counts, &AHashMap::new());
+        counts[METHOD_GET] = 5;
+        empty_flush(&mut db, "2026-05", &counts, &[0u64; PROTO_COUNT]);
 
         let row_count: i64 = db
             .conn
@@ -99,20 +93,15 @@ mod tests {
     #[test]
     fn method_counts_accumulate_across_flushes() {
         let mut db = open_test_db();
-        let period = Arc::<str>::from("2026-05");
 
         let mut c1 = [0u64; METHOD_COUNT];
         c1[METHOD_GET] = 100;
-        let mut m1 = AHashMap::new();
-        m1.insert(Arc::clone(&period), c1);
-        empty_flush(&mut db, &m1, &AHashMap::new());
+        empty_flush(&mut db, "2026-05", &c1, &[0u64; PROTO_COUNT]);
 
         let mut c2 = [0u64; METHOD_COUNT];
         c2[METHOD_GET] = 50;
         c2[METHOD_POST] = 10;
-        let mut m2 = AHashMap::new();
-        m2.insert(Arc::clone(&period), c2);
-        empty_flush(&mut db, &m2, &AHashMap::new());
+        empty_flush(&mut db, "2026-05", &c2, &[0u64; PROTO_COUNT]);
 
         let get_hits: i64 = db
             .conn
@@ -138,15 +127,11 @@ mod tests {
     #[test]
     fn proto_counts_stored_with_version_strings_not_http_prefix() {
         let mut db = open_test_db();
-        let period = Arc::<str>::from("2026-05");
 
         let mut counts = [0u64; PROTO_COUNT];
         counts[PROTO_1_1] = 80;
         counts[PROTO_2_0] = 20;
-        let mut proto_counts = AHashMap::new();
-        proto_counts.insert(Arc::clone(&period), counts);
-
-        empty_flush(&mut db, &AHashMap::new(), &proto_counts);
+        empty_flush(&mut db, "2026-05", &[0u64; METHOD_COUNT], &counts);
 
         let h11: i64 = db
             .conn
@@ -168,7 +153,6 @@ mod tests {
             .expect("2.0 row");
         assert_eq!(h2, 20);
 
-        // Confirm "HTTP/..." keys are never stored.
         let http_rows: i64 = db
             .conn
             .query_row(
@@ -183,20 +167,15 @@ mod tests {
     #[test]
     fn proto_counts_accumulate_across_flushes() {
         let mut db = open_test_db();
-        let period = Arc::<str>::from("2026-05");
 
         let mut p1 = [0u64; PROTO_COUNT];
         p1[PROTO_1_1] = 200;
-        let mut pc1 = AHashMap::new();
-        pc1.insert(Arc::clone(&period), p1);
-        empty_flush(&mut db, &AHashMap::new(), &pc1);
+        empty_flush(&mut db, "2026-05", &[0u64; METHOD_COUNT], &p1);
 
         let mut p2 = [0u64; PROTO_COUNT];
         p2[PROTO_1_1] = 100;
         p2[PROTO_2_0] = 30;
-        let mut pc2 = AHashMap::new();
-        pc2.insert(Arc::clone(&period), p2);
-        empty_flush(&mut db, &AHashMap::new(), &pc2);
+        empty_flush(&mut db, "2026-05", &[0u64; METHOD_COUNT], &p2);
 
         let h11: i64 = db
             .conn
@@ -219,191 +198,125 @@ mod tests {
         assert_eq!(h2, 30);
     }
 
-    fn insert_top_url(db: &Database, period: &str, url: &str, hits: i64) {
-        db.conn
-            .execute(
-                "INSERT OR REPLACE INTO top_urls_hits (period, url, hits, bandwidth)
-                     VALUES (?1, ?2, ?3, 100)",
-                params![period, url, hits],
-            )
-            .expect("insert top url");
-    }
-
     #[test]
-    fn trim_top_tables_keeps_latest_month_period_in_db_untrimmed() {
+    fn daily_ip_log_deduplicates_across_flushes() {
         let mut db = open_test_db();
 
-        for i in 0..30 {
-            insert_top_url(&db, "2001-01", &format!("/old-{:02}.html", i), 100 - i);
-            insert_top_url(&db, "2001-02", &format!("/new-{:02}.html", i), 100 - i);
+        let ip1: std::net::IpAddr = "1.2.3.4".parse().unwrap();
+        let ip2: std::net::IpAddr = "5.6.7.8".parse().unwrap();
+
+        let mut ips1: HashSet<std::net::IpAddr> = HashSet::new();
+        ips1.insert(ip1);
+        ips1.insert(ip2);
+        let mut daily1 = ahash::AHashMap::new();
+        daily1.insert("2026-05-01".to_string(), ips1);
+
+        let mut ips2: HashSet<std::net::IpAddr> = HashSet::new();
+        ips2.insert(ip1); // duplicate
+        let mut daily2 = ahash::AHashMap::new();
+        daily2.insert("2026-05-01".to_string(), ips2);
+
+        let empty_urls: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
+        let empty_hosts: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
+        let empty_geo: ahash::AHashMap<String, (std::sync::Arc<str>, std::sync::Arc<str>)> =
+            ahash::AHashMap::new();
+        let empty_refs: ahash::AHashMap<String, u64> = ahash::AHashMap::new();
+        let empty_agents: ahash::AHashMap<String, u64> = ahash::AHashMap::new();
+        let empty_countries: ahash::AHashMap<String, u64> = ahash::AHashMap::new();
+        let empty_status: ahash::AHashMap<u16, u64> = ahash::AHashMap::new();
+        for daily in [&daily1, &daily2] {
+            db.flush(crate::database::writer::FlushData {
+                period: "2026-05",
+                hourly: &ahash::AHashMap::new(),
+                urls: &empty_urls,
+                hosts: &empty_hosts,
+                host_geo: &empty_geo,
+                refs: &empty_refs,
+                agents: &empty_agents,
+                daily_ips: daily,
+                countries: &empty_countries,
+                status_codes: &empty_status,
+                method_counts: &[0u64; METHOD_COUNT],
+                proto_counts: &[0u64; PROTO_COUNT],
+                parse_states: &[],
+                retired_parse_states: &[],
+                visit_states: &[],
+                visit_state_prune_before_ts: None,
+            })
+            .expect("flush");
         }
 
-        db.trim_top_tables(20, 200, true, false)
-            .expect("trim top urls");
-
-        let old_count: i64 = db
+        let count: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM top_urls_hits WHERE period = '2001-01'",
+                "SELECT COUNT(*) FROM daily_ip_log WHERE date='2026-05-01'",
                 [],
-                |row| row.get(0),
+                |r| r.get(0),
             )
-            .expect("count old month rows");
-        let latest_count: i64 = db
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM top_urls_hits WHERE period = '2001-02'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("count latest month rows");
-
-        assert_eq!(old_count, 20);
-        assert_eq!(latest_count, 30);
+            .expect("count");
+        assert_eq!(count, 2, "duplicate IP must not be double-inserted");
     }
 
     #[test]
-    fn flush_all_populates_all_time_hosts_uniquely() {
+    fn finalize_month_populates_all_time_hosts() {
         let mut db = open_test_db();
 
-        let hourly: HourlyMap = AHashMap::new();
-        let top_urls: TopUrlsByHits = AHashMap::new();
-        let top_refs: PeriodCountMap = AHashMap::new();
-        let top_agents: PeriodCountMap = AHashMap::new();
-        let top_countries: CountryHitsMap = AHashMap::new();
-        let status_codes: StatusHitsMap = AHashMap::new();
+        let ip1: std::net::IpAddr = "1.2.3.4".parse().unwrap();
+        let ip2: std::net::IpAddr = "5.6.7.8".parse().unwrap();
 
-        let mut first_hosts: TopHostsByHits = AHashMap::new();
-        let mut month_hosts = TopNHosts::new(200);
-        month_hosts.add("site-a", 100);
-        month_hosts.add("site-b", 100);
-        first_hosts.insert(Arc::<str>::from("2026-05"), month_hosts);
+        let mut ips: HashSet<std::net::IpAddr> = HashSet::new();
+        ips.insert(ip1);
+        ips.insert(ip2);
+        let mut daily = ahash::AHashMap::new();
+        daily.insert("2026-05-01".to_string(), ips);
 
-        let mut year_hosts = TopNHosts::new(200);
-        year_hosts.add("site-a", 100);
-        year_hosts.add("site-a", 100);
-        first_hosts.insert(Arc::<str>::from("2026"), year_hosts);
+        let empty_hosts: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
+        let empty_geo: ahash::AHashMap<String, (std::sync::Arc<str>, std::sync::Arc<str>)> =
+            ahash::AHashMap::new();
 
-        db.flush_all(
-            &hourly,
-            &top_urls,
-            &first_hosts,
-            &top_refs,
-            &top_agents,
-            &top_countries,
-            &status_codes,
-        )
-        .expect("first flush");
+        // Flush with some URLs too so pruning runs
+        let mut urls = ahash::AHashMap::new();
+        for i in 0..30u64 {
+            urls.insert(format!("/page-{}.html", i), (100 - i, (100 - i) * 1024));
+        }
 
-        let first_count: i64 = db
+        db.flush(crate::database::writer::FlushData {
+            period: "2026-05",
+            hourly: &ahash::AHashMap::new(),
+            urls: &urls,
+            hosts: &empty_hosts,
+            host_geo: &empty_geo,
+            refs: &ahash::AHashMap::new(),
+            agents: &ahash::AHashMap::new(),
+            daily_ips: &daily,
+            countries: &ahash::AHashMap::new(),
+            status_codes: &ahash::AHashMap::new(),
+            method_counts: &[0u64; METHOD_COUNT],
+            proto_counts: &[0u64; PROTO_COUNT],
+            parse_states: &[],
+            retired_parse_states: &[],
+            visit_states: &[],
+            visit_state_prune_before_ts: None,
+        })
+        .expect("flush");
+
+        db.finalize_month("2026-05", 20).expect("finalize");
+
+        let host_count: i64 = db
             .conn
-            .query_row("SELECT COUNT(*) FROM all_time_hosts", [], |row| row.get(0))
-            .expect("count all_time_hosts after first flush");
-        assert_eq!(first_count, 2);
+            .query_row("SELECT COUNT(*) FROM all_time_hosts", [], |r| r.get(0))
+            .expect("all_time_hosts count");
+        assert_eq!(host_count, 2);
 
-        let mut second_hosts: TopHostsByHits = AHashMap::new();
-        let mut next_month_hosts = TopNHosts::new(200);
-        next_month_hosts.add("site-b", 100);
-        next_month_hosts.add("site-c", 100);
-        second_hosts.insert(Arc::<str>::from("2026-06"), next_month_hosts);
-
-        db.flush_all(
-            &hourly,
-            &top_urls,
-            &second_hosts,
-            &top_refs,
-            &top_agents,
-            &top_countries,
-            &status_codes,
-        )
-        .expect("second flush");
-
-        let second_count: i64 = db
-            .conn
-            .query_row("SELECT COUNT(*) FROM all_time_hosts", [], |row| row.get(0))
-            .expect("count all_time_hosts after second flush");
-        assert_eq!(second_count, 3);
-    }
-
-    #[test]
-    fn flush_all_with_parse_states_merges_hll_site_counts() {
-        let mut db = open_test_db();
-
-        let hourly: HourlyMap = AHashMap::new();
-        let top_urls: TopUrlsByHits = AHashMap::new();
-        let top_hosts: TopHostsByHits = AHashMap::new();
-        let top_refs: PeriodCountMap = AHashMap::new();
-        let top_agents: PeriodCountMap = AHashMap::new();
-        let top_countries: CountryHitsMap = AHashMap::new();
-        let status_codes: StatusHitsMap = AHashMap::new();
-
-        let mut first = AHashMap::new();
-        let mut first_hll = HyperLogLog::new(10);
-        first_hll.add_str("site-a");
-        first_hll.add_str("site-b");
-        first.insert(Arc::<str>::from("2026-05"), first_hll);
-        let mut first_all = HyperLogLog::new(10);
-        first_all.add_str("site-a");
-        first_all.add_str("site-b");
-
-        db.flush_all_with_parse_states(
-            &hourly,
-            &top_urls,
-            &top_hosts,
-            &top_refs,
-            &top_agents,
-            &top_countries,
-            &status_codes,
-            &first,
-            Some(&first_all),
-            &[],
-        )
-        .expect("first hll flush");
-
-        let mut second = AHashMap::new();
-        let mut second_hll = HyperLogLog::new(10);
-        second_hll.add_str("site-b");
-        second_hll.add_str("site-c");
-        second.insert(Arc::<str>::from("2026-05"), second_hll);
-        let mut second_all = HyperLogLog::new(10);
-        second_all.add_str("site-b");
-        second_all.add_str("site-c");
-
-        db.flush_all_with_parse_states(
-            &hourly,
-            &top_urls,
-            &top_hosts,
-            &top_refs,
-            &top_agents,
-            &top_countries,
-            &status_codes,
-            &second,
-            Some(&second_all),
-            &[],
-        )
-        .expect("second hll flush");
-
-        let period_estimate: i64 = db
+        let url_count: i64 = db
             .conn
             .query_row(
-                "SELECT estimate FROM site_counts_hll WHERE scope = '2026-05'",
+                "SELECT COUNT(*) FROM monthly_urls_hits WHERE period='2026-05'",
                 [],
-                |row| row.get(0),
+                |r| r.get(0),
             )
-            .expect("period estimate");
-        let all_time_estimate: i64 = db
-            .conn
-            .query_row(
-                "SELECT estimate FROM site_counts_hll WHERE scope = '__all__'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("all time estimate");
-
-        assert!(period_estimate >= 2);
-        assert!(period_estimate <= 5);
-        assert!(all_time_estimate >= 2);
-        assert!(all_time_estimate <= 5);
+            .expect("url count after prune");
+        assert_eq!(url_count, 20, "should be pruned to top_n=20");
     }
 
     #[test]
@@ -437,5 +350,21 @@ mod tests {
         assert_eq!(state.uncompressed_offset, 456);
         assert_eq!(state.mtime_ns, 1_700_000_000);
         assert!(state.completed);
+    }
+
+    #[test]
+    fn meta_get_set_roundtrip() {
+        let mut db = open_test_db();
+        assert!(db.get_meta("current_month").expect("get").is_none());
+        db.set_meta("current_month", "2026-05").expect("set");
+        assert_eq!(
+            db.get_meta("current_month").expect("get"),
+            Some("2026-05".to_string())
+        );
+        db.set_meta("current_month", "2026-06").expect("update");
+        assert_eq!(
+            db.get_meta("current_month").expect("get"),
+            Some("2026-06".to_string())
+        );
     }
 }

@@ -1,15 +1,18 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use super::messages::{pop_blocking, push_blocking, LoaderMsg, OwnedLogEntry, ParserMsg};
+use super::messages::{pop_blocking, push_blocking, LoaderMsg, OwnedLogEntry, ParsedEntry, ParserMsg};
 use super::PARSER_BATCH_SIZE;
+use crate::ua::UaParser;
 
 pub(super) fn run_parser(
     mut rx: rtrb::Consumer<LoaderMsg>,
     mut tx: rtrb::Producer<ParserMsg>,
     lines_done: Arc<AtomicU64>,
+    mut ua: UaParser,
+    bot_filter: bool,
 ) {
-    let mut entry_batch: Vec<OwnedLogEntry> = Vec::with_capacity(PARSER_BATCH_SIZE);
+    let mut entry_batch: Vec<(ParsedEntry, u64)> = Vec::with_capacity(PARSER_BATCH_SIZE);
     let mut current_offset: u64 = 0;
 
     loop {
@@ -23,9 +26,19 @@ pub(super) fn run_parser(
                 current_offset: offset,
             } => {
                 current_offset = offset;
-                for line in batch {
+                for (line, line_start) in batch {
                     if let Some(entry) = OwnedLogEntry::parse(line) {
-                        entry_batch.push(entry);
+                        let ua_result = ua.parse(entry.user_agent());
+                        if bot_filter && ua_result.is_bot {
+                            continue;
+                        }
+                        entry_batch.push((
+                            ParsedEntry {
+                                entry,
+                                ua_family: ua_result.family,
+                            },
+                            line_start,
+                        ));
 
                         if entry_batch.len() >= PARSER_BATCH_SIZE {
                             lines_done.fetch_add(entry_batch.len() as u64, Ordering::Relaxed);
@@ -38,9 +51,6 @@ pub(super) fn run_parser(
                             );
                             entry_batch = Vec::with_capacity(PARSER_BATCH_SIZE);
                         }
-                    } else {
-                        // If parsing fails, we can choose to log it, count it, or ignore it.
-                        // For now, we'll just ignore malformed lines.
                     }
                 }
             }

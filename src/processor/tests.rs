@@ -5,11 +5,11 @@ mod tests {
     use super::*;
     use crate::database::Database;
     use crate::geo::Geo;
-    use crate::ua::UaParser;
     use flate2::{write::GzEncoder, Compression};
     use rusqlite::Connection;
     use std::fs::{self, File, OpenOptions};
     use std::io::Write;
+    use std::os::unix::fs::MetadataExt;
     use std::path::Path;
     use tempfile::TempDir;
 
@@ -85,18 +85,14 @@ mod tests {
         Processor::new(
             db,
             Geo::new(None),
-            UaParser::new(),
             ProcessorConfig {
                 top_n: 20,
                 vacuum_after_prune: false,
-                enable_pruner: true,
                 bot_filter: false,
                 site_host: None,
                 enable_top_urls: true,
                 enable_top_hosts: true,
                 enable_top_refs: true,
-                hll_precision: 14,
-                topn_k: 200,
             },
         )
     }
@@ -351,84 +347,6 @@ mod tests {
     // ── Multi-File Processing ────────────────────────────────────────────────────
 
     #[test]
-    fn process_globs_persists_hll_site_counts_when_enabled() {
-        let temp = TempDir::new().expect("tempdir");
-        let db_path = temp.path().join("webstat.db");
-        let log_a = temp.path().join("a.log");
-        let log_b = temp.path().join("b.log");
-
-        write_plain_file(
-            &log_a,
-            &[
-                sample_line_at(
-                    "10.0.0.1",
-                    "08/May/2026:14:00:00 +0000",
-                    "/index.html",
-                    200,
-                    100,
-                    "-",
-                    "Mozilla/5.0",
-                ),
-                sample_line_at(
-                    "10.0.0.2",
-                    "08/May/2026:14:05:00 +0000",
-                    "/index.html",
-                    200,
-                    100,
-                    "-",
-                    "Mozilla/5.0",
-                ),
-            ],
-        );
-        write_plain_file(
-            &log_b,
-            &[
-                sample_line_at(
-                    "10.0.0.2",
-                    "08/May/2026:15:00:00 +0000",
-                    "/about",
-                    200,
-                    100,
-                    "-",
-                    "Mozilla/5.0",
-                ),
-                sample_line_at(
-                    "10.0.0.3",
-                    "08/May/2026:15:05:00 +0000",
-                    "/about",
-                    200,
-                    100,
-                    "-",
-                    "Mozilla/5.0",
-                ),
-            ],
-        );
-
-        let mut processor = new_processor(&db_path);
-        let glob = format!(
-            "{},{}",
-            log_a.to_str().expect("log a utf-8"),
-            log_b.to_str().expect("log b utf-8")
-        );
-        let processed = processor.process_globs(&glob).expect("process globs");
-        assert_eq!(processed, 4);
-
-        let conn = Connection::open(&db_path).expect("open db for validation");
-        for scope in ["2026-05-08", "2026-05", "2026", "__all__"] {
-            let estimate: i64 = conn
-                .query_row(
-                    "SELECT estimate FROM site_counts_hll WHERE scope = ?1",
-                    rusqlite::params![scope],
-                    |row| row.get(0),
-                )
-                .expect("read hll estimate");
-            // Should estimate 2-3 unique IPs (HLL is approximate)
-            assert!(estimate >= 2, "scope={scope}, estimate={estimate}");
-            assert!(estimate <= 5, "scope={scope}, estimate={estimate}");
-        }
-    }
-
-    #[test]
     fn process_globs_persists_visit_state_across_restart() {
         let temp = TempDir::new().expect("tempdir");
         let db_path = temp.path().join("webstat.db");
@@ -496,6 +414,137 @@ mod tests {
         assert_eq!(visit_state_rows, 1);
     }
 
+    // ── Month boundary hit counting ───────────────────────────────────────────
+
+    fn jan_line(i: usize) -> String {
+        format!(
+            r#"1.2.3.{i} - - [15/Jan/2026:10:00:00 +0000] "GET /jan/{i} HTTP/1.1" 200 100 "-" "Mozilla/5.0""#
+        )
+    }
+
+    fn feb_line(i: usize) -> String {
+        format!(
+            r#"1.2.3.{i} - - [15/Feb/2026:10:00:00 +0000] "GET /feb/{i} HTTP/1.1" 200 100 "-" "Mozilla/5.0""#
+        )
+    }
+
+    #[test]
+    fn month_boundary_clean_run_counts_all_entries() {
+        // Sanity check: a single file spanning two months is fully processed.
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("webstat.db");
+        let log_path = temp.path().join("access.log");
+
+        let lines: Vec<String> = (0..10)
+            .map(jan_line)
+            .chain((0..10).map(feb_line))
+            .collect();
+        write_plain_file(&log_path, &lines);
+
+        let mut processor = new_processor(&db_path);
+        let processed = processor
+            .process_globs(log_path.to_str().unwrap())
+            .unwrap();
+        assert_eq!(processed, 20);
+
+        let conn = Connection::open(&db_path).unwrap();
+        let hits: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(hits),0) FROM hourly_stats",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hits, 20);
+    }
+
+    #[test]
+    fn month_boundary_resume_from_mid_batch_offset_counts_all_entries() {
+        // Regression test for the mid-batch month-boundary offset bug.
+        //
+        // When a month boundary is detected mid-batch, the old code saved the parse
+        // state at `last_offset` = end of the entire batch. Any entries from the new
+        // month that were in the same batch would be in memory but never flushed. On
+        // resume, those entries were skipped because the saved offset pointed past them.
+        //
+        // The fix: at a month boundary, save `entry_offset` (the start byte of the
+        // first new-month entry) instead of `last_offset` (end of batch). On resume
+        // the processor seeks to that exact byte and re-reads all new-month entries.
+        //
+        // This test simulates the post-interruption DB state by injecting a parse_state
+        // row with `uncompressed_offset` pointing to the start of the Feb entries, then
+        // verifies the processor resumes from there and processes exactly the Feb lines.
+        // With the old (buggy) code the injected offset would have been `file_size`
+        // (end of batch = end of file when all entries fit in one batch), causing the
+        // resume run to process 0 lines and lose the Feb entries permanently.
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("webstat.db");
+        let log_path = temp.path().join("access.log");
+
+        let jan_lines: Vec<String> = (0..10).map(jan_line).collect();
+        let feb_lines: Vec<String> = (0..10).map(feb_line).collect();
+
+        // Write Jan then Feb — all 20 entries fit in one parser batch (PARSER_BATCH_SIZE=256),
+        // so the month boundary is mid-batch.
+        let mut all_lines = jan_lines.clone();
+        all_lines.extend(feb_lines.clone());
+        write_plain_file(&log_path, &all_lines);
+
+        // Byte offset where Feb entries start (= end of Jan entries including newlines).
+        let jan_bytes: u64 = jan_lines.iter().map(|l| l.len() as u64 + 1).sum();
+        let file_size: u64 =
+            jan_bytes + feb_lines.iter().map(|l| l.len() as u64 + 1).sum::<u64>();
+
+        let meta = std::fs::metadata(&log_path).unwrap();
+        let inode = meta.ino();
+        let mtime_ns = meta.mtime() * 1_000_000_000 + meta.mtime_nsec();
+
+        // Initialise the DB schema (processor opens and creates tables).
+        let _ = new_processor(&db_path);
+
+        // Inject a parse_state row that simulates being interrupted right after
+        // the month-boundary flush: Jan was committed, offset is at start of Feb.
+        // The old buggy code would have saved uncompressed_offset = file_size here,
+        // causing the resume to skip all Feb entries.
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "INSERT INTO parse_state
+             (filepath, inode, compressed_size, uncompressed_size,
+              compressed_head_fingerprint, uncompressed_head_fingerprint,
+              compressed_offset, uncompressed_offset, mtime_ns, completed)
+             VALUES (?1, ?2, 0, ?3, NULL, NULL, 0, ?4, ?5, 0)",
+            rusqlite::params![
+                log_path.to_str().unwrap(),
+                inode as i64,
+                file_size as i64,
+                jan_bytes as i64, // correct resume offset = start of Feb entries
+                mtime_ns,
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        // Resume run: should pick up from jan_bytes and process exactly the 10 Feb lines.
+        let mut processor = new_processor(&db_path);
+        let processed = processor
+            .process_globs(log_path.to_str().unwrap())
+            .unwrap();
+        assert_eq!(
+            processed, 10,
+            "resume from start-of-Feb offset should process exactly the 10 Feb entries"
+        );
+
+        let conn = Connection::open(&db_path).unwrap();
+        let hits: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(hits),0) FROM hourly_stats",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hits, 10, "only Feb entries should be in DB after resume");
+    }
+
     #[test]
     fn file_rotation_append_then_rotate_does_not_reprocess() {
         let temp = TempDir::new().expect("tempdir");
@@ -559,7 +608,7 @@ mod tests {
         let conn = Connection::open(&db_path).expect("open db");
         let sites: i64 = conn
             .query_row(
-                "SELECT sites FROM hourly_stats WHERE date = '2026-05-08' AND hour = 14",
+                "SELECT COUNT(*) FROM daily_ip_log WHERE date = '2026-05-08'",
                 [],
                 |row| row.get(0),
             )
@@ -593,7 +642,7 @@ mod tests {
         let conn = Connection::open(&db_path).expect("open db");
         let sites: i64 = conn
             .query_row(
-                "SELECT sites FROM hourly_stats WHERE date = '2026-05-08' AND hour = 14",
+                "SELECT COUNT(*) FROM daily_ip_log WHERE date = '2026-05-08'",
                 [],
                 |row| row.get(0),
             )
@@ -631,7 +680,7 @@ mod tests {
 
         let (month_hits, month_bw): (i64, i64) = conn
             .query_row(
-                "SELECT hits, bandwidth FROM top_urls_hits WHERE period = '2026-05' AND url = '/popular.html'",
+                "SELECT hits, bandwidth FROM monthly_urls_hits WHERE period = '2026-05' AND url = '/popular.html'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )

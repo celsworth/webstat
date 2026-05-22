@@ -7,7 +7,6 @@ mod tests {
     use crate::database::Database;
     use crate::geo::Geo;
     use crate::processor::{Processor, ProcessorConfig};
-    use crate::ua::UaParser;
     use rusqlite::Connection;
     use std::fs::{self, File};
     use std::io::Write;
@@ -38,27 +37,18 @@ mod tests {
     fn process_logs(cfg: &Config) -> u64 {
         let db = Database::open(&cfg.database).expect("open db");
         let geo = Geo::new(cfg.geoip_db.as_deref());
-        let ua = UaParser::new();
 
         let mut processor = Processor::new(
             db,
             geo,
-            ua,
             ProcessorConfig {
                 top_n: cfg.top_n,
                 vacuum_after_prune: cfg.vacuum_after_prune,
-                enable_pruner: cfg.enable_pruner,
                 bot_filter: cfg.bot_filter,
                 site_host: cfg.site_host.clone(),
                 enable_top_urls: cfg.enable_top_urls,
                 enable_top_hosts: cfg.enable_top_hosts,
                 enable_top_refs: cfg.enable_top_refs,
-                hll_precision: cfg.hll_precision,
-                topn_k: if cfg.topn_k == 0 {
-                    cfg.top_n.saturating_mul(100).max(1)
-                } else {
-                    cfg.topn_k.max(1)
-                },
             },
         );
         processor.set_checkpoint_interval_minutes(cfg.checkpoint_minutes);
@@ -154,16 +144,13 @@ mod tests {
             enable_top_hosts: true,
             enable_top_refs: true,
             vacuum_after_prune: false,
-            enable_pruner: true,
             bot_filter: true,
             site_host: Some("mysite.test".to_string()),
-            hll_precision: 14,
-            topn_k: 0,
             checkpoint_minutes: 0,
         };
 
         let imported = process_logs(&cfg);
-        assert_eq!(imported, 6);
+        assert_eq!(imported, 5); // 6 lines total, 1 Googlebot filtered out by bot_filter
         generate_html(&cfg).expect("generate html");
 
         assert!(output_dir.join("index.html").exists());
@@ -254,11 +241,8 @@ mod tests {
             enable_top_hosts: true,
             enable_top_refs: true,
             vacuum_after_prune: false,
-            enable_pruner: true,
             bot_filter: true,
             site_host: Some("incremental.test".to_string()),
-            hll_precision: 14,
-            topn_k: 0,
             checkpoint_minutes: 0,
         };
 

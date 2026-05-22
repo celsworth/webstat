@@ -1,9 +1,31 @@
 use super::merge_max;
-use super::messages::OwnedLogEntry;
+use super::messages::ParsedEntry;
 use super::*;
-use crate::method_proto::{method_index, proto_index, METHOD_COUNT, PROTO_COUNT};
-use std::hash::{Hash, Hasher};
-use ahash::AHasher;
+use crate::method_proto::{method_index, proto_index};
+
+/// Parse two ASCII decimal digits from `b[i..i+2]` without going through str.
+#[inline]
+fn parse_2d(b: &[u8], i: usize) -> Option<u8> {
+    let hi = b[i].wrapping_sub(b'0');
+    let lo = b[i + 1].wrapping_sub(b'0');
+    if hi > 9 || lo > 9 {
+        return None;
+    }
+    Some(hi * 10 + lo)
+}
+
+/// Parse four ASCII decimal digits from `b[i..i+4]` without going through str.
+#[inline]
+fn parse_4d(b: &[u8], i: usize) -> Option<i32> {
+    let d0 = b[i].wrapping_sub(b'0') as i32;
+    let d1 = b[i + 1].wrapping_sub(b'0') as i32;
+    let d2 = b[i + 2].wrapping_sub(b'0') as i32;
+    let d3 = b[i + 3].wrapping_sub(b'0') as i32;
+    if d0 > 9 || d1 > 9 || d2 > 9 || d3 > 9 {
+        return None;
+    }
+    Some(d0 * 1000 + d1 * 100 + d2 * 10 + d3)
+}
 
 impl Processor {
     fn visit_state_key(ip: &str) -> VisitStateKey {
@@ -35,17 +57,22 @@ impl Processor {
 
     // ── Per-entry aggregation ─────────────────────────────────────────────────
 
-    pub(super) fn aggregate_entry(&mut self, entry: OwnedLogEntry, run_acc: &mut RunAccumulators) {
-        let ua_result = self.ua.parse(entry.user_agent());
-        if self.bot_filter && ua_result.is_bot {
-            return;
+    /// Extract "YYYY-MM" month string from a log timestamp and month number.
+    pub(super) fn entry_month(time_str: &str, mon_num: u8) -> Option<String> {
+        let b = time_str.as_bytes();
+        if b.len() < 11 {
+            return None;
         }
+        let year = parse_4d(b, 7)?;
+        Some(format!("{year}-{mon_num:02}"))
+    }
 
-        let (date, hour, month_period, year_period, request_ts) = {
+    pub(super) fn aggregate_entry(&mut self, parsed: ParsedEntry, run_acc: &mut RunAccumulators) {
+        let ParsedEntry { entry, ua_family: agent } = parsed;
+
+        let (date, hour, _month_period, request_ts) = {
             match self.time_periods_with_timestamp(entry.time_str(), entry.month_num) {
-                Some((date, hour, month_period, year_period, request_ts)) => {
-                    (date, hour, month_period, year_period, Some(request_ts))
-                }
+                Some(v) => v,
                 None => return,
             }
         };
@@ -55,8 +82,6 @@ impl Processor {
         let ip = entry.ip();
         let path = entry.path();
         let clean_path = strip_query(path);
-        let ip_id = self.intern_ip_id(ip);
-        let agent = ua_result.family;
 
         // ── Hourly bucket ──────────────────────────────────────────────────────
         let h = run_acc
@@ -65,34 +90,38 @@ impl Processor {
             .or_default()
             .entry(hour)
             .or_default();
-        let mut hasher = AHasher::default();
-        ip_id.hash(&mut hasher);
-        h.ip_set.add_hash(hasher.finish());
         let stats = &mut h.stats;
+
+        // Pre-parse the IP once; used for both visit tracking and daily_ips.
+        let ip_addr = parse_ipv4_u32(ip)
+            .map(|v| std::net::IpAddr::V4(std::net::Ipv4Addr::from(v)))
+            .or_else(|| {
+                parse_ipv6_u128(ip)
+                    .map(|v| std::net::IpAddr::V6(std::net::Ipv6Addr::from(v)))
+            })
+            .or_else(|| ip.parse().ok());
 
         if let Some(ts) = request_ts {
             if ts > self.visit_max_seen_ts {
                 self.visit_max_seen_ts = ts;
             }
             let visit_key = Self::visit_state_key(ip);
-            let is_new_visit = {
-                let new_visit = match self.visit_last_seen.entry(visit_key.clone()) {
+            let (is_new_visit, dirty_ts) =
+                match self.visit_last_seen.entry(visit_key.clone()) {
                     std::collections::hash_map::Entry::Occupied(mut occ) => {
                         let last_seen = *occ.get();
-                        if ts > last_seen {
-                            *occ.get_mut() = ts;
+                        let new_ts = last_seen.max(ts);
+                        if new_ts > last_seen {
+                            *occ.get_mut() = new_ts;
                         }
-                        ts.saturating_sub(last_seen) > VISIT_TIMEOUT_SECONDS
+                        (ts.saturating_sub(last_seen) > VISIT_TIMEOUT_SECONDS, new_ts)
                     }
                     std::collections::hash_map::Entry::Vacant(v) => {
                         v.insert(ts);
-                        true
+                        (true, ts)
                     }
                 };
-                let dirty_ts = self.visit_last_seen.get(&visit_key).copied().unwrap_or(ts);
-                merge_max(&mut self.visit_state_dirty, visit_key, dirty_ts);
-                new_visit
-            };
+            merge_max(&mut self.visit_state_dirty, visit_key, dirty_ts);
             if is_new_visit {
                 stats.visits += 1;
             }
@@ -118,190 +147,98 @@ impl Processor {
         }
 
         // ── GeoIP ──────────────────────────────────────────────────────────────
-        let (country_code, _country_name) = if let Some(cached) = self.geo_cache.get(&ip_id) {
+        let (country_code, _country_name) = if let Some(cached) = self.geo_cache.get(ip) {
             (Arc::clone(&cached.0), Arc::clone(&cached.1))
         } else {
             let result = self.geo.lookup(ip);
             self.geo_cache
-                .insert(ip_id, (Arc::clone(&result.0), Arc::clone(&result.1)));
+                .insert(ip.to_string(), (Arc::clone(&result.0), Arc::clone(&result.1)));
             result
         };
 
-        // ── Month-period ───────────────────────────────────────────────────────
-        let topn_k = self.topn_k;
-        if self.enable_top_urls {
-            run_acc
-                .top_urls
-                .entry(Arc::clone(&month_period))
-                .or_insert_with(|| TopNUrls::new(topn_k))
-                .add(clean_path, bytes);
+        // ── Daily unique IPs ───────────────────────────────────────────────────
+        if let Some(addr) = ip_addr {
+            if let Some(set) = run_acc.daily_ips.get_mut(&*date) {
+                set.insert(addr);
+            } else {
+                let mut set = std::collections::HashSet::new();
+                set.insert(addr);
+                run_acc.daily_ips.insert(date.to_string(), set);
+            }
+        }
 
-            run_acc
-                .top_urls_bw
-                .entry(Arc::clone(&month_period))
-                .or_insert_with(|| TopNUrlsByBandwidth::new(topn_k))
-                .add(clean_path, bytes);
+        // ── Month-period aggregations ──────────────────────────────────────────
+        if self.enable_top_urls {
+            if let Some(e) = run_acc.urls.get_mut(clean_path) {
+                e.0 += 1;
+                e.1 += bytes;
+            } else {
+                run_acc.urls.insert(clean_path.to_string(), (1, bytes));
+            }
         }
 
         if self.enable_top_hosts {
-            run_acc
-                .top_hosts
-                .entry(Arc::clone(&month_period))
-                .or_insert_with(|| TopNHosts::new(topn_k))
-                .add(ip, bytes);
-
-            run_acc
-                .top_hosts_bw
-                .entry(Arc::clone(&month_period))
-                .or_insert_with(|| TopNHostsByBandwidth::new(topn_k))
-                .add(ip, bytes);
+            if let Some(e) = run_acc.hosts.get_mut(ip) {
+                e.0 += 1;
+                e.1 += bytes;
+            } else {
+                run_acc.hosts.insert(ip.to_string(), (1, bytes));
+            }
         }
 
-        *run_acc
-            .status_codes
-            .entry(Arc::clone(&month_period))
-            .or_default()
-            .entry(status)
-            .or_insert(0) += 1;
+        *run_acc.status_codes.entry(status).or_insert(0) += 1;
 
-        run_acc
-            .top_agents
-            .entry(Arc::clone(&month_period))
-            .or_insert_with(|| TopNCount::new(topn_k))
-            .add(agent.as_ref(), 1);
-
-        // ── Year-period ────────────────────────────────────────────────────────
-        if false && self.enable_top_urls {
-            run_acc
-                .top_urls
-                .entry(Arc::clone(&year_period))
-                .or_insert_with(|| TopNUrls::new(topn_k))
-                .add(clean_path, bytes);
-
-            run_acc
-                .top_urls_bw
-                .entry(Arc::clone(&year_period))
-                .or_insert_with(|| TopNUrlsByBandwidth::new(topn_k))
-                .add(clean_path, bytes);
+        if let Some(v) = run_acc.agents.get_mut(agent.as_ref()) {
+            *v += 1;
+        } else {
+            run_acc.agents.insert(agent.as_ref().to_string(), 1);
         }
 
-        if false && self.enable_top_hosts {
-            run_acc
-                .top_hosts
-                .entry(Arc::clone(&year_period))
-                .or_insert_with(|| TopNHosts::new(topn_k))
-                .add(ip, bytes);
-
-            run_acc
-                .top_hosts_bw
-                .entry(Arc::clone(&year_period))
-                .or_insert_with(|| TopNHostsByBandwidth::new(topn_k))
-                .add(ip, bytes);
-        }
-
-        if false {
-            *run_acc
-                .status_codes
-                .entry(Arc::clone(&year_period))
-                .or_default()
-                .entry(status)
-                .or_insert(0) += 1;
-
-            run_acc
-                .top_agents
-                .entry(Arc::clone(&year_period))
-                .or_insert_with(|| TopNCount::new(topn_k))
-                .add(agent.as_ref(), 1);
-        }
-
-        // ── Referrer ───────────────────────────────────────────────────────────
         if self.enable_top_refs && !entry.referer().is_empty() {
             if let Some(host) = self.extract_host(entry.referer()) {
-                if !(self.site_host.as_deref() == Some(&host)) {
-                    run_acc
-                        .top_refs
-                        .entry(Arc::clone(&month_period))
-                        .or_insert_with(|| TopNCount::new(topn_k))
-                        .add(&host, 1);
-
-                    /*
-                    top_refs
-                        .entry(Arc::clone(&year_period))
-                        .or_insert_with(|| TopNCount::new(topn_k))
-                        .add(&host, 1);
-                        */
+                if !(self.site_host.as_deref() == Some(&*host)) {
+                    if let Some(v) = run_acc.refs.get_mut(&*host) {
+                        *v += 1;
+                    } else {
+                        run_acc.refs.insert(host.to_string(), 1);
+                    }
                 }
             }
         }
 
-        *run_acc
-            .top_countries
-            .entry(Arc::clone(&month_period))
-            .or_default()
-            .entry(country_code.to_string())
-            .or_insert(0) += 1;
-
-        /*
-        *run_acc.top_countries
-            .entry(Arc::clone(&year_period))
-            .or_default()
-            .entry(country_code.to_string())
-            .or_insert(0) += 1;
-            */
-        let ip_hash = {
-            let mut h = XxHash3_64::default();
-            h.write(ip.as_bytes());
-            h.finish()
-        };
-        for scope in [&date, &month_period, &year_period] {
-            run_acc
-                .hll_site_counts
-                .entry(Arc::clone(scope))
-                .or_insert_with(|| HyperLogLog::new(self.hll_precision))
-                .add_hash(ip_hash);
-        }
-        if let Some(ref mut all_time) = run_acc.hll_all_time {
-            all_time.add_hash(ip_hash);
+        if let Some(v) = run_acc.countries.get_mut(&*country_code) {
+            *v += 1;
+        } else {
+            run_acc.countries.insert(country_code.to_string(), 1);
         }
 
-        // ── Method / proto (month + year periods only) ─────────────────────────
-        let mi = method_index(entry.method());
-        let pi = proto_index(entry.proto());
-        for period in [&month_period, &year_period] {
-            run_acc
-                .method_counts
-                .entry(Arc::clone(period))
-                .or_insert([0u64; METHOD_COUNT])[mi] += 1;
-            run_acc
-                .proto_counts
-                .entry(Arc::clone(period))
-                .or_insert([0u64; PROTO_COUNT])[pi] += 1;
-        }
+        run_acc.method_counts[method_index(entry.method())] += 1;
+        run_acc.proto_counts[proto_index(entry.proto())] += 1;
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
 
-    /// Return `(date, hour, month_period, year_period, ts)` decoded from a nginx
-    /// timestamp string "DD/Mon/YYYY:HH:MM:SS ±HHMM".  Results are memoised.
-    fn time_periods_with_timestamp(
+    /// Return `(date, hour, month_period, ts)` decoded from a nginx timestamp.
+    /// Results are memoised by (year, month, day, hour) key.
+    pub(super) fn time_periods_with_timestamp(
         &mut self,
         time_str: &str,
         mon_num: u8,
-    ) -> Option<(Arc<str>, u8, Arc<str>, Arc<str>, i64)> {
+    ) -> Option<(Arc<str>, u8, Arc<str>, Option<i64>)> {
         let b = time_str.as_bytes();
         if b.len() < 26 {
             return None;
         }
 
-        let day: u32 = std::str::from_utf8(&b[0..2]).ok()?.parse().ok()?;
-        let year: i32 = std::str::from_utf8(&b[7..11]).ok()?.parse().ok()?;
-        let hour: u8 = std::str::from_utf8(&b[12..14]).ok()?.parse().ok()?;
-        let minute: i64 = std::str::from_utf8(&b[15..17]).ok()?.parse().ok()?;
-        let second: i64 = std::str::from_utf8(&b[18..20]).ok()?.parse().ok()?;
+        let day = parse_2d(b, 0)? as u32;
+        let year = parse_4d(b, 7)?;
+        let hour = parse_2d(b, 12)?;
+        let minute = parse_2d(b, 15)? as i64;
+        let second = parse_2d(b, 18)? as i64;
 
         let sign = b[21];
-        let tz_hour: i64 = std::str::from_utf8(&b[22..24]).ok()?.parse().ok()?;
-        let tz_min: i64 = std::str::from_utf8(&b[24..26]).ok()?.parse().ok()?;
+        let tz_hour = parse_2d(b, 22)? as i64;
+        let tz_min = parse_2d(b, 24)? as i64;
         let offset = tz_hour * 3600 + tz_min * 60;
         let offset = match sign {
             b'+' => offset,
@@ -317,23 +254,14 @@ impl Processor {
                 + minute * 60
                 + second
                 - offset;
-            return Some((
-                Arc::clone(&cached.0),
-                hour,
-                Arc::clone(&cached.1),
-                Arc::clone(&cached.2),
-                ts,
-            ));
+            return Some((Arc::clone(&cached.0), hour, Arc::clone(&cached.1), Some(ts)));
         }
 
         let mon_s = format!("{mon_num:02}");
         let date = Arc::from(format!("{year}-{mon_s}-{day:02}").as_str());
         let month = Arc::from(format!("{year}-{mon_s}").as_str());
-        let year_arc = Arc::from(format!("{year}").as_str());
-        self.time_cache.insert(
-            key,
-            (Arc::clone(&date), Arc::clone(&month), Arc::clone(&year_arc)),
-        );
+        self.time_cache
+            .insert(key, (Arc::clone(&date), Arc::clone(&month)));
 
         let ts = days_from_civil(year, mon_num as u32, day) * 86_400
             + hour as i64 * 3_600
@@ -341,10 +269,9 @@ impl Processor {
             + second
             - offset;
 
-        Some((date, hour, month, year_arc, ts))
+        Some((date, hour, month, Some(ts)))
     }
 
-    /// Extract and memoise the host portion of a referrer URL.
     fn extract_host(&mut self, url: &str) -> Option<Arc<str>> {
         if let Some(cached) = self.referer_cache.get(url) {
             return Some(Arc::clone(cached));
@@ -355,42 +282,5 @@ impl Processor {
                 .insert(url.to_string(), Arc::clone(host_value));
         }
         host
-    }
-
-    /// Return a stable, exact integer ID for an IP string.
-    ///
-    /// This preserves exact unique-IP semantics while avoiding per-line String
-    /// clones inside hourly uniqueness sets.
-    fn intern_ip_id(&mut self, ip: &str) -> u32 {
-        if let Some(ipv4) = parse_ipv4_u32(ip) {
-            if let Some(id) = self.ip_ids_v4.get(&ipv4) {
-                return *id;
-            }
-
-            let id = self.next_ip_id;
-            self.next_ip_id = self.next_ip_id.saturating_add(1);
-            self.ip_ids_v4.insert(ipv4, id);
-            return id;
-        }
-
-        if let Some(ipv6) = parse_ipv6_u128(ip) {
-            if let Some(id) = self.ip_ids_v6.get(&ipv6) {
-                return *id;
-            }
-
-            let id = self.next_ip_id;
-            self.next_ip_id = self.next_ip_id.saturating_add(1);
-            self.ip_ids_v6.insert(ipv6, id);
-            return id;
-        }
-
-        if let Some(id) = self.ip_ids_other.get(ip) {
-            return *id;
-        }
-
-        let id = self.next_ip_id;
-        self.next_ip_id = self.next_ip_id.saturating_add(1);
-        self.ip_ids_other.insert(ip.to_string(), id);
-        id
     }
 }

@@ -66,18 +66,19 @@ fn read_plain(
     }
     let mut reader = BufReader::with_capacity(1 << 20, file);
     let mut line = String::new();
-    let mut batch: Vec<String> = Vec::with_capacity(LOADER_BATCH_SIZE);
+    let mut batch: Vec<(String, u64)> = Vec::with_capacity(LOADER_BATCH_SIZE);
     let mut bytes_read: u64 = 0;
     let mut reported: u64 = 0;
 
     loop {
+        let line_start = plan.offset + bytes_read;
         line.clear();
         let n = reader.read_line(&mut line)?;
         if n == 0 {
             break;
         }
         bytes_read += n as u64;
-        batch.push(line.clone());
+        batch.push((line.clone(), line_start));
 
         if batch.len() >= LOADER_BATCH_SIZE {
             let current_offset = plan.offset + bytes_read;
@@ -128,12 +129,13 @@ fn read_compressed(
     };
     let mut reader = BufReader::with_capacity(1 << 20, decoder);
     let mut line = String::new();
-    let mut batch: Vec<String> = Vec::with_capacity(LOADER_BATCH_SIZE);
+    let mut batch: Vec<(String, u64)> = Vec::with_capacity(LOADER_BATCH_SIZE);
     let mut decoded_total: u64 = 0;
     let mut skip_remaining = plan.skip_decoded_prefix_bytes;
     let mut reported: u64 = 0;
 
     loop {
+        let line_start = decoded_total;
         line.clear();
         let n = reader.read_line(&mut line)?;
         if n == 0 {
@@ -149,7 +151,7 @@ fn read_compressed(
             }
         }
 
-        batch.push(line.clone());
+        batch.push((line.clone(), line_start));
 
         if batch.len() >= LOADER_BATCH_SIZE {
             let effective = decoded_total.saturating_sub(plan.skip_decoded_prefix_bytes);
