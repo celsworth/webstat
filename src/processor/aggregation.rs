@@ -161,7 +161,7 @@ impl Processor {
             if let Some(set) = run_acc.daily_ips.get_mut(&*date) {
                 set.insert(addr);
             } else {
-                let mut set = std::collections::HashSet::new();
+                let mut set = ahash::AHashSet::new();
                 set.insert(addr);
                 run_acc.daily_ips.insert(date.to_string(), set);
             }

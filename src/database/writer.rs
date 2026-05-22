@@ -1,8 +1,7 @@
-use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use anyhow::Context;
 
 use super::*;
@@ -17,7 +16,7 @@ pub struct FlushData<'a> {
     pub host_geo: &'a AHashMap<String, (Arc<str>, Arc<str>)>,
     pub refs: &'a AHashMap<String, u64>,
     pub agents: &'a AHashMap<String, u64>,
-    pub daily_ips: &'a AHashMap<String, HashSet<IpAddr>>,
+    pub daily_ips: &'a AHashMap<String, AHashSet<IpAddr>>,
     pub countries: &'a AHashMap<String, u64>,
     pub status_codes: &'a AHashMap<u16, u64>,
     pub method_counts: &'a [u64],

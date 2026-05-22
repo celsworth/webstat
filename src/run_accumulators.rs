@@ -1,7 +1,6 @@
-use std::collections::HashSet;
 use std::net::IpAddr;
 
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 
 use crate::accumulators::HourlyMap;
 use crate::method_proto::{METHOD_COUNT, PROTO_COUNT};
@@ -13,7 +12,7 @@ pub(crate) struct RunAccumulators {
     pub(crate) hosts: AHashMap<String, (u64, u64)>,
     pub(crate) refs: AHashMap<String, u64>,
     pub(crate) agents: AHashMap<String, u64>,
-    pub(crate) daily_ips: AHashMap<String, HashSet<IpAddr>>,
+    pub(crate) daily_ips: AHashMap<String, AHashSet<IpAddr>>,
     pub(crate) countries: AHashMap<String, u64>,
     pub(crate) status_codes: AHashMap<u16, u64>,
     pub(crate) method_counts: [u64; METHOD_COUNT],

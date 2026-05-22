@@ -4,7 +4,7 @@ use super::*;
 mod tests {
     use super::*;
     use crate::method_proto::{METHOD_COUNT, METHOD_GET, METHOD_POST, PROTO_1_1, PROTO_2_0, PROTO_COUNT};
-    use std::collections::HashSet;
+    use ahash::AHashSet;
 
     fn open_test_db() -> Database {
         Database::open(":memory:").expect("open in-memory db")
@@ -205,13 +205,13 @@ mod tests {
         let ip1: std::net::IpAddr = "1.2.3.4".parse().unwrap();
         let ip2: std::net::IpAddr = "5.6.7.8".parse().unwrap();
 
-        let mut ips1: HashSet<std::net::IpAddr> = HashSet::new();
+        let mut ips1: AHashSet<std::net::IpAddr> = AHashSet::new();
         ips1.insert(ip1);
         ips1.insert(ip2);
         let mut daily1 = ahash::AHashMap::new();
         daily1.insert("2026-05-01".to_string(), ips1);
 
-        let mut ips2: HashSet<std::net::IpAddr> = HashSet::new();
+        let mut ips2: AHashSet<std::net::IpAddr> = AHashSet::new();
         ips2.insert(ip1); // duplicate
         let mut daily2 = ahash::AHashMap::new();
         daily2.insert("2026-05-01".to_string(), ips2);
@@ -264,7 +264,7 @@ mod tests {
         let ip1: std::net::IpAddr = "1.2.3.4".parse().unwrap();
         let ip2: std::net::IpAddr = "5.6.7.8".parse().unwrap();
 
-        let mut ips: HashSet<std::net::IpAddr> = HashSet::new();
+        let mut ips: AHashSet<std::net::IpAddr> = AHashSet::new();
         ips.insert(ip1);
         ips.insert(ip2);
         let mut daily = ahash::AHashMap::new();
