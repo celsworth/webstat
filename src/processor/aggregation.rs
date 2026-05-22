@@ -1,9 +1,21 @@
-use super::merge_max;
 use super::messages::ParsedEntry;
 use super::*;
 use crate::method_proto::{method_index, proto_index};
 
-const MONTHS: [&str; 13] = ["", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
+const MONTHS: [&str; 13] = [
+    "", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12",
+];
+
+/// Update a map keeping only the maximum timestamp per key.
+fn merge_max(map: &mut AHashMap<VisitStateKey, i64>, key: VisitStateKey, ts: i64) {
+    if let Some(v) = map.get_mut(&key) {
+        if ts > *v {
+            *v = ts;
+        }
+    } else {
+        map.insert(key, ts);
+    }
+}
 
 /// Parse two ASCII decimal digits from `b[i..i+2]` without going through str.
 #[inline]
@@ -70,7 +82,10 @@ impl Processor {
     }
 
     pub(super) fn aggregate_entry(&mut self, parsed: ParsedEntry, run_acc: &mut RunAccumulators) {
-        let ParsedEntry { entry, ua_family: agent } = parsed;
+        let ParsedEntry {
+            entry,
+            ua_family: agent,
+        } = parsed;
 
         let (date, hour, _month_period, request_ts) = {
             match self.time_periods_with_timestamp(entry.time_str(), entry.month_num) {
@@ -110,21 +125,20 @@ impl Processor {
             if ts > self.visit_max_seen_ts {
                 self.visit_max_seen_ts = ts;
             }
-            let (is_new_visit, dirty_ts) =
-                match self.visit_last_seen.entry(visit_key.clone()) {
-                    std::collections::hash_map::Entry::Occupied(mut occ) => {
-                        let last_seen = *occ.get();
-                        let new_ts = last_seen.max(ts);
-                        if new_ts > last_seen {
-                            *occ.get_mut() = new_ts;
-                        }
-                        (ts.saturating_sub(last_seen) > VISIT_TIMEOUT_SECONDS, new_ts)
+            let (is_new_visit, dirty_ts) = match self.visit_last_seen.entry(visit_key.clone()) {
+                std::collections::hash_map::Entry::Occupied(mut occ) => {
+                    let last_seen = *occ.get();
+                    let new_ts = last_seen.max(ts);
+                    if new_ts > last_seen {
+                        *occ.get_mut() = new_ts;
                     }
-                    std::collections::hash_map::Entry::Vacant(v) => {
-                        v.insert(ts);
-                        (true, ts)
-                    }
-                };
+                    (ts.saturating_sub(last_seen) > VISIT_TIMEOUT_SECONDS, new_ts)
+                }
+                std::collections::hash_map::Entry::Vacant(v) => {
+                    v.insert(ts);
+                    (true, ts)
+                }
+            };
             merge_max(&mut self.visit_state_dirty, visit_key, dirty_ts);
             if is_new_visit {
                 stats.visits += 1;
@@ -134,17 +148,18 @@ impl Processor {
         stats.hits += 1;
         stats.bandwidth += bytes;
 
-        if (200..300).contains(&status) {
+        let status_class = status / 100;
+        if status_class == 2 {
+            stats.status_2xx += 1;
             let ext = file_ext(clean_path);
             if FILE_EXTS.contains(&ext) {
                 stats.files += 1;
             } else {
                 stats.pages += 1;
             }
-            stats.status_2xx += 1;
-        } else if status < 400 {
+        } else if status_class == 3 {
             stats.status_3xx += 1;
-        } else if status < 500 {
+        } else if status_class == 4 {
             stats.status_4xx += 1;
         } else {
             stats.status_5xx += 1;

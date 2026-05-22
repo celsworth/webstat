@@ -204,9 +204,10 @@ impl Processor {
 
         // Sort by the timestamp on the first parseable log line in each file so
         // files are processed in chronological order regardless of mtime.
-        files.sort_by_key(|f| first_line_timestamp(f).unwrap_or_else(|| {
-            std::fs::metadata(f).map(|m| m.mtime()).unwrap_or(0)
-        }));
+        files.sort_by_key(|f| {
+            first_line_timestamp(f)
+                .unwrap_or_else(|| std::fs::metadata(f).map(|m| m.mtime()).unwrap_or(0))
+        });
 
         let dir_started = Instant::now();
 
@@ -386,8 +387,8 @@ impl Processor {
         };
 
         if let Some(cutoff) = prune_before {
-            self.visit_last_seen = self.visit_last_seen.drain().filter(|(_, ts)| *ts >= cutoff).collect();
-            self.visit_state_dirty = self.visit_state_dirty.drain().filter(|(_, ts)| *ts >= cutoff).collect();
+            self.visit_last_seen.retain(|_, ts| *ts >= cutoff);
+            self.visit_state_dirty.retain(|_, ts| *ts >= cutoff);
         }
 
         let mut updates = Vec::with_capacity(self.visit_state_dirty.len());
@@ -499,7 +500,9 @@ fn first_line_timestamp(path: &str) -> Option<i64> {
         if buf.read_line(&mut line).ok()? == 0 {
             break;
         }
-        if let Some(entry) = crate::parser::OwnedLogEntry::parse(line.trim_end_matches('\n').to_string()) {
+        if let Some(entry) =
+            crate::parser::OwnedLogEntry::parse(line.trim_end_matches('\n').to_string())
+        {
             if let Some(ts) = parse_entry_timestamp(entry.time_str(), entry.month_num) {
                 return Some(ts);
             }
@@ -529,23 +532,9 @@ fn parse_entry_timestamp(time_str: &str, mon_num: u8) -> Option<i64> {
         _ => return None,
     };
     Some(
-        days_from_civil(year, mon_num as u32, day) * 86_400
-            + hour * 3_600
-            + minute * 60
-            + second
+        days_from_civil(year, mon_num as u32, day) * 86_400 + hour * 3_600 + minute * 60 + second
             - offset,
     )
-}
-
-/// Update a map keeping only the maximum timestamp per key.
-pub(super) fn merge_max(map: &mut AHashMap<VisitStateKey, i64>, key: VisitStateKey, ts: i64) {
-    map.entry(key)
-        .and_modify(|v| {
-            if ts > *v {
-                *v = ts;
-            }
-        })
-        .or_insert(ts);
 }
 
 #[cfg(test)]
