@@ -166,43 +166,59 @@ impl Processor {
 
         // ── Daily unique IPs ───────────────────────────────────────────────────
         if let Some(addr) = ip_addr {
-            run_acc
-                .daily_ips
-                .entry(date.to_string())
-                .or_insert_with(ahash::AHashSet::new)
-                .insert(addr);
+            if let Some(set) = run_acc.daily_ips.get_mut(&*date) {
+                set.insert(addr);
+            } else {
+                let mut set = ahash::AHashSet::new();
+                set.insert(addr);
+                run_acc.daily_ips.insert(date.to_string(), set);
+            }
         }
 
         // ── Month-period aggregations ──────────────────────────────────────────
         if self.enable_top_urls {
-            run_acc
-                .urls
-                .entry(clean_path.to_string())
-                .and_modify(|e| { e.0 += 1; e.1 += bytes; })
-                .or_insert((1, bytes));
+            if let Some(e) = run_acc.urls.get_mut(clean_path) {
+                e.0 += 1;
+                e.1 += bytes;
+            } else {
+                run_acc.urls.insert(clean_path.to_string(), (1, bytes));
+            }
         }
 
         if self.enable_top_hosts {
-            run_acc
-                .hosts
-                .entry(ip.to_string())
-                .and_modify(|e| { e.0 += 1; e.1 += bytes; })
-                .or_insert((1, bytes));
+            if let Some(e) = run_acc.hosts.get_mut(ip) {
+                e.0 += 1;
+                e.1 += bytes;
+            } else {
+                run_acc.hosts.insert(ip.to_string(), (1, bytes));
+            }
         }
 
         *run_acc.status_codes.entry(status).or_insert(0) += 1;
 
-        *run_acc.agents.entry(agent.as_ref().to_string()).or_insert(0) += 1;
+        if let Some(v) = run_acc.agents.get_mut(agent.as_ref()) {
+            *v += 1;
+        } else {
+            run_acc.agents.insert(agent.as_ref().to_string(), 1);
+        }
 
         if self.enable_top_refs && !entry.referer().is_empty() {
             if let Some(host) = self.extract_host(entry.referer()) {
                 if !(self.site_host.as_deref() == Some(&*host)) {
-                    *run_acc.refs.entry(host.to_string()).or_insert(0) += 1;
+                    if let Some(v) = run_acc.refs.get_mut(&*host) {
+                        *v += 1;
+                    } else {
+                        run_acc.refs.insert(host.to_string(), 1);
+                    }
                 }
             }
         }
 
-        *run_acc.countries.entry(country_code.to_string()).or_insert(0) += 1;
+        if let Some(v) = run_acc.countries.get_mut(&*country_code) {
+            *v += 1;
+        } else {
+            run_acc.countries.insert(country_code.to_string(), 1);
+        }
 
         run_acc.method_counts[method_index(entry.method())] += 1;
         run_acc.proto_counts[proto_index(entry.proto())] += 1;
