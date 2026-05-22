@@ -3,6 +3,8 @@ use super::messages::ParsedEntry;
 use super::*;
 use crate::method_proto::{method_index, proto_index};
 
+const MONTHS: [&str; 13] = ["", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
+
 /// Parse two ASCII decimal digits from `b[i..i+2]` without going through str.
 #[inline]
 fn parse_2d(b: &[u8], i: usize) -> Option<u8> {
@@ -64,7 +66,7 @@ impl Processor {
             return None;
         }
         let year = parse_4d(b, 7)?;
-        Some(format!("{year}-{mon_num:02}"))
+        Some(format!("{year}-{}", MONTHS[mon_num as usize]))
     }
 
     pub(super) fn aggregate_entry(&mut self, parsed: ParsedEntry, run_acc: &mut RunAccumulators) {
@@ -92,20 +94,22 @@ impl Processor {
             .or_default();
         let stats = &mut h.stats;
 
-        // Pre-parse the IP once; used for both visit tracking and daily_ips.
-        let ip_addr = parse_ipv4_u32(ip)
-            .map(|v| std::net::IpAddr::V4(std::net::Ipv4Addr::from(v)))
-            .or_else(|| {
-                parse_ipv6_u128(ip)
-                    .map(|v| std::net::IpAddr::V6(std::net::Ipv6Addr::from(v)))
-            })
-            .or_else(|| ip.parse().ok());
+        // Parse IP once; derive both the visit key and IpAddr from the same result.
+        let visit_key = Self::visit_state_key(ip);
+        let ip_addr = match visit_key.ip_kind {
+            1 => Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(
+                visit_key.ip_lo as u32,
+            ))),
+            2 => Some(std::net::IpAddr::V6(std::net::Ipv6Addr::from(
+                ((visit_key.ip_hi as u128) << 64) | visit_key.ip_lo as u128,
+            ))),
+            _ => ip.parse().ok(),
+        };
 
         if let Some(ts) = request_ts {
             if ts > self.visit_max_seen_ts {
                 self.visit_max_seen_ts = ts;
             }
-            let visit_key = Self::visit_state_key(ip);
             let (is_new_visit, dirty_ts) =
                 match self.visit_last_seen.entry(visit_key.clone()) {
                     std::collections::hash_map::Entry::Occupied(mut occ) => {
@@ -147,70 +151,58 @@ impl Processor {
         }
 
         // ── GeoIP ──────────────────────────────────────────────────────────────
-        let (country_code, _country_name) = if let Some(cached) = self.geo_cache.get(ip) {
-            (Arc::clone(&cached.0), Arc::clone(&cached.1))
+        let (country_code, _country_name) = if let Some(addr) = ip_addr {
+            if let Some(cached) = self.geo_cache.get(&addr) {
+                (Arc::clone(&cached.0), Arc::clone(&cached.1))
+            } else {
+                let result = self.geo.lookup(addr);
+                self.geo_cache
+                    .insert(addr, (Arc::clone(&result.0), Arc::clone(&result.1)));
+                result
+            }
         } else {
-            let result = self.geo.lookup(ip);
-            self.geo_cache
-                .insert(ip.to_string(), (Arc::clone(&result.0), Arc::clone(&result.1)));
-            result
+            crate::geo::unknown()
         };
 
         // ── Daily unique IPs ───────────────────────────────────────────────────
         if let Some(addr) = ip_addr {
-            if let Some(set) = run_acc.daily_ips.get_mut(&*date) {
-                set.insert(addr);
-            } else {
-                let mut set = ahash::AHashSet::new();
-                set.insert(addr);
-                run_acc.daily_ips.insert(date.to_string(), set);
-            }
+            run_acc
+                .daily_ips
+                .entry(date.to_string())
+                .or_insert_with(ahash::AHashSet::new)
+                .insert(addr);
         }
 
         // ── Month-period aggregations ──────────────────────────────────────────
         if self.enable_top_urls {
-            if let Some(e) = run_acc.urls.get_mut(clean_path) {
-                e.0 += 1;
-                e.1 += bytes;
-            } else {
-                run_acc.urls.insert(clean_path.to_string(), (1, bytes));
-            }
+            run_acc
+                .urls
+                .entry(clean_path.to_string())
+                .and_modify(|e| { e.0 += 1; e.1 += bytes; })
+                .or_insert((1, bytes));
         }
 
         if self.enable_top_hosts {
-            if let Some(e) = run_acc.hosts.get_mut(ip) {
-                e.0 += 1;
-                e.1 += bytes;
-            } else {
-                run_acc.hosts.insert(ip.to_string(), (1, bytes));
-            }
+            run_acc
+                .hosts
+                .entry(ip.to_string())
+                .and_modify(|e| { e.0 += 1; e.1 += bytes; })
+                .or_insert((1, bytes));
         }
 
         *run_acc.status_codes.entry(status).or_insert(0) += 1;
 
-        if let Some(v) = run_acc.agents.get_mut(agent.as_ref()) {
-            *v += 1;
-        } else {
-            run_acc.agents.insert(agent.as_ref().to_string(), 1);
-        }
+        *run_acc.agents.entry(agent.as_ref().to_string()).or_insert(0) += 1;
 
         if self.enable_top_refs && !entry.referer().is_empty() {
             if let Some(host) = self.extract_host(entry.referer()) {
                 if !(self.site_host.as_deref() == Some(&*host)) {
-                    if let Some(v) = run_acc.refs.get_mut(&*host) {
-                        *v += 1;
-                    } else {
-                        run_acc.refs.insert(host.to_string(), 1);
-                    }
+                    *run_acc.refs.entry(host.to_string()).or_insert(0) += 1;
                 }
             }
         }
 
-        if let Some(v) = run_acc.countries.get_mut(&*country_code) {
-            *v += 1;
-        } else {
-            run_acc.countries.insert(country_code.to_string(), 1);
-        }
+        *run_acc.countries.entry(country_code.to_string()).or_insert(0) += 1;
 
         run_acc.method_counts[method_index(entry.method())] += 1;
         run_acc.proto_counts[proto_index(entry.proto())] += 1;
@@ -257,7 +249,7 @@ impl Processor {
             return Some((Arc::clone(&cached.0), hour, Arc::clone(&cached.1), Some(ts)));
         }
 
-        let mon_s = format!("{mon_num:02}");
+        let mon_s = MONTHS[mon_num as usize];
         let date = Arc::from(format!("{year}-{mon_s}-{day:02}").as_str());
         let month = Arc::from(format!("{year}-{mon_s}").as_str());
         self.time_cache

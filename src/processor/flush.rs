@@ -28,8 +28,12 @@ impl Processor {
         let mut host_geo: AHashMap<String, (Arc<str>, Arc<str>)> = AHashMap::new();
         for host in run_acc.hosts.keys() {
             if !host_geo.contains_key(host) {
-                let (cc, cn) = self.geo.lookup(host);
-                host_geo.insert(host.clone(), (cc, cn));
+                let geo_result = if let Ok(addr) = host.parse::<std::net::IpAddr>() {
+                    self.geo.lookup(addr)
+                } else {
+                    crate::geo::unknown()
+                };
+                host_geo.insert(host.clone(), geo_result);
             }
         }
 

@@ -69,7 +69,7 @@ pub struct Processor {
     checkpoint_every: Option<Duration>,
     time_cache: AHashMap<u32, (Arc<str>, Arc<str>)>,
     referer_cache: AHashMap<String, Arc<str>>,
-    geo_cache: AHashMap<String, (Arc<str>, Arc<str>)>,
+    geo_cache: AHashMap<std::net::IpAddr, (Arc<str>, Arc<str>)>,
     visit_last_seen: AHashMap<VisitStateKey, i64>,
     visit_state_dirty: AHashMap<VisitStateKey, i64>,
     visit_max_seen_ts: i64,

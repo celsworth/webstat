@@ -1,14 +1,17 @@
 use ahash::AHashMap;
 use std::net::IpAddr;
-use std::str::FromStr;
 use std::sync::Arc;
 
 const UNKNOWN_CODE: &str = "--";
 const UNKNOWN_NAME: &str = "Unknown";
 
+pub fn unknown() -> (Arc<str>, Arc<str>) {
+    (Arc::from(UNKNOWN_CODE), Arc::from(UNKNOWN_NAME))
+}
+
 pub struct Geo {
     reader: Option<maxminddb::Reader<Vec<u8>>>,
-    mem_cache: AHashMap<String, (Arc<str>, Arc<str>)>,
+    mem_cache: AHashMap<IpAddr, (Arc<str>, Arc<str>)>,
 }
 
 impl Geo {
@@ -26,41 +29,30 @@ impl Geo {
         }
     }
 
-    /// Return `(country_code, country_name)` for the given IP address string.
+    /// Return `(country_code, country_name)` for the given `IpAddr`.
     ///
     /// Results are held in an in-memory map; the first lookup per IP hits the
     /// mmdb file and every subsequent call is O(1).
-    pub fn lookup(&mut self, ip: &str) -> (Arc<str>, Arc<str>) {
-        if ip.is_empty() || ip == "-" {
-            return (Arc::from(UNKNOWN_CODE), Arc::from(UNKNOWN_NAME));
-        }
-
-        if let Some(result) = self.mem_cache.get(ip) {
+    pub fn lookup(&mut self, addr: IpAddr) -> (Arc<str>, Arc<str>) {
+        if let Some(result) = self.mem_cache.get(&addr) {
             return (Arc::clone(&result.0), Arc::clone(&result.1));
         }
 
-        let result = self.resolve(ip);
-        self.mem_cache.insert(
-            ip.to_string(),
-            (Arc::clone(&result.0), Arc::clone(&result.1)),
-        );
+        let result = self.resolve(addr);
+        self.mem_cache
+            .insert(addr, (Arc::clone(&result.0), Arc::clone(&result.1)));
         result
     }
 
-    fn resolve(&self, ip: &str) -> (Arc<str>, Arc<str>) {
+    fn resolve(&self, addr: IpAddr) -> (Arc<str>, Arc<str>) {
         let reader = match &self.reader {
             Some(r) => r,
-            None => return (Arc::from(UNKNOWN_CODE), Arc::from(UNKNOWN_NAME)),
+            None => return unknown(),
         };
 
-        let ip_addr = match IpAddr::from_str(ip) {
-            Ok(a) => a,
-            Err(_) => return (Arc::from(UNKNOWN_CODE), Arc::from(UNKNOWN_NAME)),
-        };
-
-        let country: maxminddb::geoip2::Country = match reader.lookup(ip_addr) {
+        let country: maxminddb::geoip2::Country = match reader.lookup(addr) {
             Ok(c) => c,
-            Err(_) => return (Arc::from(UNKNOWN_CODE), Arc::from(UNKNOWN_NAME)),
+            Err(_) => return unknown(),
         };
 
         let code = country
