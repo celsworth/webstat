@@ -11,16 +11,16 @@ It parses nginx access logs incrementally into SQLite, then generates static HTM
 - Parse CLI args and load config — `src/main.rs`, `src/config.rs`
 - Initialise logging (verbosity globals) — `src/logging.rs`
 - Open SQLite database and initialise schema — `src/database.rs`
-- Expand glob patterns into a file list, sort by first-line timestamp — `src/processor.rs` (`process_globs`)
-- For each file, fingerprint it and decide what to skip/resume — `src/fingerprint.rs`, `src/processor/resume_policy.rs`
-- Seed initial progress counters from already-processed offsets — `src/processor/progress_seed.rs`
-- Spawn a progress display thread — `src/processor.rs`, `src/progress.rs`
-- Run the 3-stage pipeline — `src/processor/pipeline.rs`:
-  - **Loader thread** — reads raw bytes, decompresses if needed, emits line batches — `src/processor/loader.rs`, `src/compression.rs`
-  - **Parser thread** — parses combined-log-format lines into structured entries, runs UA classification and bot filtering; bots are dropped here — `src/processor/parser_stage.rs`, `src/parser.rs`, `src/ua.rs`
-  - **Aggregator (main thread)** — consumes `ParsedEntry` values, updates in-memory accumulators, detects month boundaries and triggers `finalize_month` — `src/processor/aggregation.rs`, `src/processor/flush.rs`, `src/geo.rs`
+- Expand glob patterns into a file list, sort by first-line timestamp — `src/aggregator/mod.rs` (`process_globs`)
+- For each file, fingerprint it and decide what to skip/resume — `src/fingerprint.rs`, `src/aggregator/resume.rs`
+- Seed initial progress counters from already-processed offsets — `src/aggregator/progress_seed.rs`
+- Spawn a progress display thread — `src/aggregator/mod.rs`, `src/progress.rs`
+- Run the 3-stage pipeline — `src/aggregator/pipeline.rs`:
+  - **Loader thread** — reads raw bytes, decompresses if needed, emits line batches — `src/loader.rs`, `src/compression.rs`
+  - **Parser thread** — parses combined-log-format lines into structured entries, runs UA classification and bot filtering; bots are dropped here — `src/parser/stage.rs`, `src/parser/mod.rs`, `src/ua.rs`
+  - **Aggregator (main thread)** — consumes `ParsedEntry` values, updates in-memory accumulators, detects month boundaries and triggers `finalize_month` — `src/aggregator/aggregation.rs`, `src/aggregator/flush.rs`, `src/geo.rs`
 - On month finalisation: prune top-N tables to `top_n` rows, compute and cache unique-IP counts — `src/database/writer.rs`
-- Flush accumulators to SQLite at checkpoints and on completion — `src/processor/flush.rs`, `src/database.rs`
+- Flush accumulators to SQLite at checkpoints and on completion — `src/aggregator/flush.rs`, `src/database.rs`
 - Update per-file parse state for resume tracking — `src/database.rs`
 
 ### `generate` command

@@ -87,7 +87,7 @@ struct Stats {
     max: Duration,
 }
 
-fn measure<F: FnMut() -> ()>(label: &str, n: usize, mut f: F) -> Stats {
+fn measure<F: FnMut()>(label: &str, n: usize, mut f: F) -> Stats {
     let mut times = Vec::with_capacity(n);
     for _ in 0..n {
         let t = Instant::now();

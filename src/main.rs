@@ -7,8 +7,9 @@ mod geo;
 mod ip;
 mod logging;
 mod method_proto;
+mod aggregator;
+mod loader;
 mod parser;
-mod processor;
 mod progress;
 mod reports;
 mod rules;
@@ -21,7 +22,7 @@ use clap::{ArgAction, Parser, Subcommand};
 
 use database::Database;
 use geo::Geo;
-use processor::{Processor, ProcessorConfig};
+use aggregator::{Processor, ProcessorConfig};
 
 /// Webstat — web access-log processor
 #[derive(Parser, Debug)]

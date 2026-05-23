@@ -13,16 +13,16 @@ cargo test
 
 - **`src/main.rs`** — CLI entry point (clap), subcommands, config loading
 - **`src/config.rs`** — YAML config parsing and path resolution
-- **`src/parser.rs`** — combined-log-format line parser → `OwnedLogEntry`
-- **`src/processor.rs`** — orchestration: file discovery, resume planning, progress thread, pipeline entry point
-- **`src/processor/pipeline.rs`** — 3-stage Loader→Parser→Aggregator pipeline; aggregator runs on the calling thread
-- **`src/processor/loader.rs`** — reads raw bytes, decompresses if needed, emits `LoaderMsg::Lines` batches
-- **`src/processor/parser_stage.rs`** — converts raw strings to `OwnedLogEntry`, runs UA parsing and bot filtering; bots are dropped here and never reach the aggregator
-- **`src/processor/aggregation.rs`** — per-entry aggregation into `RunAccumulators`
-- **`src/processor/flush.rs`** — flushes `RunAccumulators` to SQLite; calls `finalize_month` on month boundaries
-- **`src/processor/messages.rs`** — `LoaderMsg`, `ParserMsg`, `ParsedEntry` channel types
-- **`src/processor/resume_policy.rs`** — per-file skip/resume decisions using fingerprints and stored state
-- **`src/processor/progress_seed.rs`** — seeds initial progress counters from DB state
+- **`src/parser/mod.rs`** — combined-log-format line parser → `OwnedLogEntry`
+- **`src/parser/stage.rs`** — parser pipeline thread: converts raw strings to `OwnedLogEntry`, runs UA parsing and bot filtering; bots are dropped here and never reach the aggregator
+- **`src/loader.rs`** — reads raw bytes, decompresses if needed, emits `LoaderMsg::Lines` batches
+- **`src/aggregator/mod.rs`** — `Processor` struct: orchestration, file discovery, resume planning, progress thread, pipeline entry point
+- **`src/aggregator/pipeline.rs`** — 3-stage Loader→Parser→Aggregator pipeline; aggregator runs on the calling thread
+- **`src/aggregator/aggregation.rs`** — per-entry aggregation into `RunAccumulators`
+- **`src/aggregator/flush.rs`** — flushes `RunAccumulators` to SQLite; calls `finalize_month` on month boundaries
+- **`src/aggregator/messages.rs`** — `LoaderMsg`, `ParserMsg`, `ParsedEntry` channel types
+- **`src/aggregator/resume.rs`** — per-file skip/resume decisions using fingerprints and stored state
+- **`src/aggregator/progress_seed.rs`** — seeds initial progress counters from DB state
 - **`src/accumulators.rs`** — `HourlyStats`, `HourlyAcc`, `HourlyMap` types
 - **`src/run_accumulators.rs`** — `RunAccumulators`: in-memory aggregation buffers (hourly, urls, hosts, refs, agents, countries, status codes, etc.)
 - **`src/compression.rs`** — `CompressionType` enum (`Plain`, `Gz`, `Bz2`) and extension detection

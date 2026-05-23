@@ -5,11 +5,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use super::messages::{push_blocking, LoaderMsg};
-use super::{FileResumePlan, ProgressState, LOADER_BATCH_SIZE};
+use crate::aggregator::messages::{push_blocking, LoaderMsg};
+use crate::aggregator::{FileResumePlan, ProgressState, LOADER_BATCH_SIZE};
 use crate::compression::CompressionType;
 
-pub(super) fn run_loader(
+pub(crate) fn run_loader(
     files: Vec<(usize, String, FileResumePlan)>,
     mut tx: rtrb::Producer<LoaderMsg>,
     ps: Arc<ProgressState>,

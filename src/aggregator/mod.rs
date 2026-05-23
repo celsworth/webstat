@@ -19,18 +19,16 @@ use crate::util::{days_from_civil, extract_host_from_url, file_ext, strip_query,
 
 mod aggregation;
 mod flush;
-mod loader;
-mod messages;
-mod parser_stage;
+pub(crate) mod messages;
 mod pipeline;
 mod progress_seed;
-mod resume_policy;
+mod resume;
 
-pub(super) const LOADER_BATCH_SIZE: usize = 256;
-pub(super) const PARSER_BATCH_SIZE: usize = 256;
+pub(crate) const LOADER_BATCH_SIZE: usize = 256;
+pub(crate) const PARSER_BATCH_SIZE: usize = 256;
 pub(super) const CHANNEL_CAPACITY: usize = 64;
 
-pub(super) struct ProgressState {
+pub(crate) struct ProgressState {
     pub files_done: AtomicUsize,
     pub bytes_done: AtomicU64,
     pub lines_done: AtomicU64,
@@ -54,16 +52,16 @@ struct ResolutionOutcome {
 }
 
 #[derive(Clone)]
-struct FileResumePlan {
-    current_inode: u64,
-    stat_size: u64,
-    mtime_ns: i64,
-    compression: CompressionType,
-    offset: u64,
-    skip_decoded_prefix_bytes: u64,
-    uncompressed_size: Option<u64>,
-    compressed_head_fingerprint: Option<u64>,
-    uncompressed_head_fingerprint: Option<u64>,
+pub(crate) struct FileResumePlan {
+    pub(crate) current_inode: u64,
+    pub(crate) stat_size: u64,
+    pub(crate) mtime_ns: i64,
+    pub(crate) compression: CompressionType,
+    pub(crate) offset: u64,
+    pub(crate) skip_decoded_prefix_bytes: u64,
+    pub(crate) uncompressed_size: Option<u64>,
+    pub(crate) compressed_head_fingerprint: Option<u64>,
+    pub(crate) uncompressed_head_fingerprint: Option<u64>,
 }
 
 // ── Processor ─────────────────────────────────────────────────────────────────
@@ -345,8 +343,6 @@ impl Processor {
                 logging::log(&format!("  {} lines hidden by rule {name}", stats.hidden));
             }
         }
-
-        let _ = total;
 
         if self.vacuum_after_prune {
             self.db.vacuum()?;

@@ -21,7 +21,7 @@ fn merge_max(map: &mut AHashMap<VisitStateKey, i64>, key: VisitStateKey, ts: i64
 
 /// Parse two ASCII decimal digits from `b[i..i+2]` without going through str.
 #[inline]
-pub(crate) fn parse_2d(b: &[u8], i: usize) -> Option<u8> {
+pub(super) fn parse_2d(b: &[u8], i: usize) -> Option<u8> {
     let hi = b[i].wrapping_sub(b'0');
     let lo = b[i + 1].wrapping_sub(b'0');
     if hi > 9 || lo > 9 {
@@ -32,7 +32,7 @@ pub(crate) fn parse_2d(b: &[u8], i: usize) -> Option<u8> {
 
 /// Parse four ASCII decimal digits from `b[i..i+4]` without going through str.
 #[inline]
-pub(crate) fn parse_4d(b: &[u8], i: usize) -> Option<i32> {
+pub(super) fn parse_4d(b: &[u8], i: usize) -> Option<i32> {
     let d0 = b[i].wrapping_sub(b'0') as i32;
     let d1 = b[i + 1].wrapping_sub(b'0') as i32;
     let d2 = b[i + 2].wrapping_sub(b'0') as i32;

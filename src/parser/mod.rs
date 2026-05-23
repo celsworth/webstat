@@ -120,7 +120,7 @@ pub fn parse_line(line: &str) -> Option<OwnedLogEntry> {
         return None;
     }
 
-    let month_num = month_num(&b.get(time_start + 3..time_start + 6)?)?;
+    let month_num = month_num(b.get(time_start + 3..time_start + 6)?)?;
 
     i += 2; // "] "
 
@@ -291,7 +291,7 @@ pub fn parse_line(line: &str) -> Option<OwnedLogEntry> {
 
 /// Parse "DD/Mon/YYYY:HH:MM:SS ±HHMM" and return a month number (1-12).
 #[inline]
-pub fn month_num(m: &[u8]) -> Option<u8> {
+fn month_num(m: &[u8]) -> Option<u8> {
     match m {
         b"Jan" => Some(1),
         b"Feb" => Some(2),
@@ -337,6 +337,8 @@ fn parse_u64(bytes: &[u8]) -> Option<u64> {
 
     Some(n)
 }
+
+pub mod stage;
 
 #[cfg(test)]
 mod tests;

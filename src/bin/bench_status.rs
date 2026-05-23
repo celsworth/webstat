@@ -109,18 +109,9 @@ fn main() {
     let mut counts5 = [0u64; 4];
     let table: [u8; 600] = {
         let mut t = [0u8; 600];
-        for i in 200..300 {
-            t[i] = 0;
-        }
-        for i in 300..400 {
-            t[i] = 1;
-        }
-        for i in 400..500 {
-            t[i] = 2;
-        }
-        for i in 500..600 {
-            t[i] = 3;
-        }
+        t[300..400].fill(1);
+        t[400..500].fill(2);
+        t[500..600].fill(3);
         t
     };
     for _ in 0..iterations {

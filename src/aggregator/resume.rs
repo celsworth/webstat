@@ -395,22 +395,18 @@ impl Processor {
                     offset = 0;
                 } else if stat_size > previous_size {
                     if is_compressed {
-                        if !inode_changed_for_path {
-                            skip_decoded_prefix_bytes = state.uncompressed_offset;
-                            offset = 0;
-                        } else if state.uncompressed_head_fingerprint.is_some()
-                            && state.uncompressed_head_fingerprint == uncompressed_head_fingerprint
-                            && state.uncompressed_offset > 0
+                        offset = 0;
+                        if !inode_changed_for_path
+                            || (state.uncompressed_head_fingerprint.is_some()
+                                && state.uncompressed_head_fingerprint
+                                    == uncompressed_head_fingerprint
+                                && state.uncompressed_offset > 0)
                         {
                             skip_decoded_prefix_bytes = state.uncompressed_offset;
-                            offset = 0;
-                        } else {
-                            offset = 0;
                         }
-                    } else if !inode_changed_for_path {
-                        offset = state.uncompressed_offset.min(stat_size);
-                    } else if state.uncompressed_head_fingerprint.is_some()
-                        && state.uncompressed_head_fingerprint == uncompressed_head_fingerprint
+                    } else if !inode_changed_for_path
+                        || (state.uncompressed_head_fingerprint.is_some()
+                            && state.uncompressed_head_fingerprint == uncompressed_head_fingerprint)
                     {
                         offset = state.uncompressed_offset.min(stat_size);
                     } else {

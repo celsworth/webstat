@@ -65,8 +65,7 @@ fn main() {
                 ahash::AHashMap::with_capacity(unique);
 
             // warm-up (not timed)
-            for idx in 0..unique {
-                let ip_str = ip_strings[idx].clone();
+            for ip_str in ip_strings.iter().take(unique).cloned() {
                 let ip: std::net::IpAddr = ip_str.parse().unwrap();
                 let result: Result<geoip2::Country, _> = reader.lookup(ip);
                 let (code, name) = match result {

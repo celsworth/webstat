@@ -6,10 +6,10 @@ use ahash::{AHashMap, AHashSet};
 use anyhow::Result;
 
 use super::messages::{pop_blocking, LoaderMsg, ParserMsg};
-use super::{
-    loader, parser_stage, parser_stage::RuleStats, FileResumePlan, Processor, CHANNEL_CAPACITY,
-};
+use super::{FileResumePlan, Processor, CHANNEL_CAPACITY};
 use crate::database::ParseStateUpdate;
+use crate::loader;
+use crate::parser::stage::{self as parser_stage, RuleStats};
 use crate::run_accumulators::RunAccumulators;
 use std::collections::BTreeMap;
 
@@ -160,13 +160,13 @@ impl Processor {
                 let t0b = std::time::Instant::now();
                 let pending_first_tss: Vec<Option<i64>> = pending_indices
                     .iter()
-                    .map(|&i| super::resume_policy::read_first_line_ts(&files[i]))
+                    .map(|&i| super::resume::read_first_line_ts(&files[i]))
                     .collect();
                 // Find the rightmost pending file whose first-line ts < last_log_ts.
                 // Every pending file before that position is guaranteed fully processed.
                 if let Some(pos) = pending_first_tss
                     .iter()
-                    .rposition(|ts| ts.map_or(false, |t| t < last_log_ts))
+                    .rposition(|ts| ts.is_some_and(|t| t < last_log_ts))
                 {
                     for &idx in &pending_indices[..pos] {
                         order_skip.insert(idx);

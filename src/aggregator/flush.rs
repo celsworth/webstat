@@ -112,9 +112,9 @@ fn pretrim_hits_bw_map(map: &mut ahash::AHashMap<String, (u64, u64)>, top_n: usi
         return;
     }
     let mut by_hits: Vec<(String, u64)> = map.iter().map(|(k, &(h, _))| (k.clone(), h)).collect();
-    by_hits.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    by_hits.sort_unstable_by_key(|a| std::cmp::Reverse(a.1));
     let mut by_bw: Vec<(String, u64)> = map.iter().map(|(k, &(_, b))| (k.clone(), b)).collect();
-    by_bw.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    by_bw.sort_unstable_by_key(|a| std::cmp::Reverse(a.1));
 
     let mut keep: ahash::AHashSet<String> = ahash::AHashSet::with_capacity(top_n * 2);
     for (k, _) in by_hits.into_iter().take(top_n) {
@@ -132,7 +132,7 @@ fn pretrim_count_map(map: &mut ahash::AHashMap<String, u64>, top_n: usize) {
         return;
     }
     let mut entries: Vec<(String, u64)> = map.iter().map(|(k, &v)| (k.clone(), v)).collect();
-    entries.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    entries.sort_unstable_by_key(|a| std::cmp::Reverse(a.1));
     let keep: ahash::AHashSet<String> = entries.into_iter().take(top_n).map(|(k, _)| k).collect();
     map.retain(|k, _| keep.contains(k.as_str()));
 }

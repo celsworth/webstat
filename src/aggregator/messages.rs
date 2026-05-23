@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 /// A parsed log entry with its UA family already resolved.
 /// Bot entries are filtered out in the parser stage and never reach the aggregator.
-pub(super) struct ParsedEntry {
+pub(crate) struct ParsedEntry {
     pub entry: OwnedLogEntry,
     pub ua_family: Arc<str>,
     /// Which top-N tables to exclude this entry from (zero = not hidden from anything).
     pub hidden: HideMask,
 }
 
-pub(super) enum LoaderMsg {
+pub(crate) enum LoaderMsg {
     FileStart {
         file_idx: usize,
     },
@@ -31,7 +31,7 @@ pub(super) enum LoaderMsg {
     Done,
 }
 
-pub(super) enum ParserMsg {
+pub(crate) enum ParserMsg {
     FileStart {
         file_idx: usize,
     },
@@ -51,7 +51,7 @@ pub(super) enum ParserMsg {
 
 /// Spin-yield loop to push an item into a bounded rtrb ring buffer.
 /// Returns only when the push succeeds.
-pub(super) fn push_blocking<T>(tx: &mut rtrb::Producer<T>, mut item: T) {
+pub(crate) fn push_blocking<T>(tx: &mut rtrb::Producer<T>, mut item: T) {
     let mut spins = 0u32;
     loop {
         match tx.push(item) {
@@ -72,7 +72,7 @@ pub(super) fn push_blocking<T>(tx: &mut rtrb::Producer<T>, mut item: T) {
 
 /// Spin-yield loop to pop an item from a bounded rtrb ring buffer.
 /// Returns only when an item is available.
-pub(super) fn pop_blocking<T>(rx: &mut rtrb::Consumer<T>) -> T {
+pub(crate) fn pop_blocking<T>(rx: &mut rtrb::Consumer<T>) -> T {
     let mut spins = 0u32;
     loop {
         match rx.pop() {

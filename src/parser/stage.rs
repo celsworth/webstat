@@ -2,20 +2,21 @@ use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use super::messages::{
-    pop_blocking, push_blocking, LoaderMsg, OwnedLogEntry, ParsedEntry, ParserMsg,
+use crate::aggregator::messages::{
+    pop_blocking, push_blocking, LoaderMsg, ParsedEntry, ParserMsg,
 };
-use super::{ProgressState, PARSER_BATCH_SIZE};
+use crate::aggregator::{ProgressState, PARSER_BATCH_SIZE};
+use crate::parser::OwnedLogEntry;
 use crate::rules::{Action, HideMask, SharedRuleSet};
 use crate::ua::UaParser;
 use rand::Rng as _;
 
-pub(super) struct RuleStats {
+pub(crate) struct RuleStats {
     pub ignored: u64,
     pub hidden: u64,
 }
 
-pub(super) fn run_parser(
+pub(crate) fn run_parser(
     mut rx: rtrb::Consumer<LoaderMsg>,
     mut tx: rtrb::Producer<ParserMsg>,
     ps: Arc<ProgressState>,

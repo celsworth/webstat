@@ -202,7 +202,7 @@ fn compute_bz2_fingerprints(filepath: &str) -> Result<Option<FileFingerprint>> {
 }
 
 /// Hash a byte slice with XxHash3_64.
-pub fn hash_sample(bytes: &[u8]) -> u64 {
+fn hash_sample(bytes: &[u8]) -> u64 {
     let mut hasher = XxHash3_64::default();
     hasher.write(bytes);
     hasher.finish()

@@ -27,6 +27,32 @@ pub struct FlushData<'a> {
     pub visit_state_prune_before_ts: Option<i64>,
 }
 
+fn encode_host_key(host: &str) -> HostKey {
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => HostKey {
+            kind: 1,
+            hi: 0,
+            lo: u32::from(v4) as u64,
+            text: String::new(),
+        },
+        Ok(IpAddr::V6(v6)) => {
+            let n = u128::from(v6);
+            HostKey {
+                kind: 2,
+                hi: (n >> 64) as u64,
+                lo: n as u64,
+                text: String::new(),
+            }
+        }
+        Err(_) => HostKey {
+            kind: 0,
+            hi: 0,
+            lo: 0,
+            text: host.to_string(),
+        },
+    }
+}
+
 impl Database {
     pub fn flush(&mut self, data: FlushData<'_>) -> Result<()> {
         let tx = self.conn.transaction()?;

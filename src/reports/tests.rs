@@ -6,7 +6,7 @@ mod tests {
     use crate::config::Config;
     use crate::database::Database;
     use crate::geo::Geo;
-    use crate::processor::{Processor, ProcessorConfig};
+    use crate::aggregator::{Processor, ProcessorConfig};
     use crate::rules::{RawAction, RawCondition, RawRule, RawWhen, RuleSet};
     use rusqlite::Connection;
     use std::fs::{self, File};
