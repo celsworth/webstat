@@ -78,6 +78,10 @@ struct Args {
     #[arg(long, global = true)]
     checkpoint_minutes: Option<u64>,
 
+    /// Anonymise IP addresses in reports (true/false, default: false)
+    #[arg(long, global = true)]
+    anonymise_ips: Option<bool>,
+
     /// Run SQLite VACUUM after pruning (true/false, default: false)
     #[arg(long, global = true)]
     vacuum_after_prune: Option<bool>,
@@ -181,6 +185,9 @@ fn build_config(args: &Args) -> Result<config::Config> {
     }
     if let Some(v) = args.checkpoint_minutes {
         cfg.checkpoint_minutes = v;
+    }
+    if let Some(v) = args.anonymise_ips {
+        cfg.anonymise_ips = v;
     }
     if let Some(v) = args.vacuum_after_prune {
         cfg.vacuum_after_prune = v;

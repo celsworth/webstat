@@ -31,6 +31,8 @@ pub struct Config {
     /// Periodic database checkpoint interval in minutes.
     /// `0` disables checkpointing (flush only at end of run/file).
     pub checkpoint_minutes: u64,
+    /// Anonymise IP addresses by zeroing out the last octet (IPv4) or last 80 bits (IPv6).
+    pub anonymise_ips: bool,
     /// Optional per-entry filtering rules evaluated in the parser thread.
     #[serde(default)]
     pub rules: Vec<RawRule>,
@@ -52,6 +54,7 @@ impl Default for Config {
             vacuum_after_prune: false,
             bot_filter: true,
             checkpoint_minutes: 0,
+            anonymise_ips: false,
             rules: Vec::new(),
         }
     }

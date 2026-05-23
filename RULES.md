@@ -350,8 +350,6 @@ Valid table names:
 
 **`matches` (regex) is the most expensive operator.** Prefer `starts_with`, `ends_with`, or `contains` when any of those will do.
 
-**Rules run in the parser thread.** The parser thread has more idle time than the aggregator thread. Dropped entries never touch the aggregator, so a busy rule set that drops many entries actually reduces aggregator load.
-
 ---
 
 ## Full example

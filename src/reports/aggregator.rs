@@ -67,6 +67,7 @@ pub(super) fn monthly_summary(
     month: i32,
     top_n: usize,
     compact_counts: bool,
+    anonymise_ips: bool,
 ) -> Result<MonthlySummary> {
     let period = format!("{year:04}-{month:02}");
 
@@ -76,8 +77,8 @@ pub(super) fn monthly_summary(
 
     let top_urls_hits = top_urls_hits(conn, &period, top_n, compact_counts)?;
     let top_urls_bandwidth = top_urls_bandwidth(conn, &period, top_n, compact_counts)?;
-    let top_sites_hits = top_sites_hits(conn, &period, top_n, compact_counts)?;
-    let top_sites_bandwidth = top_sites_bandwidth(conn, &period, top_n, compact_counts)?;
+    let top_sites_hits = top_sites_hits(conn, &period, top_n, compact_counts, anonymise_ips)?;
+    let top_sites_bandwidth = top_sites_bandwidth(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_refs = top_refs(conn, &period, top_n, compact_counts)?;
 
     let top_agents_raw = top_agents_raw(conn, &period, top_n)?;
@@ -146,6 +147,7 @@ pub(super) fn yearly_summary(
     year: i32,
     top_n: usize,
     compact_counts: bool,
+    anonymise_ips: bool,
 ) -> Result<YearlySummary> {
     let period = year.to_string();
     let monthly_rows = monthly_rows(conn, year, compact_counts)?;
@@ -153,8 +155,8 @@ pub(super) fn yearly_summary(
 
     let top_urls_hits = top_urls_hits(conn, &period, top_n, compact_counts)?;
     let top_urls_bandwidth = top_urls_bandwidth(conn, &period, top_n, compact_counts)?;
-    let top_sites_hits = top_sites_hits(conn, &period, top_n, compact_counts)?;
-    let top_sites_bandwidth = top_sites_bandwidth(conn, &period, top_n, compact_counts)?;
+    let top_sites_hits = top_sites_hits(conn, &period, top_n, compact_counts, anonymise_ips)?;
+    let top_sites_bandwidth = top_sites_bandwidth(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_refs = top_refs(conn, &period, top_n, compact_counts)?;
     let top_agents_raw = top_agents_raw(conn, &period, top_n)?;
     let top_countries_raw = top_countries_raw(conn, &period, top_n)?;
@@ -788,6 +790,7 @@ fn top_sites_hits(
     period: &str,
     top_n: usize,
     compact_counts: bool,
+    anonymise_ips: bool,
 ) -> Result<Vec<TopHostRow>> {
     top_sites_from_table(
         conn,
@@ -796,6 +799,7 @@ fn top_sites_hits(
         top_n,
         compact_counts,
         "hits",
+        anonymise_ips,
     )
 }
 
@@ -804,6 +808,7 @@ fn top_sites_bandwidth(
     period: &str,
     top_n: usize,
     compact_counts: bool,
+    anonymise_ips: bool,
 ) -> Result<Vec<TopHostRow>> {
     top_sites_from_table(
         conn,
@@ -812,6 +817,7 @@ fn top_sites_bandwidth(
         top_n,
         compact_counts,
         "bandwidth",
+        anonymise_ips,
     )
 }
 
@@ -822,6 +828,7 @@ fn top_sites_from_table(
     top_n: usize,
     compact_counts: bool,
     order_metric: &str,
+    anonymise_ips: bool,
 ) -> Result<Vec<TopHostRow>> {
     let (sql, period_param) = if period.len() == 7 {
         (
@@ -864,7 +871,7 @@ fn top_sites_from_table(
         let host_text = row.get::<_, String>(3)?;
         let country_code = row.get::<_, String>(6)?;
         Ok(TopHostRow {
-            host: decode_host(host_kind, host_hi, host_lo, &host_text),
+            host: decode_host(host_kind, host_hi, host_lo, &host_text, anonymise_ips),
             hits: row.get::<_, i64>(4)? as u64,
             bandwidth: row.get::<_, i64>(5)? as u64,
             country_flag: flag_emoji(&country_code),
@@ -888,10 +895,22 @@ fn top_sites_from_table(
     Ok(out)
 }
 
-fn decode_host(kind: u8, hi: u64, lo: u64, text: &str) -> String {
+fn decode_host(kind: u8, hi: u64, lo: u64, text: &str, anonymise: bool) -> String {
     match kind {
-        1 => Ipv4Addr::from(lo as u32).to_string(),
+        1 => {
+            let addr = if anonymise {
+                lo as u32 & 0xFFFF_FF00
+            } else {
+                lo as u32
+            };
+            Ipv4Addr::from(addr).to_string()
+        }
         2 => {
+            let (hi, lo) = if anonymise {
+                (hi & 0xFFFF_FFFF_FFFF_0000, 0u64)
+            } else {
+                (hi, lo)
+            };
             let n = ((hi as u128) << 64) | lo as u128;
             Ipv6Addr::from(n).to_string()
         }

@@ -85,6 +85,7 @@ Global flags:
 - `--geoip-db <PATH>`
 - `--file-workers <N>`
 - `--checkpoint-minutes <N>` (`0` disables periodic checkpoints)
+- `--anonymise-ips <true|false>`
 - `--top-n <N>`
 - `--vacuum-after-prune <true|false>`
 - `--enable-top-urls <true|false>`
@@ -123,6 +124,8 @@ cp webstat.yml.example webstat.yml
 - **`checkpoint_minutes`** — Periodic SQLite checkpoint interval in minutes. Default: `0` (disabled).
   - Set to a positive value to flush partial aggregates and parse progress during long runs.
   - Helps reduce lost work if processing is interrupted.
+
+- **`anonymise_ips`** — Anonymise IP addresses in the HTML reports by zeroing out the last octet (IPv4) or last 80 bits (IPv6). Default: `false`.
 
 - **`top_n`** — Number of rows to keep in top-N tables (URLs, hosts, referrers, agents, countries). Default: `20`.
   - When a month is finalised, each top-N table is pruned to this many rows per period.

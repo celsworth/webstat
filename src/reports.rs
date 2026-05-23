@@ -385,13 +385,14 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
                 m.month as i32,
                 cfg.top_n,
                 compact_counts,
+                cfg.anonymise_ips,
             )?;
             render_month_page(&tera, cfg, output_dir, &summary)?;
             logging::log_debug_at(2, &format!("  Wrote {}/index.html", summary.period));
             month_count += 1;
         }
 
-        let yearly = aggregator::yearly_summary(&conn, *year, cfg.top_n, compact_counts)?;
+        let yearly = aggregator::yearly_summary(&conn, *year, cfg.top_n, compact_counts, cfg.anonymise_ips)?;
         render_year_page(&tera, cfg, output_dir, &yearly)?;
         logging::log_debug_at(
             1,
