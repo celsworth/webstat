@@ -315,7 +315,8 @@ impl Processor {
         }
         eprintln!();
 
-        let (total, run_acc, pending_parse_states, retired_parse_states, rule_stats) = result?;
+        let (total, run_acc, pending_parse_states, retired_parse_states, rule_stats, bot_filtered) =
+            result?;
 
         self.flush_run(&run_acc, &pending_parse_states, &retired_parse_states)?;
 
@@ -331,6 +332,10 @@ impl Processor {
             "Processed {total_for_log} total new lines from {count} file(s) ({:.1}s, {} l/s)",
             total_elapsed, lps
         ));
+
+        if bot_filtered > 0 {
+            logging::log(&format!("  {bot_filtered} lines filtered by bot filter"));
+        }
 
         for (name, stats) in &rule_stats {
             if stats.ignored > 0 {

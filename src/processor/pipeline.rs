@@ -102,6 +102,7 @@ impl Processor {
         Vec<ParseStateUpdate>,
         Vec<ParseStateUpdate>,
         BTreeMap<Arc<str>, RuleStats>,
+        u64,
     )> {
         let count = files.len();
         let mut run_acc = RunAccumulators::new(initial_month);
@@ -243,6 +244,7 @@ impl Processor {
                 pending_parse_states,
                 retired_parse_states,
                 BTreeMap::new(),
+                0,
             ));
         }
 
@@ -379,7 +381,7 @@ impl Processor {
 
         // ── Phase 5: join worker threads ───────────────────────────────────────
         let loader_result = loader_handle.join().expect("loader thread panicked");
-        let rule_stats = parser_handle.join().expect("parser thread panicked");
+        let (rule_stats, bot_filtered) = parser_handle.join().expect("parser thread panicked");
         loader_result?;
 
         Ok((
@@ -388,6 +390,7 @@ impl Processor {
             pending_parse_states,
             retired_parse_states,
             rule_stats,
+            bot_filtered,
         ))
     }
 }

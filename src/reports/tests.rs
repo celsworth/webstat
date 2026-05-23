@@ -153,6 +153,7 @@ mod tests {
             vacuum_after_prune: false,
             bot_filter: true,
             checkpoint_minutes: 0,
+            anonymise_ips: false,
             rules: vec![RawRule {
                 name: "Self-referrals".into(),
                 enabled: true,
@@ -259,6 +260,7 @@ mod tests {
             vacuum_after_prune: false,
             bot_filter: true,
             checkpoint_minutes: 0,
+            anonymise_ips: false,
             rules: vec![],
         };
 

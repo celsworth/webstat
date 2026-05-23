@@ -22,10 +22,11 @@ pub(super) fn run_parser(
     mut ua: UaParser,
     bot_filter: bool,
     rule_set: Option<SharedRuleSet>,
-) -> BTreeMap<Arc<str>, RuleStats> {
+) -> (BTreeMap<Arc<str>, RuleStats>, u64) {
     let mut entry_batch: Vec<(ParsedEntry, u64)> = Vec::with_capacity(PARSER_BATCH_SIZE);
     let mut current_offset: u64 = 0;
     let mut rule_stats: BTreeMap<Arc<str>, RuleStats> = BTreeMap::new();
+    let mut bot_filtered: u64 = 0;
 
     loop {
         match pop_blocking(&mut rx) {
@@ -42,6 +43,8 @@ pub(super) fn run_parser(
                     if let Some(entry) = OwnedLogEntry::parse(line) {
                         let ua_result = ua.parse(entry.user_agent());
                         if bot_filter && ua_result.is_bot {
+                            bot_filtered += 1;
+                            ps.lines_done.fetch_add(1, Ordering::Relaxed);
                             continue;
                         }
                         let hidden = if let Some(rs) = &rule_set {
@@ -153,7 +156,7 @@ pub(super) fn run_parser(
                     );
                 }
                 push_blocking(&mut tx, ParserMsg::Done);
-                return rule_stats;
+                return (rule_stats, bot_filtered);
             }
         }
     }
