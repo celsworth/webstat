@@ -6,7 +6,7 @@ Rules are compiled once at startup. The hot path does no allocation, no string c
 
 ## Config format
 
-Add a `rules:` list to your config file. Each rule has a `name`, a `when:` block, and an `action:`.
+Add a `rules:` list to your config file. Each rule has a `name`, a `when:` block, and an `action:`. Rules also accept an optional `enabled` boolean (default: `true`) — set it to `false` to disable a rule without removing it.
 
 ```yaml
 rules:
@@ -45,6 +45,14 @@ rules:
         - field: url
           op: starts_with
           value: "/old/"
+    action: ignore
+
+  - name: "Temporarily disabled rule"
+    enabled: false
+    when:
+      - field: url
+        op: starts_with
+        value: "/debug/"
     action: ignore
 ```
 

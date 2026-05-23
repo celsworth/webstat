@@ -9,9 +9,15 @@ use crate::parser::OwnedLogEntry;
 
 // ── Raw config types (YAML deserialization) ────────────────────────────────
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RawRule {
     pub name: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub when: RawWhen,
     pub action: RawAction,
 }
@@ -465,7 +471,11 @@ fn compile_rule(raw: &RawRule) -> Result<Rule> {
 
 impl RuleSet {
     pub fn compile(raw: &[RawRule]) -> Result<Self> {
-        let rules = raw.iter().map(compile_rule).collect::<Result<Vec<_>>>()?;
+        let rules = raw
+            .iter()
+            .filter(|r| r.enabled)
+            .map(compile_rule)
+            .collect::<Result<Vec<_>>>()?;
         Ok(Self(rules))
     }
 
@@ -573,6 +583,7 @@ mod tests {
     fn single(field: &str, op: &str, value: serde_yaml::Value) -> RuleSet {
         RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: field.into(),
                 op: op.into(),
@@ -830,6 +841,7 @@ mod tests {
     fn len_op_on_numeric_field_is_error() {
         let err = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: "status".into(),
                 op: "len_gt".into(),
@@ -847,6 +859,7 @@ mod tests {
         // status==301 AND url starts_with /old/ → only B matches
         let rs = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::All {
                 all: vec![
                     RawCondition {
@@ -874,6 +887,7 @@ mod tests {
         // First condition false → rule does not match even though second would
         let rs = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::All {
                 all: vec![
                     RawCondition {
@@ -899,6 +913,7 @@ mod tests {
         // Bare list behaves identically to all:
         let list_rs = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![
                 RawCondition {
                     field: "status".into(),
@@ -916,6 +931,7 @@ mod tests {
         .unwrap();
         let all_rs = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::All {
                 all: vec![
                     RawCondition {
@@ -944,6 +960,7 @@ mod tests {
         // status==404 OR ua contains Googlebot → B and C match
         let rs = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::Any {
                 any: vec![
                     RawCondition {
@@ -970,6 +987,7 @@ mod tests {
     fn any_mode_no_match() {
         let rs = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::Any {
                 any: vec![
                     RawCondition {
@@ -1001,6 +1019,7 @@ mod tests {
         let rs = RuleSet::compile(&[
             RawRule {
                 name: "first".into(),
+                enabled: true,
                 when: RawWhen::List(vec![RawCondition {
                     field: "status".into(),
                     op: "eq".into(),
@@ -1010,6 +1029,7 @@ mod tests {
             },
             RawRule {
                 name: "second".into(),
+                enabled: true,
                 when: RawWhen::List(vec![RawCondition {
                     field: "url".into(),
                     op: "starts_with".into(),
@@ -1041,6 +1061,7 @@ mod tests {
         let rs = RuleSet::compile(&[
             RawRule {
                 name: "r1".into(),
+                enabled: true,
                 when: RawWhen::List(vec![RawCondition {
                     field: "status".into(),
                     op: "eq".into(),
@@ -1050,6 +1071,7 @@ mod tests {
             },
             RawRule {
                 name: "r2".into(),
+                enabled: true,
                 when: RawWhen::List(vec![RawCondition {
                     field: "url".into(),
                     op: "starts_with".into(),
@@ -1068,6 +1090,7 @@ mod tests {
     fn hide_action_compiles_and_applies() {
         let rs = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: "url".into(),
                 op: "starts_with".into(),
@@ -1088,6 +1111,7 @@ mod tests {
     fn hide_mask_contains_only_named_tables() {
         let rs = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: "url".into(),
                 op: "starts_with".into(),
@@ -1111,6 +1135,7 @@ mod tests {
     fn hide_unknown_table_is_error() {
         let err = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: "url".into(),
                 op: "starts_with".into(),
@@ -1126,6 +1151,7 @@ mod tests {
         let rs = RuleSet::compile(&[
             RawRule {
                 name: "hide-static".into(),
+                enabled: true,
                 when: RawWhen::List(vec![RawCondition {
                     field: "url".into(),
                     op: "starts_with".into(),
@@ -1135,6 +1161,7 @@ mod tests {
             },
             RawRule {
                 name: "ignore-200".into(),
+                enabled: true,
                 when: RawWhen::List(vec![RawCondition {
                     field: "status".into(),
                     op: "eq".into(),
@@ -1158,6 +1185,7 @@ mod tests {
     fn unknown_field_is_error() {
         let result = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: "no_such_field".into(),
                 op: "eq".into(),
@@ -1173,6 +1201,7 @@ mod tests {
     fn unknown_op_is_error() {
         let result = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: "url".into(),
                 op: "fuzzy_match".into(),
@@ -1188,6 +1217,7 @@ mod tests {
     fn invalid_regex_is_error() {
         let err = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: "url".into(),
                 op: "matches".into(),
@@ -1202,6 +1232,7 @@ mod tests {
     fn between_wrong_arity_is_error() {
         let err = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: "status".into(),
                 op: "between".into(),
@@ -1216,6 +1247,7 @@ mod tests {
     fn in_with_scalar_is_error() {
         let err = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: "url".into(),
                 op: "in".into(),
@@ -1231,6 +1263,7 @@ mod tests {
     fn make_sample_rs(rate: f64) -> RuleSet {
         RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: "status".into(),
                 op: "eq".into(),
@@ -1272,6 +1305,7 @@ mod tests {
     fn sample_rate_above_one_is_error() {
         let err = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: "status".into(),
                 op: "eq".into(),
@@ -1286,6 +1320,7 @@ mod tests {
     fn sample_rate_negative_is_error() {
         let err = RuleSet::compile(&[RawRule {
             name: "t".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: "status".into(),
                 op: "eq".into(),
@@ -1421,5 +1456,56 @@ mod tests {
             rs.apply(&make_entry(B)),
             Some((_, Action::Ignore))
         ));
+    }
+
+    // ── enabled flag ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn disabled_rule_is_skipped() {
+        let yaml = r#"
+- name: "disabled"
+  enabled: false
+  when:
+    - field: status
+      op: eq
+      value: 200
+  action: ignore
+"#;
+        let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
+        assert!(!raw[0].enabled);
+        let rs = RuleSet::compile(&raw).expect("compile");
+        assert!(rs.apply(&make_entry(A)).is_none());
+    }
+
+    #[test]
+    fn enabled_true_explicit_works() {
+        let yaml = r#"
+- name: "enabled-explicit"
+  enabled: true
+  when:
+    - field: status
+      op: eq
+      value: 200
+  action: ignore
+"#;
+        let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
+        let rs = RuleSet::compile(&raw).expect("compile");
+        assert!(is_ignored(&rs, &make_entry(A)));
+    }
+
+    #[test]
+    fn enabled_defaults_to_true_when_omitted() {
+        let yaml = r#"
+- name: "no-enabled-field"
+  when:
+    - field: status
+      op: eq
+      value: 200
+  action: ignore
+"#;
+        let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
+        assert!(raw[0].enabled);
+        let rs = RuleSet::compile(&raw).expect("compile");
+        assert!(is_ignored(&rs, &make_entry(A)));
     }
 }

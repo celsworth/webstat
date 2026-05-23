@@ -706,6 +706,7 @@ mod tests {
     fn hide_ruleset_for_url_prefix(prefix: &str, tables: &[&str]) -> crate::rules::SharedRuleSet {
         let rs = RuleSet::compile(&[RawRule {
             name: "hide".into(),
+            enabled: true,
             when: RawWhen::List(vec![RawCondition {
                 field: "url".into(),
                 op: "starts_with".into(),

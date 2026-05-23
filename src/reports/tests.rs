@@ -155,6 +155,7 @@ mod tests {
             checkpoint_minutes: 0,
             rules: vec![RawRule {
                 name: "Self-referrals".into(),
+                enabled: true,
                 when: RawWhen::List(vec![RawCondition {
                     field: "referer".into(),
                     op: "contains".into(),
