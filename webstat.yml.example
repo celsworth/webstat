@@ -44,46 +44,87 @@ enable_top_refs: true
 # Rules are evaluated in the parser thread in order; the first matching rule wins.
 # See RULES.md for full field/operator reference.
 #
-# rules:
-#   # Drop all redirect responses
-#   - name: "Ignore redirects"
-#     when:
-#       - field: status
-#         op: between
-#         value: [301, 308]
-#     action: ignore
-#
-#   # Drop static asset requests
-#   - name: "Ignore static assets"
-#     when:
-#       any:
-#         - field: url
-#           op: starts_with
-#           value: "/static/"
-#         - field: url
-#           op: starts_with
-#           value: "/assets/"
-#         - field: url
-#           op: ends_with
-#           value: ".ico"
-#     action: ignore
-#
-#   # Drop known crawlers not caught by bot_filter
-#   - name: "Ignore crawlers"
-#     when:
-#       any:
-#         - field: user_agent
-#           op: contains
-#           value: "AhrefsBot"
-#         - field: user_agent
-#           op: contains
-#           value: "SemrushBot"
-#     action: ignore
-#
-#   # Drop PHP probes (common scan noise)
-#   - name: "Ignore PHP probes"
-#     when:
-#       - field: url
-#         op: ends_with
-#         value: ".php"
-#     action: ignore
+rules:
+  - name: "Ignore redirects"
+    enabled: false
+    when:
+      - field: status
+        op: between
+        value: [301, 308]
+    action: ignore
+
+  - name: "Ignore static assets"
+    enabled: false
+    when:
+      any:
+        - field: url
+          op: starts_with
+          value: "/static/"
+        - field: url
+          op: starts_with
+          value: "/assets/"
+        - field: url
+          op: ends_with
+          value: ".ico"
+    action: ignore
+
+  - name: "Hide self-referrals from top refs"
+    enabled: false
+    when:
+      any:
+        - field: referer
+          op: contains
+          value: site-name
+        - field: referer
+          op: contains
+          value: alternate-site-name
+    action:
+      hide: [refs]
+
+  - name: "Ignore common scanner paths"
+    enabled: false
+    when:
+      any:
+        - field: url
+          op: starts_with
+          value: "/wp-"
+        - field: url
+          op: starts_with
+          value: "/wp-admin"
+        - field: url
+          op: contains
+          value: "phpMyAdmin"
+        - field: url
+          op: contains
+          value: ".php"
+        - field: url
+          op: contains
+          value: ".env"
+        - field: url
+          op: contains
+          value: "/.git"
+    action: ignore
+
+  - name: "Ignore suspiciously long URLs"
+    enabled: false
+    when:
+      - field: url
+        op: len_gt
+        value: 500
+    action: ignore
+
+  - name: "Ignore suspiciously long UA"
+    enabled: false
+    when:
+      - field: user_agent
+        op: len_gt
+        value: 400
+    action: ignore
+
+  - name: "Ignore suspiciously long referer"
+    enabled: false
+    when:
+      - field: referer
+        op: len_gt
+        value: 300
+    action: ignore
