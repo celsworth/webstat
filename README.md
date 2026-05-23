@@ -1,35 +1,26 @@
 # Webstat
 
-Webstat is a single-binary Rust web log analyzer, inspired by Webalizer.
+AI disclamer: yes, all of it. Max vibes.
 
-It parses nginx access logs incrementally into SQLite, then generates static HTML reports from that database using Tera templates and Chart.js.
+A single-binary Rust web log analyser, inspired by Webalizer. Parses nginx access logs incrementally into SQLite, then generates static HTML reports using Tera templates and Chart.js.
 
 ## Build
 
 ```bash
 cargo build --release
+# binary at ./target/release/webstat
 ```
 
-Binary path:
+## Usage
 
 ```bash
-./target/release/webstat
-```
+webstat process      # parse logs into SQLite
+webstat generate     # generate HTML from SQLite
+webstat all          # parse then generate
+webstat              # same as `all`
 
-## Commands
-
-```bash
-# Process logs into SQLite (default command)
-./target/release/webstat process -c webstat.yml -v
-
-# Generate static HTML from SQLite
-./target/release/webstat generate -c webstat.yml -v
-
-# Process then generate (default if no subcommand supplied)
-./target/release/webstat all -c webstat.yml -v
-
-# No YAML required: pass config on the command line
-./target/release/webstat all \
+# Most config can be passed on the command line
+webstat \
   --log-glob /var/log/nginx/access.log,/dump/logs/access* \
   --database /var/lib/webstat/webstat.db \
   --output-dir /var/www/webstat \
@@ -37,138 +28,101 @@ Binary path:
   -v
 ```
 
-Global flags:
+### Flags
 
-- `-c, --config <FILE>` optional config file path
-- `-v, --verbose` counted verbosity levels:
-  - `-v` verbose progress/log output
-  - `-vv` enables debug level 1 (most planning/debug lines)
-  - `-vvv` enables debug level 2 (includes extra noisy planning lines)
-- `--site-name <TEXT>`
-- `--log-glob <PATTERNS>` comma-separated glob patterns
-- `--database <PATH>`
-- `--output-dir <PATH>`
-- `--geoip-db <PATH>`
-- `--file-workers <N>`
-- `--checkpoint-minutes <N>` (`0` disables periodic checkpoints)
-- `--anonymise-ips <true|false>`
-- `--top-n <N>`
-- `--vacuum-after-prune <true|false>`
-- `--enable-top-urls <true|false>`
-- `--enable-top-hosts <true|false>`
-- `--enable-top-refs <true|false>`
-- `--bot-filter <true|false>`
-- `--site-host <HOST>`
+| Flag | Description |
+|---|---|
+| `-c, --config <FILE>` | Config file (default: `./webstat.yml`) |
+| `-v` / `-vv` / `-vvv` | Verbosity: level 1 / 2 / 3|
+| `--site-name <TEXT>` | |
+| `--log-glob <PATTERNS>` | Comma-separated glob patterns |
+| `--database <PATH>` | |
+| `--output-dir <PATH>` | |
+| `--geoip-db <PATH>` | |
+| `--checkpoint-minutes <N>` | `0` disables periodic checkpoints |
+| `--anonymise-ips <true\|false>` | |
+| `--top-n <N>` | |
+| `--vacuum-after-prune <true\|false>` | |
+| `--enable-top-urls <true\|false>` | |
+| `--enable-top-hosts <true\|false>` | |
+| `--enable-top-refs <true\|false>` | |
+| `--bot-filter <true\|false>` | |
+| `--site-host <HOST>` | |
 
 ## Configuration
-
-Copy and edit the example as needed:
 
 ```bash
 cp webstat.yml.example webstat.yml
 ```
 
-### Required Settings
+### Required
 
-- **`site_name`** — Display name in HTML reports (e.g., `"My Site"`).
+| Key | Description |
+|---|---|
+| `site_name` | Display name in HTML reports |
+| `log_glob` | Comma-separated file paths or glob patterns. Relative paths resolve from the config file location. |
+| `database` | SQLite database path (created if absent) |
+| `output_dir` | Directory for generated HTML reports |
 
-- **`log_glob`** — Required log source patterns (comma-separated):
-  - Example: `"/var/log/nginx/access.log,/dump/logs/access*"`
-  - Each entry can be a single file path or a glob pattern.
-  - Relative entries are resolved relative to the config file location.
+### Optional
 
-- **`database`** — SQLite database path (will be created if absent). Can be relative.
+| Key | Default | Description |
+|---|---|---|
+| `geoip_db` | — | Path to a MaxMind GeoLite2-Country `.mmdb` file |
+| `checkpoint_minutes` | `0` | Flush partial progress to SQLite periodically. Useful for large backlogs. `0` disables. |
+| `anonymise_ips` | `false` | Zero out the last IPv4 octet / last 80 IPv6 bits in reports |
+| `top_n` | `20` | Rows kept per top-N table (URLs, hosts, referrers, agents, countries) when a month is finalised |
+| `vacuum_after_prune` | `false` | Run `VACUUM` after pruning top-N rows. Reclaims space but is expensive. |
+| `bot_filter` | `true` | Drop known bots/crawlers before aggregation (woothee + substring list) |
+| `enable_top_urls` | `true` | |
+| `enable_top_hosts` | `true` | |
+| `enable_top_refs` | `true` | |
 
-- **`output_dir`** — Directory where static HTML reports are written. Can be relative.
+### Rules
 
-### Optional Settings
+Webstat supports a comprehensive rule system for ignoring requests based on URL patterns, user agents, referrers, and more.
 
-- **`geoip_db`** — Path to MaxMind GeoLite2-Country `.mmdb` file. Leave unset to skip GeoIP lookups. Can be relative.
+See RULES.md for details.
 
-- **`checkpoint_minutes`** — Periodic SQLite checkpoint interval in minutes. Default: `0` (disabled).
-  - Set to a positive value to flush partial aggregates and parse progress during long runs.
-  - Checkpoints run after every month is finalised but this can help if you have a very large backlog of logs.
-  - Helps reduce lost work if processing is interrupted.
+### File change detection
 
-- **`anonymise_ips`** — Anonymise IP addresses in the HTML reports by zeroing out the last octet (IPv4) or last 80 bits (IPv6). Default: `false`.
+Webstat tracks each source file in SQLite to avoid re-importing duplicates.
+Before processing, each file passes through a skip hierarchy:
 
-- **`top_n`** — Number of rows to keep in top-N tables (URLs, hosts, referrers, agents, countries). Default: `20`.
-  - When a month is finalised, each top-N table is pruned to this many rows per period.
+1. **Metadata match** — if inode, size, and mtime all match the stored state,
+   the file is skipped with no reads at all.
+2. **Order-based skip** — if a file's first log entry predates the most recently
+   processed timestamp, and a later file in the sorted list also does, everything
+   before that boundary is considered fully processed and skipped.
+3. **Fingerprint match** — head fingerprints (first 8 KiB) are compared against
+   stored state. Two separate fingerprints are maintained: one of the raw
+   compressed bytes and one of the decompressed content. This enables
+   cross-format deduplication — a `.gz` file whose decompressed content matches
+   a previously processed plain log is skipped outright.
+4. **Resume** — if none of the above apply, Webstat resumes from the last known
+   position. For plain files this is a byte offset; for compressed files it reads
+   from the start and skips the previously decoded byte count.
 
-- **`vacuum_after_prune`** — Run `VACUUM` on the database after pruning old top-N rows. Default: `false`.
-  - Reclaims disk space but is expensive on large databases.
+Inode is the primary file identity signal, so renamed or rotated files are
+recognised as the same stream and not reprocessed.
 
-- **`bot_filter`** — Exclude known bots/crawlers from all statistics. Default: `true`.
-  - Bot detection runs in the parser thread; filtered entries are discarded before reaching the aggregator and are not counted anywhere.
-  - This uses woothee crawler detection and a list of known bot user agent substrings.
+## Program flow
 
-- **`enable_top_urls`** — Enable tracking of top URLs. Default: `true`.
+### `process`
 
-- **`enable_top_hosts`** — Enable tracking of top hosts/IPs. Default: `true`.
+1. Parse CLI args and config (`src/main.rs`, `src/config.rs`)
+2. Open SQLite and initialise schema (`src/database.rs`)
+3. Expand globs into a file list sorted by first-line timestamp (`src/aggregator/mod.rs`)
+4. Fingerprint each file and decide what to skip or resume (`src/fingerprint.rs`, `src/aggregator/resume.rs`)
+5. Run a three-stage pipeline (`src/aggregator/pipeline.rs`):
+   - **Loader** — reads and decompresses raw bytes into line batches (`src/loader.rs`, `src/compression.rs`)
+   - **Parser** — parses combined-log-format lines, classifies user agents, drops bots (`src/parser/`)
+   - **Aggregator** — updates in-memory accumulators, detects month boundaries, triggers finalisation (`src/aggregator/aggregation.rs`, `src/aggregator/flush.rs`)
+6. On month finalisation: prune top-N tables, compute unique-IP counts (`src/database/writer.rs`)
+7. Flush accumulators and update per-file parse state (`src/aggregator/flush.rs`, `src/database.rs`)
 
-- **`enable_top_refs`** — Enable tracking of top referrers. Default: `true`.
+### `generate`
 
-### File Change Detection
-
-Webstat makes significant efforts not to re-import duplicates. To do this, it tracks each source file with an SQLite state record. The current rules are:
-
-- `inode` is the primary identity signal. If the same inode appears under a new name (file rename), Webstat treats it as the same stream and does not reprocess it.
-- `file_size` and `mtime_ns` are stored for the last processed view of the file.
-- A head fingerprint is stored from the content stream using first 8 KiB samples.
-  For plain logs this is raw file bytes; for `.gz`/`.bz2` logs this is decompressed bytes.
-- A content fingerprint is stored when a file is fully processed, which allows exact skip of already-seen content.
-
-For plain text logs:
-
-- If `file_size` grows, Webstat resumes from the stored byte offset and processes only the new tail data.
-- If `file_size` shrinks, Webstat treats that as truncation/copy-truncate and restarts that live path from offset `0`.
-- If a rotated file later appears with the same fingerprints as a previously seen file, Webstat can inherit the prior byte offset from the archived state and avoid reprocessing the already-seen data.
-
-For bz2/gzip logs:
-
-- A `.bz2` or `.gz` file with the same decompressed content as a previously processed plain log is skipped via content fingerprint dedupe.
-- A stable `.bz2` or `.gz` file is skipped after a successful full pass.
-- If a `.bz2` or `.gz` file grows and inode is unchanged, Webstat seeks to the stored compressed offset and resumes from there.
-
-### Example Config
-
-```yaml
-site_name: "My Site"
-log_glob: logs/access.log,logs/access.log.*
-database: webstat.db
-output_dir: output
-geoip_db: GeoLite2-Country.mmdb
-top_n: 20
-bot_filter: true
-```
-
-## Runtime Outputs
-
-- SQLite DB at `database` path (often `./webstat.db`)
-- Generated site at `output_dir` (often `./output`)
-- Extracted report assets at `output_dir/assets`
-
-## Program Flow
-
-### `process` command
-
-- Parse CLI args and load config — `src/main.rs`, `src/config.rs`
-- Initialise logging (verbosity globals) — `src/logging.rs`
-- Open SQLite database and initialise schema — `src/database.rs`
-- Expand glob patterns into a file list, sort by first-line timestamp — `src/aggregator/mod.rs` (`process_globs`)
-- For each file, fingerprint it and decide what to skip/resume — `src/fingerprint.rs`, `src/aggregator/resume.rs`
-- Seed initial progress counters from already-processed offsets — `src/aggregator/progress_seed.rs`
-- Spawn a progress display thread — `src/aggregator/mod.rs`, `src/progress.rs`
-- Run the 3-stage pipeline — `src/aggregator/pipeline.rs`:
-  - **Loader thread** — reads raw bytes, decompresses if needed, emits line batches — `src/loader.rs`, `src/compression.rs`
-  - **Parser thread** — parses combined-log-format lines into structured entries, runs UA classification and bot filtering; bots are dropped here — `src/parser/stage.rs`, `src/parser/mod.rs`, `src/ua.rs`
-  - **Aggregator (main thread)** — consumes `ParsedEntry` values, updates in-memory accumulators, detects month boundaries and triggers `finalize_month` — `src/aggregator/aggregation.rs`, `src/aggregator/flush.rs`, `src/geo.rs`
-- On month finalisation: prune top-N tables to `top_n` rows, compute and cache unique-IP counts — `src/database/writer.rs`
-- Flush accumulators to SQLite at checkpoints and on completion — `src/aggregator/flush.rs`, `src/database.rs`
-- Update per-file parse state for resume tracking — `src/database.rs`
-
-### `generate` command
-
-- Query aggregated data from SQLite — `src/database.rs`
-- Render Tera templates into static HTML — `src/reports.rs`
-- Write HTML and copy bundled assets to `output_dir` — `src/reports.rs`
+1. Query aggregated data from SQLite (`src/database.rs`)
+2. Render Tera templates into static HTML (`src/reports.rs`)
+3. Write HTML to `output_dir` (`src/reports.rs`)
