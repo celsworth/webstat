@@ -1,0 +1,6 @@
+/output
+/logs
+/webstat.db*
+/webstat.yml
+/target
+/GeoLite2-Country.mmdb

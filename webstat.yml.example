@@ -1,0 +1,89 @@
+# Webstat configuration example
+# Copy to webstat.yml and adjust for your environment.
+
+# Display name shown in the HTML reports
+site_name: "My Site"
+
+# Comma-separated log file/glob patterns
+# Each entry can be a single file or a wildcard glob.
+log_glob: /var/log/nginx/access.log,/dump/logs/access*
+
+# SQLite database path (will be created if absent)
+database: /var/lib/webstat/webstat.db
+
+# Directory where static HTML reports are written
+output_dir: /var/www/webstat
+
+# Path to the MaxMind GeoLite2-Country .mmdb file (optional)
+# Leave blank to disable GeoIP lookup
+geoip_db: /etc/webstat/GeoLite2-Country.mmdb
+
+# Number of files to process in parallel (Rust importer only)
+# Start with 2-4 and benchmark; 1 keeps single-thread behavior
+file_workers: 1
+
+# Periodic checkpoint interval in minutes.
+# 0 disables intermediate checkpoints (flush only at end of run).
+checkpoint_minutes: 0
+
+# Number of rows in top-N tables
+top_n: 20
+
+# Run SQLite VACUUM after pruning (can be expensive on large DBs)
+vacuum_after_prune: false
+
+# Exclude known bots/crawlers from main statistics
+bot_filter: true
+
+# Track top URLs/hosts/referrers (disable to go faster and reduce processing CPU/memory if not required)
+enable_top_urls: true
+enable_top_hosts: true
+enable_top_refs: true
+
+# Rule-based filtering
+# Rules are evaluated in the parser thread in order; the first matching rule wins.
+# See RULES.md for full field/operator reference.
+#
+# rules:
+#   # Drop all redirect responses
+#   - name: "Ignore redirects"
+#     when:
+#       - field: status
+#         op: between
+#         value: [301, 308]
+#     action: ignore
+#
+#   # Drop static asset requests
+#   - name: "Ignore static assets"
+#     when:
+#       any:
+#         - field: url
+#           op: starts_with
+#           value: "/static/"
+#         - field: url
+#           op: starts_with
+#           value: "/assets/"
+#         - field: url
+#           op: ends_with
+#           value: ".ico"
+#     action: ignore
+#
+#   # Drop known crawlers not caught by bot_filter
+#   - name: "Ignore crawlers"
+#     when:
+#       any:
+#         - field: user_agent
+#           op: contains
+#           value: "AhrefsBot"
+#         - field: user_agent
+#           op: contains
+#           value: "SemrushBot"
+#     action: ignore
+#
+#   # Drop PHP probes (common scan noise)
+#   - name: "Ignore PHP probes"
+#     when:
+#       - field: url
+#         op: ends_with
+#         value: ".php"
+#     action: ignore

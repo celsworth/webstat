@@ -1,0 +1,291 @@
+<div class="page-header">
+  <h2>{{ year }} - Annual Summary</h2>
+</div>
+
+<section class="summary-bar">
+  <div class="stat-card stat-card--hits">
+    <span class="stat-value" title="{{ totals.hits_exact_fmt }}">{{ totals.hits_fmt }}</span>
+    <span class="stat-label">Total Hits</span>
+  </div>
+  <div class="stat-card stat-card--pages">
+    <span class="stat-value" title="{{ totals.pages_exact_fmt }}">{{ totals.pages_fmt }}</span>
+    <span class="stat-label">Total Pages</span>
+  </div>
+  <div class="stat-card stat-card--files">
+    <span class="stat-value" title="{{ totals.files_exact_fmt }}">{{ totals.files_fmt }}</span>
+    <span class="stat-label">Total Files</span>
+  </div>
+  <div class="stat-card stat-card--visits">
+    <span class="stat-value" title="{{ totals.visits_exact_fmt }}">{{ totals.visits_fmt }}</span>
+    <span class="stat-label">Total Visits</span>
+  </div>
+  <div class="stat-card stat-card--sites">
+    <span class="stat-value" title="{{ totals.sites_exact_fmt }}">{{ totals.sites_fmt }}</span>
+    <span class="stat-label">Unique Sites</span>
+  </div>
+  <div class="stat-card stat-card--bandwidth">
+    <span class="stat-value">{{ totals.bandwidth_fmt }}</span>
+    <span class="stat-label">Bandwidth</span>
+  </div>
+</section>
+
+<section class="charts-col">
+  <div class="charts-split">
+    <div class="chart-box chart-box--bar">
+      <canvas id="overviewChart"></canvas>
+    </div>
+    <div class="chart-box chart-box--bar">
+      <canvas id="overviewVisitsChart"></canvas>
+    </div>
+  </div>
+</section>
+
+{% if status_codes | length > 0 or top_countries | length > 0 or top_agents | length > 0 %}
+<section class="charts-col">
+  <div class="charts-triple">
+    {% if status_codes | length > 0 %}
+    <div class="chart-box">
+      <canvas id="statusChart"></canvas>
+    </div>
+    {% endif %}
+    {% if top_countries | length > 0 %}
+    <div class="chart-box">
+      <canvas id="countriesChart"></canvas>
+    </div>
+    {% endif %}
+    {% if top_agents | length > 0 %}
+    <div class="chart-box">
+      <canvas id="agentsChart"></canvas>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+<section class="stats-group">
+<div class="stats-panel">
+  <table class="data-table stats-panel__table">
+    <thead>
+      <tr><th colspan="8" class="stats-panel__heading">Monthly Breakdown</th></tr>
+      <tr>
+        <th>Month</th>
+        <th class="num-col metric-hits">Hits</th>
+        <th class="num-col metric-pages">Pages</th>
+        <th class="num-col metric-files">Files</th>
+        <th class="num-col metric-visits">Visits</th>
+        <th class="num-col metric-sites">Sites</th>
+        <th class="num-col metric-bandwidth">Bandwidth</th>
+        <th>Detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in monthly_rows %}
+      <tr>
+        <td>{{ row.month_name }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.pages }}" title="{{ row.pages_exact_fmt }}">{{ row.pages_fmt }}</td>
+        <td class="num-col" data-value="{{ row.files }}" title="{{ row.files_exact_fmt }}">{{ row.files_fmt }}</td>
+        <td class="num-col" data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">{{ row.visits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.sites }}" title="{{ row.sites_exact_fmt }}">{{ row.sites_fmt }}</td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+        <td><a href="../{{ row.period }}/index.html" class="btn-link">View -></a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+</section>
+
+<section class="stats-group">
+  <div class="stats-panel">
+    {% if status_codes | length > 0 %}
+    <table class="data-table stats-panel__table stats-panel__table--3col">
+      <thead>
+        <tr><th colspan="3" class="stats-panel__heading">Hits by Response Code</th></tr>
+      </thead>
+      <tbody>
+        {% for s in status_codes %}
+        <tr class="{% if s.status >= 200 and s.status < 300 %}status-row--2xx{% elif s.status >= 300 and s.status < 400 %}status-row--3xx{% elif s.status >= 400 and s.status < 500 %}status-row--4xx{% elif s.status >= 500 and s.status < 600 %}status-row--5xx{% else %}status-row--other{% endif %}">
+          <td>{{ s.label }}</td>
+          <td class="stats-panel__pct">{{ s.pct_fmt }}</td>
+          <td title="{{ s.hits_exact_fmt }}">{{ s.hits_fmt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  <div class="stats-panel">
+    {% if proto_codes | length > 0 %}
+    <table class="data-table stats-panel__table stats-panel__table--3col">
+      <thead>
+        <tr><th colspan="3" class="stats-panel__heading">Hits by Protocol</th></tr>
+      </thead>
+      <tbody>
+        {% for p in proto_codes %}
+        <tr>
+          <td>{{ p.proto }}</td>
+          <td class="stats-panel__pct">{{ p.pct_fmt }}</td>
+          <td title="{{ p.hits_exact_fmt }}">{{ p.hits_fmt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  <div class="stats-panel">
+    {% if method_codes | length > 0 %}
+    <table class="data-table stats-panel__table stats-panel__table--3col">
+      <thead>
+        <tr><th colspan="3" class="stats-panel__heading">Hits by Method</th></tr>
+      </thead>
+      <tbody>
+        {% for m in method_codes %}
+        <tr>
+          <td>{{ m.method }}</td>
+          <td class="stats-panel__pct">{{ m.pct_fmt }}</td>
+          <td title="{{ m.hits_exact_fmt }}">{{ m.hits_fmt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+</section>
+
+{% if top_urls_hits | length > 0 or top_urls_bandwidth | length > 0 %}
+<div class="paired-tables-grid">
+{% if top_urls_hits | length > 0 %}
+<div class="stats-panel">
+  <table class="data-table stats-panel__table">
+    <thead>
+      <tr><th colspan="4" class="stats-panel__heading">Top URLs by Hits - {{ year }}</th></tr>
+      <tr><th>#</th><th>URL</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
+    </thead>
+    <tbody>
+      {% for row in top_urls_hits %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td class="url-cell">{{ row.url }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if top_urls_bandwidth | length > 0 %}
+<div class="stats-panel">
+  <table class="data-table stats-panel__table">
+    <thead>
+      <tr><th colspan="4" class="stats-panel__heading">Top URLs by Bandwidth - {{ year }}</th></tr>
+      <tr><th>#</th><th>URL</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
+    </thead>
+    <tbody>
+      {% for row in top_urls_bandwidth %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td class="url-cell">{{ row.url }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+</div>
+{% endif %}
+
+{% if top_sites_hits | length > 0 or top_sites_bandwidth | length > 0 %}
+<div class="paired-tables-grid">
+{% if top_sites_hits | length > 0 %}
+<div class="stats-panel">
+  <table class="data-table stats-panel__table">
+    <thead>
+      <tr><th colspan="5" class="stats-panel__heading">Top Sites by Hits - {{ year }}</th></tr>
+      <tr><th>#</th><th>Site</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
+    </thead>
+    <tbody>
+      {% for row in top_sites_hits %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.host }}</td>
+        <td>{{ row.country_flag }} {{ row.country_name }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if top_sites_bandwidth | length > 0 %}
+<div class="stats-panel">
+  <table class="data-table stats-panel__table">
+    <thead>
+      <tr><th colspan="5" class="stats-panel__heading">Top Sites by Bandwidth - {{ year }}</th></tr>
+      <tr><th>#</th><th>Site</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
+    </thead>
+    <tbody>
+      {% for row in top_sites_bandwidth %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.host }}</td>
+        <td>{{ row.country_flag }} {{ row.country_name }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+</div>
+{% endif %}
+
+{% if top_refs | length > 0 %}
+<section class="stats-group">
+<div class="stats-panel">
+  <table class="data-table stats-panel__table">
+    <thead>
+      <tr><th colspan="3" class="stats-panel__heading">Top Referrers - {{ year }}</th></tr>
+      <tr><th>#</th><th>Referrer</th><th class="num-col">Hits</th></tr>
+    </thead>
+    <tbody>
+      {% for row in top_refs %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td class="url-cell"><a href="{{ row.referrer }}" rel="noopener noreferrer" target="_blank">{{ row.referrer }}</a></td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+</section>
+{% endif %}
+
+<script>
+(function() {
+  new Chart(document.getElementById('overviewChart'), {{ overview_chart | safe }});
+  new Chart(document.getElementById('overviewVisitsChart'), {{ overview_visits_chart | safe }});
+  var statusCanvas = document.getElementById('statusChart');
+  if (statusCanvas) {
+    new Chart(statusCanvas, {{ status_chart | safe }});
+  }
+  var countriesCanvas = document.getElementById('countriesChart');
+  if (countriesCanvas) {
+    new Chart(countriesCanvas, {{ country_chart | safe }});
+  }
+  var agentsCanvas = document.getElementById('agentsChart');
+  if (agentsCanvas) {
+    new Chart(agentsCanvas, {{ agents_chart | safe }});
+  }
+})();
+</script>
