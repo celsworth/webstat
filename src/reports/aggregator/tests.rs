@@ -86,7 +86,7 @@ mod tests {
     }
 
     fn finalize_site_count_cache(conn: &Connection, period: &str) {
-        let like = format!("{}-%" , period);
+        let like = format!("{}-%", period);
         conn.execute(
             "INSERT OR REPLACE INTO site_count_cache (period, count)
              SELECT ?1, COUNT(*) FROM (
@@ -170,7 +170,10 @@ mod tests {
         insert_daily_ip(&conn, "2026-05-01", 30);
 
         let sites = site_count_for_scope(&conn, "2026").expect("yearly dedup");
-        assert_eq!(sites, 3, "should deduplicate ip 10 across yearly_ip_log and daily_ip_log");
+        assert_eq!(
+            sites, 3,
+            "should deduplicate ip 10 across yearly_ip_log and daily_ip_log"
+        );
     }
 
     #[test]

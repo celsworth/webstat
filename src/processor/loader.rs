@@ -89,7 +89,8 @@ fn read_plain(
 
     if !batch.is_empty() {
         let current_offset = plan.offset + bytes_read;
-        ps.bytes_done.fetch_add(bytes_read.saturating_sub(reported), Ordering::Relaxed);
+        ps.bytes_done
+            .fetch_add(bytes_read.saturating_sub(reported), Ordering::Relaxed);
         push_blocking(
             tx,
             LoaderMsg::Lines {
@@ -160,7 +161,8 @@ fn read_compressed(
 
     if !batch.is_empty() {
         let effective = decoded_total.saturating_sub(plan.skip_decoded_prefix_bytes);
-        ps.bytes_done.fetch_add(effective.saturating_sub(reported), Ordering::Relaxed);
+        ps.bytes_done
+            .fetch_add(effective.saturating_sub(reported), Ordering::Relaxed);
         push_blocking(
             tx,
             LoaderMsg::Lines {
@@ -172,7 +174,8 @@ fn read_compressed(
 
     // Update gz progress counters once the whole file is done.
     ps.gz_comp_done.fetch_add(plan.stat_size, Ordering::Relaxed);
-    ps.gz_decoded_done.fetch_add(decoded_total, Ordering::Relaxed);
+    ps.gz_decoded_done
+        .fetch_add(decoded_total, Ordering::Relaxed);
 
     Ok((decoded_total, true))
 }

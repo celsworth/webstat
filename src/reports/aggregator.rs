@@ -655,7 +655,7 @@ fn site_count_for_scope(conn: &Connection, scope: &str) -> Result<u64> {
         }
         7 => {
             // Use precomputed cache; for the in-progress month fall back to daily_ip_log.
-            let like = format!("{}-%" , scope);
+            let like = format!("{}-%", scope);
             let count: i64 = conn.query_row(
                 "SELECT COALESCE(
                     (SELECT count FROM site_count_cache WHERE period = ?1),
@@ -669,7 +669,7 @@ fn site_count_for_scope(conn: &Connection, scope: &str) -> Result<u64> {
         }
         4 => {
             // Use precomputed cache; for the in-progress year combine yearly_ip_log with daily_ip_log.
-            let like = format!("{}-%" , scope);
+            let like = format!("{}-%", scope);
             let count: i64 = conn.query_row(
                 "SELECT COALESCE(
                     (SELECT count FROM site_count_cache WHERE period = ?1),
@@ -690,8 +690,7 @@ fn site_count_for_scope(conn: &Connection, scope: &str) -> Result<u64> {
 }
 
 fn all_time_site_count(conn: &Connection) -> Result<u64> {
-    let count: i64 =
-        conn.query_row("SELECT COUNT(*) FROM all_time_hosts", [], |row| row.get(0))?;
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM all_time_hosts", [], |row| row.get(0))?;
     Ok(count as u64)
 }
 
@@ -701,7 +700,14 @@ fn top_urls_hits(
     top_n: usize,
     compact_counts: bool,
 ) -> Result<Vec<TopUrlRow>> {
-    top_urls_from_table(conn, "monthly_urls_hits", period, top_n, compact_counts, "hits")
+    top_urls_from_table(
+        conn,
+        "monthly_urls_hits",
+        period,
+        top_n,
+        compact_counts,
+        "hits",
+    )
 }
 
 fn top_urls_bandwidth(
@@ -1095,7 +1101,8 @@ fn top_countries_all_raw(conn: &Connection, limit: usize) -> Result<Vec<(String,
 fn status_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result<Vec<StatusRow>> {
     let (sql, period_param) = if period.len() == 7 {
         (
-            "SELECT status, hits FROM status_codes WHERE period = ?1 ORDER BY hits DESC".to_string(),
+            "SELECT status, hits FROM status_codes WHERE period = ?1 ORDER BY hits DESC"
+                .to_string(),
             period.to_string(),
         )
     } else {
@@ -1208,7 +1215,8 @@ fn proto_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result<
 fn method_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result<Vec<MethodRow>> {
     let (sql, period_param) = if period.len() == 7 {
         (
-            "SELECT method, hits FROM method_counts WHERE period = ?1 ORDER BY hits DESC".to_string(),
+            "SELECT method, hits FROM method_counts WHERE period = ?1 ORDER BY hits DESC"
+                .to_string(),
             period.to_string(),
         )
     } else {

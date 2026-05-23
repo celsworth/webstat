@@ -28,7 +28,9 @@ fn compressed_head(path: &str) -> Option<u64> {
     let mut f = std::fs::File::open(path).ok()?;
     let mut buf = vec![0u8; SAMPLE];
     let n = f.read(&mut buf).ok()?;
-    if n == 0 { return None; }
+    if n == 0 {
+        return None;
+    }
     Some(hash8k(&buf[..n]))
 }
 
@@ -40,11 +42,15 @@ fn gz_decompressed_head(path: &str) -> Option<u64> {
     let mut buf = [0u8; SAMPLE];
     while head.len() < SAMPLE {
         let n = dec.read(&mut buf).ok()?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         let take = (SAMPLE - head.len()).min(n);
         head.extend_from_slice(&buf[..take]);
     }
-    if head.is_empty() { return None; }
+    if head.is_empty() {
+        return None;
+    }
     Some(hash8k(&head))
 }
 
@@ -90,10 +96,14 @@ fn measure<F: FnMut() -> ()>(label: &str, n: usize, mut f: F) -> Stats {
     }
     let min = *times.iter().min().unwrap();
     let max = *times.iter().max().unwrap();
-    let mean = Duration::from_nanos(
-        (times.iter().map(|d| d.as_nanos()).sum::<u128>() / n as u128) as u64,
-    );
-    Stats { label: label.to_string(), min, mean, max }
+    let mean =
+        Duration::from_nanos((times.iter().map(|d| d.as_nanos()).sum::<u128>() / n as u128) as u64);
+    Stats {
+        label: label.to_string(),
+        min,
+        mean,
+        max,
+    }
 }
 
 fn fmt_dur(d: Duration) -> String {
@@ -109,7 +119,14 @@ fn fmt_dur(d: Duration) -> String {
 
 fn print_stats(rows: &[Stats]) {
     let w = rows.iter().map(|s| s.label.len()).max().unwrap_or(40);
-    println!("\n{:<width$}  {:>9}  {:>9}  {:>9}", "operation", "min", "mean", "max", width = w);
+    println!(
+        "\n{:<width$}  {:>9}  {:>9}  {:>9}",
+        "operation",
+        "min",
+        "mean",
+        "max",
+        width = w
+    );
     println!("{}", "─".repeat(w + 33));
     for s in rows {
         println!(
@@ -138,8 +155,14 @@ fn main() {
     }
 
     println!("N={ITERS} per operation");
-    println!("gz:    {gz_path}  ({:.1} MB)", std::fs::metadata(gz_path).unwrap().len() as f64 / 1e6);
-    println!("plain: {plain_path}  ({:.1} MB)", std::fs::metadata(plain_path).unwrap().len() as f64 / 1e6);
+    println!(
+        "gz:    {gz_path}  ({:.1} MB)",
+        std::fs::metadata(gz_path).unwrap().len() as f64 / 1e6
+    );
+    println!(
+        "plain: {plain_path}  ({:.1} MB)",
+        std::fs::metadata(plain_path).unwrap().len() as f64 / 1e6
+    );
 
     // ── DB setup ──────────────────────────────────────────────────────────────
     // Use a temp file-based SQLite so queries go through real SQLite I/O paths
@@ -147,7 +170,8 @@ fn main() {
     let db_dir = tempdir();
     let db_path = format!("{}/bench.db", db_dir);
     let conn = rusqlite::Connection::open(&db_path).unwrap();
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE parse_state (
             filepath TEXT PRIMARY KEY,
             inode INTEGER NOT NULL,
@@ -173,7 +197,9 @@ fn main() {
             mtime_ns INTEGER,
             completed INTEGER
         );
-    ").unwrap();
+    ",
+    )
+    .unwrap();
 
     // Insert a completed row for the gz file so we can time the "hit" path.
     let gz_meta = std::fs::metadata(gz_path).unwrap();
@@ -193,7 +219,8 @@ fn main() {
           compressed_offset,uncompressed_offset,mtime_ns,completed)
          VALUES (?1,?2,?3,5000000,111111,222222,?3,5000000,?4,1)",
         rusqlite::params![gz_path, gz_inode as i64, gz_size, gz_mtime],
-    ).unwrap();
+    )
+    .unwrap();
 
     let mut rows: Vec<Stats> = Vec::new();
 
@@ -245,43 +272,66 @@ fn main() {
         let stored_size = gz_size as u64;
         let stored_mtime = gz_mtime;
         let stored_inode = gz_inode;
-        rows.push(measure("in-memory exact-match (inode+size+mtime)", ITERS, || {
-            let meta = std::fs::metadata(black_box(gz_path)).unwrap();
-            use std::os::unix::fs::MetadataExt;
-            let matched = black_box(
-                meta.ino() == stored_inode
-                    && meta.len() == stored_size
-                    && (meta.mtime().saturating_mul(1_000_000_000) + meta.mtime_nsec()) == stored_mtime,
-            );
-            let _ = matched;
-        }));
+        rows.push(measure(
+            "in-memory exact-match (inode+size+mtime)",
+            ITERS,
+            || {
+                let meta = std::fs::metadata(black_box(gz_path)).unwrap();
+                use std::os::unix::fs::MetadataExt;
+                let matched = black_box(
+                    meta.ino() == stored_inode
+                        && meta.len() == stored_size
+                        && (meta.mtime().saturating_mul(1_000_000_000) + meta.mtime_nsec())
+                            == stored_mtime,
+                );
+                let _ = matched;
+            },
+        ));
     }
 
     // ── separator ─────────────────────────────────────────────────────────────
     rows.push(Stats {
         label: "── file I/O operations ──".to_string(),
-        min: Duration::ZERO, mean: Duration::ZERO, max: Duration::ZERO,
+        min: Duration::ZERO,
+        mean: Duration::ZERO,
+        max: Duration::ZERO,
     });
 
     // ── 6: compressed head fingerprint (gz) — raw 8KB read + hash ────────────
-    rows.push(measure("compressed head fingerprint (gz, 8KB raw+hash)", ITERS, || {
-        let _ = black_box(compressed_head(black_box(gz_path)));
-    }));
+    rows.push(measure(
+        "compressed head fingerprint (gz, 8KB raw+hash)",
+        ITERS,
+        || {
+            let _ = black_box(compressed_head(black_box(gz_path)));
+        },
+    ));
 
     // ── 7: decompressed head fingerprint (gz) — 8KB decompress + hash ─────────
-    rows.push(measure("decompressed head fingerprint (gz, 8KB decomp+hash)", ITERS, || {
-        let _ = black_box(gz_decompressed_head(black_box(gz_path)));
-    }));
+    rows.push(measure(
+        "decompressed head fingerprint (gz, 8KB decomp+hash)",
+        ITERS,
+        || {
+            let _ = black_box(gz_decompressed_head(black_box(gz_path)));
+        },
+    ));
 
     // ── 8: read_first_line_ts (gz) — 8KB compressed in, decompress, scan lines ─
-    rows.push(measure("first-line timestamp scan (gz, 8KB compressed input)", ITERS, || {
-        let _ = black_box(gz_first_line_ts(black_box(gz_path)));
-    }));
+    rows.push(measure(
+        "first-line timestamp scan (gz, 8KB compressed input)",
+        ITERS,
+        || {
+            let _ = black_box(gz_first_line_ts(black_box(gz_path)));
+        },
+    ));
 
     // ── 9: plain file — stat + 8KB read + hash ────────────────────────────────
-    rows.push(measure("compressed head fingerprint (plain, 8KB read+hash)", ITERS, || {
-        let _ = black_box(compressed_head(black_box(plain_path)));
-    }));
+    rows.push(measure(
+        "compressed head fingerprint (plain, 8KB read+hash)",
+        ITERS,
+        || {
+            let _ = black_box(compressed_head(black_box(plain_path)));
+        },
+    ));
 
     // ── 10: find_completed_by_compressed_identity (global dedup DB query) ─────
     rows.push(measure("DB find_completed_by_compressed_identity", ITERS, || {

@@ -246,4 +246,3 @@ fn run_processing(cfg: &config::Config) -> Result<()> {
 
     Ok(())
 }
-

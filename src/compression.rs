@@ -27,21 +27,36 @@ mod tests {
 
     #[test]
     fn from_path_detects_gz() {
-        assert_eq!(CompressionType::from_path("access.log.gz"), CompressionType::Gz);
+        assert_eq!(
+            CompressionType::from_path("access.log.gz"),
+            CompressionType::Gz
+        );
         assert_eq!(CompressionType::from_path("file.gz"), CompressionType::Gz);
     }
 
     #[test]
     fn from_path_detects_bz2() {
-        assert_eq!(CompressionType::from_path("access.log.bz2"), CompressionType::Bz2);
+        assert_eq!(
+            CompressionType::from_path("access.log.bz2"),
+            CompressionType::Bz2
+        );
         assert_eq!(CompressionType::from_path("file.bz2"), CompressionType::Bz2);
     }
 
     #[test]
     fn from_path_plain_for_unrecognised_extensions() {
-        assert_eq!(CompressionType::from_path("access.log"), CompressionType::Plain);
-        assert_eq!(CompressionType::from_path("data.zip"), CompressionType::Plain);
-        assert_eq!(CompressionType::from_path("archive.tar"), CompressionType::Plain);
+        assert_eq!(
+            CompressionType::from_path("access.log"),
+            CompressionType::Plain
+        );
+        assert_eq!(
+            CompressionType::from_path("data.zip"),
+            CompressionType::Plain
+        );
+        assert_eq!(
+            CompressionType::from_path("archive.tar"),
+            CompressionType::Plain
+        );
     }
 
     #[test]
@@ -51,8 +66,14 @@ mod tests {
 
     #[test]
     fn from_path_case_sensitive() {
-        assert_eq!(CompressionType::from_path("access.log.GZ"), CompressionType::Plain);
-        assert_eq!(CompressionType::from_path("access.log.BZ2"), CompressionType::Plain);
+        assert_eq!(
+            CompressionType::from_path("access.log.GZ"),
+            CompressionType::Plain
+        );
+        assert_eq!(
+            CompressionType::from_path("access.log.BZ2"),
+            CompressionType::Plain
+        );
     }
 
     #[test]

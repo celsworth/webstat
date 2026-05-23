@@ -6,10 +6,12 @@ use ahash::{AHashMap, AHashSet};
 use anyhow::Result;
 
 use super::messages::{pop_blocking, LoaderMsg, ParserMsg};
-use super::{loader, parser_stage, parser_stage::RuleStats, FileResumePlan, Processor, CHANNEL_CAPACITY};
-use std::collections::BTreeMap;
+use super::{
+    loader, parser_stage, parser_stage::RuleStats, FileResumePlan, Processor, CHANNEL_CAPACITY,
+};
 use crate::database::ParseStateUpdate;
 use crate::run_accumulators::RunAccumulators;
+use std::collections::BTreeMap;
 
 /// Per-file state tracked by the aggregator while a file is being processed.
 struct ActiveFile {
@@ -235,7 +237,13 @@ impl Processor {
         );
 
         if work_files.is_empty() {
-            return Ok((0, run_acc, pending_parse_states, retired_parse_states, BTreeMap::new()));
+            return Ok((
+                0,
+                run_acc,
+                pending_parse_states,
+                retired_parse_states,
+                BTreeMap::new(),
+            ));
         }
 
         // ── Phase 2: create channels ───────────────────────────────────────────
@@ -254,7 +262,9 @@ impl Processor {
         let rule_set = self.rule_set.clone();
         let parser_handle = std::thread::Builder::new()
             .name("parser".into())
-            .spawn(move || parser_stage::run_parser(parser_rx, parser_tx, ps_parser, ua, bot_filter, rule_set))?;
+            .spawn(move || {
+                parser_stage::run_parser(parser_rx, parser_tx, ps_parser, ua, bot_filter, rule_set)
+            })?;
 
         // ── Phase 4: aggregator loop (runs on this thread) ─────────────────────
         let mut total = 0u64;
@@ -372,6 +382,12 @@ impl Processor {
         let rule_stats = parser_handle.join().expect("parser thread panicked");
         loader_result?;
 
-        Ok((total, run_acc, pending_parse_states, retired_parse_states, rule_stats))
+        Ok((
+            total,
+            run_acc,
+            pending_parse_states,
+            retired_parse_states,
+            rule_stats,
+        ))
     }
 }

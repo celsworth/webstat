@@ -47,7 +47,12 @@ impl Processor {
     fn visit_state_key(ip: &str) -> (VisitStateKey, Option<Ip>) {
         match Ip::parse(ip) {
             Some(Ip::V4(n)) => (
-                VisitStateKey { ip_kind: 1, ip_hi: 0, ip_lo: n as u64, ip_text: String::new() },
+                VisitStateKey {
+                    ip_kind: 1,
+                    ip_hi: 0,
+                    ip_lo: n as u64,
+                    ip_text: String::new(),
+                },
                 Some(Ip::V4(n)),
             ),
             Some(Ip::V6(n)) => (
@@ -60,7 +65,12 @@ impl Processor {
                 Some(Ip::V6(n)),
             ),
             None => (
-                VisitStateKey { ip_kind: 0, ip_hi: 0, ip_lo: 0, ip_text: ip.to_string() },
+                VisitStateKey {
+                    ip_kind: 0,
+                    ip_hi: 0,
+                    ip_lo: 0,
+                    ip_text: ip.to_string(),
+                },
                 None,
             ),
         }
@@ -161,7 +171,11 @@ impl Processor {
 
         // ── Daily unique IPs ───────────────────────────────────────────────────
         if let Some(ip) = parsed_ip {
-            run_acc.daily_ips.entry(date.to_string()).or_default().insert(ip);
+            run_acc
+                .daily_ips
+                .entry(date.to_string())
+                .or_default()
+                .insert(ip);
         }
 
         // ── Month-period aggregations ──────────────────────────────────────────

@@ -3,7 +3,9 @@ use super::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::method_proto::{METHOD_COUNT, METHOD_GET, METHOD_POST, PROTO_1_1, PROTO_2_0, PROTO_COUNT};
+    use crate::method_proto::{
+        METHOD_COUNT, METHOD_GET, METHOD_POST, PROTO_1_1, PROTO_2_0, PROTO_COUNT,
+    };
     use ahash::AHashSet;
 
     fn open_test_db() -> Database {
@@ -338,7 +340,11 @@ mod tests {
 
         let yearly_count: i64 = db
             .conn
-            .query_row("SELECT COUNT(*) FROM yearly_ip_log WHERE year='2026'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM yearly_ip_log WHERE year='2026'",
+                [],
+                |r| r.get(0),
+            )
             .expect("yearly_ip_log count");
         assert_eq!(yearly_count, 2);
 
@@ -377,14 +383,21 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("yearly cache");
-        assert_eq!(cached, 3, "yearly cache should deduplicate ip2 across months");
+        assert_eq!(
+            cached, 3,
+            "yearly cache should deduplicate ip2 across months"
+        );
 
         db.finalize_year("2026").expect("finalize year");
 
         // yearly_ip_log for 2026 should be cleared
         let remaining: i64 = db
             .conn
-            .query_row("SELECT COUNT(*) FROM yearly_ip_log WHERE year='2026'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM yearly_ip_log WHERE year='2026'",
+                [],
+                |r| r.get(0),
+            )
             .expect("yearly_ip_log after finalize_year");
         assert_eq!(remaining, 0);
 

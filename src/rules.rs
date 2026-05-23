@@ -58,15 +58,17 @@ impl<'de> serde::Deserialize<'de> for RawAction {
             fn visit_str<E: de::Error>(self, v: &str) -> Result<RawAction, E> {
                 match v {
                     "ignore" => Ok(RawAction::Ignore),
-                    other    => Err(E::unknown_variant(other, &["ignore", "hide", "sample"])),
+                    other => Err(E::unknown_variant(other, &["ignore", "hide", "sample"])),
                 }
             }
             fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<RawAction, M::Error> {
-                let key: String = map.next_key()?.ok_or_else(|| de::Error::missing_field("key"))?;
+                let key: String = map
+                    .next_key()?
+                    .ok_or_else(|| de::Error::missing_field("key"))?;
                 match key.as_str() {
-                    "hide"   => Ok(RawAction::Hide(map.next_value()?)),
+                    "hide" => Ok(RawAction::Hide(map.next_value()?)),
                     "sample" => Ok(RawAction::Sample(map.next_value()?)),
-                    other    => Err(de::Error::unknown_field(other, &["hide", "sample"])),
+                    other => Err(de::Error::unknown_field(other, &["hide", "sample"])),
                 }
             }
         }
@@ -90,31 +92,102 @@ pub enum Field {
 
 pub enum Condition {
     // String ops
-    Eq        { field: Field, value: String },
-    Neq       { field: Field, value: String },
-    StartsWith { field: Field, prefix: String },
-    EndsWith  { field: Field, suffix: String },
-    Contains  { field: Field, needle: String },
-    Matches   { field: Field, pattern: Regex },
-    In        { field: Field, values: HashSet<String> },
-    NotIn     { field: Field, values: HashSet<String> },
+    Eq {
+        field: Field,
+        value: String,
+    },
+    Neq {
+        field: Field,
+        value: String,
+    },
+    StartsWith {
+        field: Field,
+        prefix: String,
+    },
+    EndsWith {
+        field: Field,
+        suffix: String,
+    },
+    Contains {
+        field: Field,
+        needle: String,
+    },
+    Matches {
+        field: Field,
+        pattern: Regex,
+    },
+    In {
+        field: Field,
+        values: HashSet<String>,
+    },
+    NotIn {
+        field: Field,
+        values: HashSet<String>,
+    },
     // Length ops (string fields only)
-    LenGt      { field: Field, value: usize },
-    LenLt      { field: Field, value: usize },
-    LenGte     { field: Field, value: usize },
-    LenLte     { field: Field, value: usize },
-    LenEq      { field: Field, value: usize },
-    LenBetween { field: Field, low: usize, high: usize },
+    LenGt {
+        field: Field,
+        value: usize,
+    },
+    LenLt {
+        field: Field,
+        value: usize,
+    },
+    LenGte {
+        field: Field,
+        value: usize,
+    },
+    LenLte {
+        field: Field,
+        value: usize,
+    },
+    LenEq {
+        field: Field,
+        value: usize,
+    },
+    LenBetween {
+        field: Field,
+        low: usize,
+        high: usize,
+    },
     // Numeric ops
-    NumEq    { field: Field, value: u64 },
-    NumNeq   { field: Field, value: u64 },
-    Gt       { field: Field, value: u64 },
-    Lt       { field: Field, value: u64 },
-    Gte      { field: Field, value: u64 },
-    Lte      { field: Field, value: u64 },
-    Between  { field: Field, low: u64, high: u64 },
-    NumIn    { field: Field, values: HashSet<u64> },
-    NumNotIn { field: Field, values: HashSet<u64> },
+    NumEq {
+        field: Field,
+        value: u64,
+    },
+    NumNeq {
+        field: Field,
+        value: u64,
+    },
+    Gt {
+        field: Field,
+        value: u64,
+    },
+    Lt {
+        field: Field,
+        value: u64,
+    },
+    Gte {
+        field: Field,
+        value: u64,
+    },
+    Lte {
+        field: Field,
+        value: u64,
+    },
+    Between {
+        field: Field,
+        low: u64,
+        high: u64,
+    },
+    NumIn {
+        field: Field,
+        values: HashSet<u64>,
+    },
+    NumNotIn {
+        field: Field,
+        values: HashSet<u64>,
+    },
 }
 
 pub enum MatchMode {
@@ -127,11 +200,11 @@ pub enum MatchMode {
 pub struct HideMask(u8);
 
 impl HideMask {
-    pub const NONE:      HideMask = HideMask(0);
-    pub const URLS:      HideMask = HideMask(1 << 0);
-    pub const HOSTS:     HideMask = HideMask(1 << 1);
-    pub const REFS:      HideMask = HideMask(1 << 2);
-    pub const AGENTS:    HideMask = HideMask(1 << 3);
+    pub const NONE: HideMask = HideMask(0);
+    pub const URLS: HideMask = HideMask(1 << 0);
+    pub const HOSTS: HideMask = HideMask(1 << 1);
+    pub const REFS: HideMask = HideMask(1 << 2);
+    pub const AGENTS: HideMask = HideMask(1 << 3);
     pub const COUNTRIES: HideMask = HideMask(1 << 4);
 
     fn with(self, other: HideMask) -> HideMask {
@@ -141,7 +214,6 @@ impl HideMask {
     pub fn contains(self, other: HideMask) -> bool {
         (self.0 & other.0) != 0
     }
-
 }
 
 pub enum Action {
@@ -172,15 +244,15 @@ impl Field {
 
 fn parse_field(s: &str) -> Result<Field> {
     match s {
-        "ip"         => Ok(Field::Ip),
-        "method"     => Ok(Field::Method),
-        "url"        => Ok(Field::Url),
-        "referer"    => Ok(Field::Referer),
+        "ip" => Ok(Field::Ip),
+        "method" => Ok(Field::Method),
+        "url" => Ok(Field::Url),
+        "referer" => Ok(Field::Referer),
         "user_agent" => Ok(Field::UserAgent),
-        "proto"      => Ok(Field::Proto),
-        "status"     => Ok(Field::Status),
-        "bytes"      => Ok(Field::Bytes),
-        other        => bail!("unknown field '{other}'"),
+        "proto" => Ok(Field::Proto),
+        "status" => Ok(Field::Status),
+        "bytes" => Ok(Field::Bytes),
+        other => bail!("unknown field '{other}'"),
     }
 }
 
@@ -208,49 +280,62 @@ fn yaml_as_str(v: &serde_yaml::Value, ctx: &str) -> Result<String> {
 
 fn yaml_as_str_list(v: &serde_yaml::Value, ctx: &str) -> Result<HashSet<String>> {
     match v {
-        serde_yaml::Value::Sequence(seq) => seq
-            .iter()
-            .map(|item| yaml_as_str(item, ctx))
-            .collect(),
+        serde_yaml::Value::Sequence(seq) => seq.iter().map(|item| yaml_as_str(item, ctx)).collect(),
         _ => bail!("{ctx}: value must be a list for 'in'/'not_in'"),
     }
 }
 
 fn yaml_as_u64_list(v: &serde_yaml::Value, ctx: &str) -> Result<HashSet<u64>> {
     match v {
-        serde_yaml::Value::Sequence(seq) => seq
-            .iter()
-            .map(|item| yaml_as_u64(item, ctx))
-            .collect(),
+        serde_yaml::Value::Sequence(seq) => seq.iter().map(|item| yaml_as_u64(item, ctx)).collect(),
         _ => bail!("{ctx}: value must be a list for 'in'/'not_in'"),
     }
 }
 
 fn compile_condition(raw: &RawCondition, rule_name: &str) -> Result<Condition> {
-    let ctx = format!("rule '{}', field '{}', op '{}'", rule_name, raw.field, raw.op);
+    let ctx = format!(
+        "rule '{}', field '{}', op '{}'",
+        rule_name, raw.field, raw.op
+    );
     let field = parse_field(&raw.field).with_context(|| ctx.clone())?;
     let op = raw.op.as_str();
 
     // Numeric-only ops
     if field.is_numeric() {
         return match op {
-            "eq"      => Ok(Condition::NumEq  { field, value: yaml_as_u64(&raw.value, &ctx)? }),
-            "neq"     => Ok(Condition::NumNeq { field, value: yaml_as_u64(&raw.value, &ctx)? }),
-            "gt"      => Ok(Condition::Gt     { field, value: yaml_as_u64(&raw.value, &ctx)? }),
-            "lt"      => Ok(Condition::Lt     { field, value: yaml_as_u64(&raw.value, &ctx)? }),
-            "gte"     => Ok(Condition::Gte    { field, value: yaml_as_u64(&raw.value, &ctx)? }),
-            "lte"     => Ok(Condition::Lte    { field, value: yaml_as_u64(&raw.value, &ctx)? }),
-            "between" => {
-                match &raw.value {
-                    serde_yaml::Value::Sequence(seq) if seq.len() == 2 => {
-                        let low  = yaml_as_u64(&seq[0], &ctx)?;
-                        let high = yaml_as_u64(&seq[1], &ctx)?;
-                        Ok(Condition::Between { field, low, high })
-                    }
-                    _ => bail!("{ctx}: 'between' requires [low, high]"),
+            "eq" => Ok(Condition::NumEq {
+                field,
+                value: yaml_as_u64(&raw.value, &ctx)?,
+            }),
+            "neq" => Ok(Condition::NumNeq {
+                field,
+                value: yaml_as_u64(&raw.value, &ctx)?,
+            }),
+            "gt" => Ok(Condition::Gt {
+                field,
+                value: yaml_as_u64(&raw.value, &ctx)?,
+            }),
+            "lt" => Ok(Condition::Lt {
+                field,
+                value: yaml_as_u64(&raw.value, &ctx)?,
+            }),
+            "gte" => Ok(Condition::Gte {
+                field,
+                value: yaml_as_u64(&raw.value, &ctx)?,
+            }),
+            "lte" => Ok(Condition::Lte {
+                field,
+                value: yaml_as_u64(&raw.value, &ctx)?,
+            }),
+            "between" => match &raw.value {
+                serde_yaml::Value::Sequence(seq) if seq.len() == 2 => {
+                    let low = yaml_as_u64(&seq[0], &ctx)?;
+                    let high = yaml_as_u64(&seq[1], &ctx)?;
+                    Ok(Condition::Between { field, low, high })
                 }
-            }
-            "in"     => {
+                _ => bail!("{ctx}: 'between' requires [low, high]"),
+            },
+            "in" => {
                 let values = yaml_as_u64_list(&raw.value, &ctx)?;
                 Ok(Condition::NumIn { field, values })
             }
@@ -264,35 +349,68 @@ fn compile_condition(raw: &RawCondition, rule_name: &str) -> Result<Condition> {
 
     // String ops
     match op {
-        "eq"          => Ok(Condition::Eq        { field, value:  yaml_as_str(&raw.value, &ctx)? }),
-        "neq"         => Ok(Condition::Neq       { field, value:  yaml_as_str(&raw.value, &ctx)? }),
-        "starts_with" => Ok(Condition::StartsWith{ field, prefix: yaml_as_str(&raw.value, &ctx)? }),
-        "ends_with"   => Ok(Condition::EndsWith  { field, suffix: yaml_as_str(&raw.value, &ctx)? }),
-        "contains"    => Ok(Condition::Contains  { field, needle: yaml_as_str(&raw.value, &ctx)? }),
-        "matches"     => {
+        "eq" => Ok(Condition::Eq {
+            field,
+            value: yaml_as_str(&raw.value, &ctx)?,
+        }),
+        "neq" => Ok(Condition::Neq {
+            field,
+            value: yaml_as_str(&raw.value, &ctx)?,
+        }),
+        "starts_with" => Ok(Condition::StartsWith {
+            field,
+            prefix: yaml_as_str(&raw.value, &ctx)?,
+        }),
+        "ends_with" => Ok(Condition::EndsWith {
+            field,
+            suffix: yaml_as_str(&raw.value, &ctx)?,
+        }),
+        "contains" => Ok(Condition::Contains {
+            field,
+            needle: yaml_as_str(&raw.value, &ctx)?,
+        }),
+        "matches" => {
             let pat = yaml_as_str(&raw.value, &ctx)?;
-            let re  = Regex::new(&pat)
-                .with_context(|| format!("{ctx}: invalid regex '{pat}'"))?;
+            let re = Regex::new(&pat).with_context(|| format!("{ctx}: invalid regex '{pat}'"))?;
             Ok(Condition::Matches { field, pattern: re })
         }
-        "in"      => Ok(Condition::In    { field, values: yaml_as_str_list(&raw.value, &ctx)? }),
-        "not_in"  => Ok(Condition::NotIn { field, values: yaml_as_str_list(&raw.value, &ctx)? }),
-        "len_gt"  => Ok(Condition::LenGt  { field, value: yaml_as_usize(&raw.value, &ctx)? }),
-        "len_lt"  => Ok(Condition::LenLt  { field, value: yaml_as_usize(&raw.value, &ctx)? }),
-        "len_gte" => Ok(Condition::LenGte { field, value: yaml_as_usize(&raw.value, &ctx)? }),
-        "len_lte" => Ok(Condition::LenLte { field, value: yaml_as_usize(&raw.value, &ctx)? }),
-        "len_eq"  => Ok(Condition::LenEq  { field, value: yaml_as_usize(&raw.value, &ctx)? }),
-        "len_between" => {
-            match &raw.value {
-                serde_yaml::Value::Sequence(seq) if seq.len() == 2 => {
-                    let low  = yaml_as_usize(&seq[0], &ctx)?;
-                    let high = yaml_as_usize(&seq[1], &ctx)?;
-                    Ok(Condition::LenBetween { field, low, high })
-                }
-                _ => bail!("{ctx}: 'len_between' requires [low, high]"),
+        "in" => Ok(Condition::In {
+            field,
+            values: yaml_as_str_list(&raw.value, &ctx)?,
+        }),
+        "not_in" => Ok(Condition::NotIn {
+            field,
+            values: yaml_as_str_list(&raw.value, &ctx)?,
+        }),
+        "len_gt" => Ok(Condition::LenGt {
+            field,
+            value: yaml_as_usize(&raw.value, &ctx)?,
+        }),
+        "len_lt" => Ok(Condition::LenLt {
+            field,
+            value: yaml_as_usize(&raw.value, &ctx)?,
+        }),
+        "len_gte" => Ok(Condition::LenGte {
+            field,
+            value: yaml_as_usize(&raw.value, &ctx)?,
+        }),
+        "len_lte" => Ok(Condition::LenLte {
+            field,
+            value: yaml_as_usize(&raw.value, &ctx)?,
+        }),
+        "len_eq" => Ok(Condition::LenEq {
+            field,
+            value: yaml_as_usize(&raw.value, &ctx)?,
+        }),
+        "len_between" => match &raw.value {
+            serde_yaml::Value::Sequence(seq) if seq.len() == 2 => {
+                let low = yaml_as_usize(&seq[0], &ctx)?;
+                let high = yaml_as_usize(&seq[1], &ctx)?;
+                Ok(Condition::LenBetween { field, low, high })
             }
-        }
-        other    => bail!("{ctx}: unknown op '{other}'"),
+            _ => bail!("{ctx}: 'len_between' requires [low, high]"),
+        },
+        other => bail!("{ctx}: unknown op '{other}'"),
     }
 }
 
@@ -300,12 +418,12 @@ fn parse_hide_mask(tables: &[String], rule_name: &str) -> Result<HideMask> {
     let mut mask = HideMask::NONE;
     for t in tables {
         mask = match t.as_str() {
-            "urls"      => mask.with(HideMask::URLS),
-            "hosts"     => mask.with(HideMask::HOSTS),
-            "refs"      => mask.with(HideMask::REFS),
-            "agents"    => mask.with(HideMask::AGENTS),
+            "urls" => mask.with(HideMask::URLS),
+            "hosts" => mask.with(HideMask::HOSTS),
+            "refs" => mask.with(HideMask::REFS),
+            "agents" => mask.with(HideMask::AGENTS),
             "countries" => mask.with(HideMask::COUNTRIES),
-            other       => bail!("rule '{rule_name}': unknown hide target '{other}'"),
+            other => bail!("rule '{rule_name}': unknown hide target '{other}'"),
         };
     }
     Ok(mask)
@@ -314,7 +432,7 @@ fn parse_hide_mask(tables: &[String], rule_name: &str) -> Result<HideMask> {
 fn compile_rule(raw: &RawRule) -> Result<Rule> {
     let (mode, raw_conditions) = match &raw.when {
         RawWhen::List(c) | RawWhen::All { all: c } => (MatchMode::All, c),
-        RawWhen::Any { any: c }                     => (MatchMode::Any, c),
+        RawWhen::Any { any: c } => (MatchMode::Any, c),
     };
 
     let conditions = raw_conditions
@@ -323,31 +441,32 @@ fn compile_rule(raw: &RawRule) -> Result<Rule> {
         .collect::<Result<Vec<_>>>()?;
 
     let action = match &raw.action {
-        RawAction::Ignore       => Action::Ignore,
+        RawAction::Ignore => Action::Ignore,
         RawAction::Hide(tables) => Action::Hide(parse_hide_mask(tables, &raw.name)?),
         RawAction::Sample(rate) => {
             if !(*rate >= 0.0 && *rate <= 1.0) {
-                bail!("rule '{}': sample rate must be between 0.0 and 1.0, got {}", raw.name, rate);
+                bail!(
+                    "rule '{}': sample rate must be between 0.0 and 1.0, got {}",
+                    raw.name,
+                    rate
+                );
             }
             Action::Sample(*rate)
         }
     };
 
-    Ok(Rule { name: raw.name.as_str().into(), mode, conditions, action })
+    Ok(Rule {
+        name: raw.name.as_str().into(),
+        mode,
+        conditions,
+        action,
+    })
 }
 
 impl RuleSet {
     pub fn compile(raw: &[RawRule]) -> Result<Self> {
-        let rules = raw
-            .iter()
-            .map(compile_rule)
-            .collect::<Result<Vec<_>>>()?;
+        let rules = raw.iter().map(compile_rule).collect::<Result<Vec<_>>>()?;
         Ok(Self(rules))
-    }
-
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
     }
 
     /// Returns the (name, action) from the first matching rule, or `None`.
@@ -365,12 +484,12 @@ impl OwnedLogEntry {
     #[inline]
     fn rule_str(&self, field: Field) -> &str {
         match field {
-            Field::Ip        => self.ip(),
-            Field::Method    => self.method(),
-            Field::Url       => self.path(),
-            Field::Referer   => self.referer(),
+            Field::Ip => self.ip(),
+            Field::Method => self.method(),
+            Field::Url => self.path(),
+            Field::Referer => self.referer(),
             Field::UserAgent => self.user_agent(),
-            Field::Proto     => self.proto(),
+            Field::Proto => self.proto(),
             Field::Status | Field::Bytes => "",
         }
     }
@@ -379,8 +498,8 @@ impl OwnedLogEntry {
     fn rule_num(&self, field: Field) -> u64 {
         match field {
             Field::Status => self.status as u64,
-            Field::Bytes  => self.bytes,
-            _             => 0,
+            Field::Bytes => self.bytes,
+            _ => 0,
         }
     }
 }
@@ -389,34 +508,40 @@ impl Condition {
     #[inline]
     pub fn matches(&self, entry: &OwnedLogEntry) -> bool {
         match self {
-            Condition::Eq        { field, value  } => entry.rule_str(*field) == value.as_str(),
-            Condition::Neq       { field, value  } => entry.rule_str(*field) != value.as_str(),
-            Condition::StartsWith{ field, prefix } => entry.rule_str(*field).starts_with(prefix.as_str()),
-            Condition::EndsWith  { field, suffix } => entry.rule_str(*field).ends_with(suffix.as_str()),
-            Condition::Contains  { field, needle } => entry.rule_str(*field).contains(needle.as_str()),
-            Condition::Matches   { field, pattern} => pattern.is_match(entry.rule_str(*field)),
-            Condition::In        { field, values } => values.contains(entry.rule_str(*field)),
-            Condition::NotIn     { field, values } => !values.contains(entry.rule_str(*field)),
-            Condition::LenGt      { field, value } => entry.rule_str(*field).len() >  *value,
-            Condition::LenLt      { field, value } => entry.rule_str(*field).len() <  *value,
-            Condition::LenGte     { field, value } => entry.rule_str(*field).len() >= *value,
-            Condition::LenLte     { field, value } => entry.rule_str(*field).len() <= *value,
-            Condition::LenEq      { field, value } => entry.rule_str(*field).len() == *value,
+            Condition::Eq { field, value } => entry.rule_str(*field) == value.as_str(),
+            Condition::Neq { field, value } => entry.rule_str(*field) != value.as_str(),
+            Condition::StartsWith { field, prefix } => {
+                entry.rule_str(*field).starts_with(prefix.as_str())
+            }
+            Condition::EndsWith { field, suffix } => {
+                entry.rule_str(*field).ends_with(suffix.as_str())
+            }
+            Condition::Contains { field, needle } => {
+                entry.rule_str(*field).contains(needle.as_str())
+            }
+            Condition::Matches { field, pattern } => pattern.is_match(entry.rule_str(*field)),
+            Condition::In { field, values } => values.contains(entry.rule_str(*field)),
+            Condition::NotIn { field, values } => !values.contains(entry.rule_str(*field)),
+            Condition::LenGt { field, value } => entry.rule_str(*field).len() > *value,
+            Condition::LenLt { field, value } => entry.rule_str(*field).len() < *value,
+            Condition::LenGte { field, value } => entry.rule_str(*field).len() >= *value,
+            Condition::LenLte { field, value } => entry.rule_str(*field).len() <= *value,
+            Condition::LenEq { field, value } => entry.rule_str(*field).len() == *value,
             Condition::LenBetween { field, low, high } => {
                 let n = entry.rule_str(*field).len();
                 n >= *low && n <= *high
             }
-            Condition::NumEq  { field, value } => entry.rule_num(*field) == *value,
+            Condition::NumEq { field, value } => entry.rule_num(*field) == *value,
             Condition::NumNeq { field, value } => entry.rule_num(*field) != *value,
-            Condition::Gt     { field, value } => entry.rule_num(*field) >  *value,
-            Condition::Lt     { field, value } => entry.rule_num(*field) <  *value,
-            Condition::Gte    { field, value } => entry.rule_num(*field) >= *value,
-            Condition::Lte    { field, value } => entry.rule_num(*field) <= *value,
-            Condition::Between{ field, low, high } => {
+            Condition::Gt { field, value } => entry.rule_num(*field) > *value,
+            Condition::Lt { field, value } => entry.rule_num(*field) < *value,
+            Condition::Gte { field, value } => entry.rule_num(*field) >= *value,
+            Condition::Lte { field, value } => entry.rule_num(*field) <= *value,
+            Condition::Between { field, low, high } => {
                 let v = entry.rule_num(*field);
                 v >= *low && v <= *high
             }
-            Condition::NumIn    { field, values } => values.contains(&entry.rule_num(*field)),
+            Condition::NumIn { field, values } => values.contains(&entry.rule_num(*field)),
             Condition::NumNotIn { field, values } => !values.contains(&entry.rule_num(*field)),
         }
     }
@@ -448,7 +573,11 @@ mod tests {
     fn single(field: &str, op: &str, value: serde_yaml::Value) -> RuleSet {
         RuleSet::compile(&[RawRule {
             name: "t".into(),
-            when: RawWhen::List(vec![RawCondition { field: field.into(), op: op.into(), value }]),
+            when: RawWhen::List(vec![RawCondition {
+                field: field.into(),
+                op: op.into(),
+                value,
+            }]),
             action: RawAction::Ignore,
         }])
         .expect("compile")
@@ -581,30 +710,30 @@ mod tests {
     fn num_gt() {
         let rs = single("status", "gt", num(300));
         assert!(!is_ignored(&rs, &make_entry(A))); // 200 not > 300
-        assert!(is_ignored(&rs, &make_entry(B)));   // 301 > 300
-        assert!(is_ignored(&rs, &make_entry(C)));   // 404 > 300
+        assert!(is_ignored(&rs, &make_entry(B))); // 301 > 300
+        assert!(is_ignored(&rs, &make_entry(C))); // 404 > 300
     }
 
     #[test]
     fn num_lt() {
         let rs = single("status", "lt", num(300));
-        assert!(is_ignored(&rs, &make_entry(A)));   // 200 < 300
-        assert!(!is_ignored(&rs, &make_entry(B)));  // 301 not < 300
+        assert!(is_ignored(&rs, &make_entry(A))); // 200 < 300
+        assert!(!is_ignored(&rs, &make_entry(B))); // 301 not < 300
     }
 
     #[test]
     fn num_gte_boundary() {
         let rs = single("status", "gte", num(301));
         assert!(!is_ignored(&rs, &make_entry(A))); // 200
-        assert!(is_ignored(&rs, &make_entry(B)));  // 301 == 301
-        assert!(is_ignored(&rs, &make_entry(C)));  // 404 > 301
+        assert!(is_ignored(&rs, &make_entry(B))); // 301 == 301
+        assert!(is_ignored(&rs, &make_entry(C))); // 404 > 301
     }
 
     #[test]
     fn num_lte_boundary() {
         let rs = single("status", "lte", num(301));
-        assert!(is_ignored(&rs, &make_entry(A)));  // 200 <= 301
-        assert!(is_ignored(&rs, &make_entry(B)));  // 301 == 301
+        assert!(is_ignored(&rs, &make_entry(A))); // 200 <= 301
+        assert!(is_ignored(&rs, &make_entry(B))); // 301 == 301
         assert!(!is_ignored(&rs, &make_entry(C))); // 404 > 301
     }
 
@@ -612,7 +741,7 @@ mod tests {
     fn num_between_inclusive_boundaries() {
         let rs = single("status", "between", num_seq(&[300, 399]));
         assert!(!is_ignored(&rs, &make_entry(A))); // 200
-        assert!(is_ignored(&rs, &make_entry(B)));  // 301 in [300,399]
+        assert!(is_ignored(&rs, &make_entry(B))); // 301 in [300,399]
         assert!(!is_ignored(&rs, &make_entry(C))); // 404
     }
 
@@ -626,14 +755,14 @@ mod tests {
     #[test]
     fn bytes_field() {
         let rs = single("bytes", "gt", num(1000));
-        assert!(is_ignored(&rs, &make_entry(A)));  // 1234
+        assert!(is_ignored(&rs, &make_entry(A))); // 1234
         assert!(!is_ignored(&rs, &make_entry(B))); // 0
     }
 
     #[test]
     fn num_in_set() {
         let rs = single("status", "in", num_seq(&[200, 201, 204]));
-        assert!(is_ignored(&rs, &make_entry(A)));  // 200
+        assert!(is_ignored(&rs, &make_entry(A))); // 200
         assert!(!is_ignored(&rs, &make_entry(B))); // 301
     }
 
@@ -641,7 +770,7 @@ mod tests {
     fn num_not_in_set() {
         let rs = single("status", "not_in", num_seq(&[200, 201, 204]));
         assert!(!is_ignored(&rs, &make_entry(A))); // 200 is in the set
-        assert!(is_ignored(&rs, &make_entry(B)));  // 301 is not
+        assert!(is_ignored(&rs, &make_entry(B))); // 301 is not
     }
 
     // ── Length ops ────────────────────────────────────────────────────────────
@@ -651,7 +780,7 @@ mod tests {
     #[test]
     fn len_gt() {
         let rs = single("url", "len_gt", num(10));
-        assert!(is_ignored(&rs, &make_entry(A)));  // 15 > 10
+        assert!(is_ignored(&rs, &make_entry(A))); // 15 > 10
         assert!(!is_ignored(&rs, &make_entry(B))); // 9 not > 10
     }
 
@@ -659,35 +788,35 @@ mod tests {
     fn len_lt() {
         let rs = single("url", "len_lt", num(10));
         assert!(!is_ignored(&rs, &make_entry(A))); // 15 not < 10
-        assert!(is_ignored(&rs, &make_entry(B)));  // 9 < 10
+        assert!(is_ignored(&rs, &make_entry(B))); // 9 < 10
     }
 
     #[test]
     fn len_gte_boundary() {
         let rs = single("url", "len_gte", num(9));
-        assert!(is_ignored(&rs, &make_entry(A)));  // 15 >= 9
-        assert!(is_ignored(&rs, &make_entry(B)));  // 9 == 9
+        assert!(is_ignored(&rs, &make_entry(A))); // 15 >= 9
+        assert!(is_ignored(&rs, &make_entry(B))); // 9 == 9
     }
 
     #[test]
     fn len_lte_boundary() {
         let rs = single("url", "len_lte", num(9));
         assert!(!is_ignored(&rs, &make_entry(A))); // 15 > 9
-        assert!(is_ignored(&rs, &make_entry(B)));  // 9 == 9
+        assert!(is_ignored(&rs, &make_entry(B))); // 9 == 9
     }
 
     #[test]
     fn len_eq() {
         let rs = single("url", "len_eq", num(9));
         assert!(!is_ignored(&rs, &make_entry(A))); // 15
-        assert!(is_ignored(&rs, &make_entry(B)));  // 9
+        assert!(is_ignored(&rs, &make_entry(B))); // 9
     }
 
     #[test]
     fn len_between_inclusive() {
         let rs = single("url", "len_between", num_seq(&[9, 14]));
-        assert!(is_ignored(&rs, &make_entry(A)));  // 14
-        assert!(is_ignored(&rs, &make_entry(B)));  // 9
+        assert!(is_ignored(&rs, &make_entry(A))); // 14
+        assert!(is_ignored(&rs, &make_entry(B))); // 9
     }
 
     #[test]
@@ -720,8 +849,16 @@ mod tests {
             name: "t".into(),
             when: RawWhen::All {
                 all: vec![
-                    RawCondition { field: "status".into(), op: "eq".into(), value: num(301) },
-                    RawCondition { field: "url".into(), op: "starts_with".into(), value: str_val("/old/") },
+                    RawCondition {
+                        field: "status".into(),
+                        op: "eq".into(),
+                        value: num(301),
+                    },
+                    RawCondition {
+                        field: "url".into(),
+                        op: "starts_with".into(),
+                        value: str_val("/old/"),
+                    },
                 ],
             },
             action: RawAction::Ignore,
@@ -739,8 +876,16 @@ mod tests {
             name: "t".into(),
             when: RawWhen::All {
                 all: vec![
-                    RawCondition { field: "status".into(), op: "eq".into(), value: num(999) },
-                    RawCondition { field: "url".into(), op: "starts_with".into(), value: str_val("/") },
+                    RawCondition {
+                        field: "status".into(),
+                        op: "eq".into(),
+                        value: num(999),
+                    },
+                    RawCondition {
+                        field: "url".into(),
+                        op: "starts_with".into(),
+                        value: str_val("/"),
+                    },
                 ],
             },
             action: RawAction::Ignore,
@@ -755,8 +900,16 @@ mod tests {
         let list_rs = RuleSet::compile(&[RawRule {
             name: "t".into(),
             when: RawWhen::List(vec![
-                RawCondition { field: "status".into(), op: "eq".into(), value: num(301) },
-                RawCondition { field: "url".into(), op: "starts_with".into(), value: str_val("/old/") },
+                RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(301),
+                },
+                RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/old/"),
+                },
             ]),
             action: RawAction::Ignore,
         }])
@@ -765,8 +918,16 @@ mod tests {
             name: "t".into(),
             when: RawWhen::All {
                 all: vec![
-                    RawCondition { field: "status".into(), op: "eq".into(), value: num(301) },
-                    RawCondition { field: "url".into(), op: "starts_with".into(), value: str_val("/old/") },
+                    RawCondition {
+                        field: "status".into(),
+                        op: "eq".into(),
+                        value: num(301),
+                    },
+                    RawCondition {
+                        field: "url".into(),
+                        op: "starts_with".into(),
+                        value: str_val("/old/"),
+                    },
                 ],
             },
             action: RawAction::Ignore,
@@ -785,16 +946,24 @@ mod tests {
             name: "t".into(),
             when: RawWhen::Any {
                 any: vec![
-                    RawCondition { field: "status".into(), op: "eq".into(), value: num(404) },
-                    RawCondition { field: "user_agent".into(), op: "contains".into(), value: str_val("Googlebot") },
+                    RawCondition {
+                        field: "status".into(),
+                        op: "eq".into(),
+                        value: num(404),
+                    },
+                    RawCondition {
+                        field: "user_agent".into(),
+                        op: "contains".into(),
+                        value: str_val("Googlebot"),
+                    },
                 ],
             },
             action: RawAction::Ignore,
         }])
         .unwrap();
         assert!(!is_ignored(&rs, &make_entry(A))); // 200, Mozilla
-        assert!(is_ignored(&rs, &make_entry(B)));  // Googlebot
-        assert!(is_ignored(&rs, &make_entry(C)));  // 404
+        assert!(is_ignored(&rs, &make_entry(B))); // Googlebot
+        assert!(is_ignored(&rs, &make_entry(C))); // 404
     }
 
     #[test]
@@ -803,8 +972,16 @@ mod tests {
             name: "t".into(),
             when: RawWhen::Any {
                 any: vec![
-                    RawCondition { field: "status".into(), op: "eq".into(), value: num(500) },
-                    RawCondition { field: "user_agent".into(), op: "eq".into(), value: str_val("unknown") },
+                    RawCondition {
+                        field: "status".into(),
+                        op: "eq".into(),
+                        value: num(500),
+                    },
+                    RawCondition {
+                        field: "user_agent".into(),
+                        op: "eq".into(),
+                        value: str_val("unknown"),
+                    },
                 ],
             },
             action: RawAction::Ignore,
@@ -819,34 +996,42 @@ mod tests {
 
     #[test]
     fn first_matching_rule_wins() {
-        // Two rules, both would match A, but only the first should be returned.
-        // We can't distinguish actions yet (only Ignore), so we just confirm
-        // that apply() returns Some and the first rule's name is the winner
-        // by verifying the ruleset matches at all.
+        // Both rules match A (status=200, url=/static/foo.js).
+        // The ruleset must return the first rule's name and action, not the second's.
         let rs = RuleSet::compile(&[
             RawRule {
                 name: "first".into(),
-                when: RawWhen::List(vec![
-                    RawCondition { field: "status".into(), op: "eq".into(), value: num(200) },
-                ]),
+                when: RawWhen::List(vec![RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(200),
+                }]),
                 action: RawAction::Ignore,
             },
             RawRule {
                 name: "second".into(),
-                when: RawWhen::List(vec![
-                    RawCondition { field: "url".into(), op: "starts_with".into(), value: str_val("/static/") },
-                ]),
-                action: RawAction::Ignore,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Hide(vec!["urls".into()]),
             },
         ])
         .unwrap();
-        assert!(is_ignored(&rs, &make_entry(A)));
+
+        let (name, action) = rs.apply(&make_entry(A)).expect("should match");
+        assert_eq!(name.as_ref(), "first");
+        assert!(
+            matches!(action, Action::Ignore),
+            "first rule's action should win, not second's Hide"
+        );
     }
 
     #[test]
     fn no_rules_never_matches() {
         let rs = RuleSet::compile(&[]).unwrap();
-        assert!(rs.is_empty());
+        assert!(rs.0.is_empty());
         assert!(rs.apply(&make_entry(A)).is_none());
     }
 
@@ -856,16 +1041,20 @@ mod tests {
         let rs = RuleSet::compile(&[
             RawRule {
                 name: "r1".into(),
-                when: RawWhen::List(vec![
-                    RawCondition { field: "status".into(), op: "eq".into(), value: num(404) },
-                ]),
+                when: RawWhen::List(vec![RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(404),
+                }]),
                 action: RawAction::Ignore,
             },
             RawRule {
                 name: "r2".into(),
-                when: RawWhen::List(vec![
-                    RawCondition { field: "url".into(), op: "starts_with".into(), value: str_val("/api/") },
-                ]),
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/api/"),
+                }]),
                 action: RawAction::Ignore,
             },
         ])
@@ -957,7 +1146,10 @@ mod tests {
         .expect("compile");
 
         let entry = make_entry(A); // /static/foo.js, status 200 — both rules match
-        assert!(matches!(rs.apply(&entry), Some((_, Action::Hide(_)))), "hide rule should win");
+        assert!(
+            matches!(rs.apply(&entry), Some((_, Action::Hide(_)))),
+            "hide rule should win"
+        );
     }
 
     // ── Compilation errors ────────────────────────────────────────────────────
@@ -1053,19 +1245,27 @@ mod tests {
     fn sample_action_compiles() {
         let rs = make_sample_rs(0.1);
         let entry = make_entry(A);
-        assert!(matches!(rs.apply(&entry), Some((_, Action::Sample(r))) if (r - 0.1).abs() < f64::EPSILON));
+        assert!(
+            matches!(rs.apply(&entry), Some((_, Action::Sample(r))) if (r - 0.1).abs() < f64::EPSILON)
+        );
     }
 
     #[test]
     fn sample_rate_zero_compiles() {
         let rs = make_sample_rs(0.0);
-        assert!(matches!(rs.apply(&make_entry(A)), Some((_, Action::Sample(_)))));
+        assert!(matches!(
+            rs.apply(&make_entry(A)),
+            Some((_, Action::Sample(_)))
+        ));
     }
 
     #[test]
     fn sample_rate_one_compiles() {
         let rs = make_sample_rs(1.0);
-        assert!(matches!(rs.apply(&make_entry(A)), Some((_, Action::Sample(_)))));
+        assert!(matches!(
+            rs.apply(&make_entry(A)),
+            Some((_, Action::Sample(_)))
+        ));
     }
 
     #[test]
@@ -1116,7 +1316,9 @@ mod tests {
 "#;
         let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
         let rs = RuleSet::compile(&raw).expect("compile");
-        assert!(matches!(rs.apply(&make_entry(A)), Some((_, Action::Sample(r))) if (r - 0.1).abs() < f64::EPSILON));
+        assert!(
+            matches!(rs.apply(&make_entry(A)), Some((_, Action::Sample(r))) if (r - 0.1).abs() < f64::EPSILON)
+        );
         assert!(rs.apply(&make_entry(B)).is_none()); // status 301
     }
 
@@ -1157,7 +1359,7 @@ mod tests {
 "#;
         let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
         let rs = RuleSet::compile(&raw).expect("compile");
-        assert!(is_ignored(&rs, &make_entry(B)));  // 301 + /old/
+        assert!(is_ignored(&rs, &make_entry(B))); // 301 + /old/
         assert!(!is_ignored(&rs, &make_entry(A))); // 200
         assert!(!is_ignored(&rs, &make_entry(C))); // 404
     }
@@ -1175,7 +1377,7 @@ mod tests {
         let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
         let rs = RuleSet::compile(&raw).expect("compile");
         assert!(!is_ignored(&rs, &make_entry(A))); // 200
-        assert!(is_ignored(&rs, &make_entry(B)));  // 301
+        assert!(is_ignored(&rs, &make_entry(B))); // 301
         assert!(!is_ignored(&rs, &make_entry(C))); // 404
     }
 
@@ -1197,7 +1399,9 @@ mod tests {
         let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
         let rs = RuleSet::compile(&raw).expect("compile");
         // A has referer "https://example.com/" → hide applies
-        assert!(matches!(rs.apply(&make_entry(A)), Some((_, Action::Hide(m))) if m.contains(HideMask::REFS)));
+        assert!(
+            matches!(rs.apply(&make_entry(A)), Some((_, Action::Hide(m))) if m.contains(HideMask::REFS))
+        );
         assert!(rs.apply(&make_entry(B)).is_none()); // referer is "-"
     }
 
@@ -1213,6 +1417,9 @@ mod tests {
 "#;
         let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
         let rs = RuleSet::compile(&raw).expect("compile");
-        assert!(matches!(rs.apply(&make_entry(B)), Some((_, Action::Ignore))));
+        assert!(matches!(
+            rs.apply(&make_entry(B)),
+            Some((_, Action::Ignore))
+        ));
     }
 }

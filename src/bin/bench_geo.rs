@@ -26,7 +26,9 @@ fn main() {
 
     // Convert to strings once so string parsing is included in both paths.
     let pool_size = 10_000usize;
-    let ip_strings: Vec<String> = (0..pool_size as u32).map(|i| make_ip(i).to_string()).collect();
+    let ip_strings: Vec<String> = (0..pool_size as u32)
+        .map(|i| make_ip(i).to_string())
+        .collect();
 
     // ---------- scenarios ----------
     let scenarios: &[(&str, usize, usize)] = &[
@@ -37,7 +39,10 @@ fn main() {
         ("10k unique / 100k lookups (cold cache)", 10_000, 100_000),
     ];
 
-    println!("{:<42} {:>12} {:>12} {:>10}", "scenario", "direct (ms)", "cached (ms)", "speedup");
+    println!(
+        "{:<42} {:>12} {:>12} {:>10}",
+        "scenario", "direct (ms)", "cached (ms)", "speedup"
+    );
     println!("{}", "-".repeat(80));
 
     for &(label, unique, total) in scenarios {

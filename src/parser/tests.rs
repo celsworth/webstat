@@ -14,7 +14,7 @@ mod tests {
         assert_eq!(entry.status, 200);
         assert_eq!(entry.bytes, 1234);
         assert_eq!(entry.path(), "/index.html");
-        assert_eq!(entry.method(),"GET");
+        assert_eq!(entry.method(), "GET");
         assert_eq!(entry.referer(), "https://example.com/");
     }
 
@@ -63,7 +63,7 @@ mod tests {
     fn post_request() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "POST /api/submit HTTP/1.1" 201 500 "-" "curl/7.68.0""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method(),"POST");
+        assert_eq!(entry.method(), "POST");
         assert_eq!(entry.path(), "/api/submit");
     }
 
@@ -71,21 +71,21 @@ mod tests {
     fn put_request() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "PUT /api/resource/123 HTTP/1.1" 204 0 "-" "curl/7.68.0""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method(),"PUT");
+        assert_eq!(entry.method(), "PUT");
     }
 
     #[test]
     fn delete_request() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "DELETE /api/resource/123 HTTP/1.1" 204 0 "-" "curl/7.68.0""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method(),"DELETE");
+        assert_eq!(entry.method(), "DELETE");
     }
 
     #[test]
     fn head_request() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "HEAD /index.html HTTP/1.1" 200 0 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method(),"HEAD");
+        assert_eq!(entry.method(), "HEAD");
     }
 
     #[test]
@@ -93,7 +93,7 @@ mod tests {
         let line =
             r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "OPTIONS * HTTP/1.1" 200 0 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method(),"OPTIONS");
+        assert_eq!(entry.method(), "OPTIONS");
         assert_eq!(entry.path(), "*");
     }
 
@@ -101,7 +101,7 @@ mod tests {
     fn patch_request() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "PATCH /api/resource HTTP/1.1" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method(),"PATCH");
+        assert_eq!(entry.method(), "PATCH");
     }
 
     // ── HTTP status codes ────────────────────────────────────────────────────
@@ -506,7 +506,7 @@ mod tests {
     fn http_connect_method() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "CONNECT example.com:443 HTTP/1.1" 200 0 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.method(),"CONNECT");
+        assert_eq!(entry.method(), "CONNECT");
         assert_eq!(entry.path(), "example.com:443");
     }
 
@@ -577,21 +577,24 @@ mod tests {
 
     #[test]
     fn proto_http11_captured() {
-        let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-""#;
+        let line =
+            r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
         assert_eq!(entry.proto(), "HTTP/1.1");
     }
 
     #[test]
     fn proto_http10_captured() {
-        let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.0" 200 100 "-" "-""#;
+        let line =
+            r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.0" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
         assert_eq!(entry.proto(), "HTTP/1.0");
     }
 
     #[test]
     fn proto_http20_captured() {
-        let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/2.0" 200 100 "-" "-""#;
+        let line =
+            r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/2.0" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
         assert_eq!(entry.proto(), "HTTP/2.0");
     }

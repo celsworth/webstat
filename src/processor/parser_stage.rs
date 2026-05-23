@@ -2,11 +2,13 @@ use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use super::messages::{pop_blocking, push_blocking, LoaderMsg, OwnedLogEntry, ParsedEntry, ParserMsg};
+use super::messages::{
+    pop_blocking, push_blocking, LoaderMsg, OwnedLogEntry, ParsedEntry, ParserMsg,
+};
 use super::{ProgressState, PARSER_BATCH_SIZE};
 use crate::rules::{Action, HideMask, SharedRuleSet};
-use rand::Rng as _;
 use crate::ua::UaParser;
+use rand::Rng as _;
 
 pub(super) struct RuleStats {
     pub ignored: u64,
@@ -45,22 +47,34 @@ pub(super) fn run_parser(
                         let hidden = if let Some(rs) = &rule_set {
                             match rs.apply(&entry) {
                                 Some((name, Action::Ignore)) => {
-                                    rule_stats.entry(Arc::clone(name))
-                                        .or_insert(RuleStats { ignored: 0, hidden: 0 })
+                                    rule_stats
+                                        .entry(Arc::clone(name))
+                                        .or_insert(RuleStats {
+                                            ignored: 0,
+                                            hidden: 0,
+                                        })
                                         .ignored += 1;
                                     ps.lines_done.fetch_add(1, Ordering::Relaxed);
                                     continue;
                                 }
                                 Some((name, Action::Hide(mask))) => {
-                                    rule_stats.entry(Arc::clone(name))
-                                        .or_insert(RuleStats { ignored: 0, hidden: 0 })
+                                    rule_stats
+                                        .entry(Arc::clone(name))
+                                        .or_insert(RuleStats {
+                                            ignored: 0,
+                                            hidden: 0,
+                                        })
                                         .hidden += 1;
                                     *mask
                                 }
                                 Some((name, Action::Sample(rate))) => {
                                     if rand::thread_rng().gen::<f64>() >= *rate {
-                                        rule_stats.entry(Arc::clone(name))
-                                            .or_insert(RuleStats { ignored: 0, hidden: 0 })
+                                        rule_stats
+                                            .entry(Arc::clone(name))
+                                            .or_insert(RuleStats {
+                                                ignored: 0,
+                                                hidden: 0,
+                                            })
                                             .ignored += 1;
                                         ps.lines_done.fetch_add(1, Ordering::Relaxed);
                                         continue;
@@ -82,7 +96,8 @@ pub(super) fn run_parser(
                         ));
 
                         if entry_batch.len() >= PARSER_BATCH_SIZE {
-                            ps.lines_done.fetch_add(entry_batch.len() as u64, Ordering::Relaxed);
+                            ps.lines_done
+                                .fetch_add(entry_batch.len() as u64, Ordering::Relaxed);
                             push_blocking(
                                 &mut tx,
                                 ParserMsg::Entries {
@@ -103,7 +118,8 @@ pub(super) fn run_parser(
             } => {
                 // Flush any partial entry batch before signalling file done.
                 if !entry_batch.is_empty() {
-                    ps.lines_done.fetch_add(entry_batch.len() as u64, Ordering::Relaxed);
+                    ps.lines_done
+                        .fetch_add(entry_batch.len() as u64, Ordering::Relaxed);
                     push_blocking(
                         &mut tx,
                         ParserMsg::Entries {
@@ -126,7 +142,8 @@ pub(super) fn run_parser(
             LoaderMsg::Done => {
                 // Flush any remaining entries (shouldn't happen after a FileDone, but be safe).
                 if !entry_batch.is_empty() {
-                    ps.lines_done.fetch_add(entry_batch.len() as u64, Ordering::Relaxed);
+                    ps.lines_done
+                        .fetch_add(entry_batch.len() as u64, Ordering::Relaxed);
                     push_blocking(
                         &mut tx,
                         ParserMsg::Entries {

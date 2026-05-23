@@ -744,7 +744,6 @@ fn compact_3sf(n: u64) -> String {
     format!("{}{}", num, UNITS[unit_idx])
 }
 
-
 fn format_bytes(n: u64) -> String {
     if n < 1_024 {
         return format!("{} B", n);

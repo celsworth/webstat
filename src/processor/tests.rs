@@ -4,8 +4,8 @@ use super::*;
 mod tests {
     use super::*;
     use crate::database::Database;
-    use crate::rules::{RawAction, RawCondition, RawRule, RawWhen, RuleSet};
     use crate::geo::Geo;
+    use crate::rules::{RawAction, RawCondition, RawRule, RawWhen, RuleSet};
     use flate2::{write::GzEncoder, Compression};
     use rusqlite::Connection;
     use std::fs::{self, File, OpenOptions};
@@ -243,7 +243,10 @@ mod tests {
         let processed = processor
             .process_globs(renamed_path.to_str().unwrap())
             .expect("second run on renamed file");
-        assert_eq!(processed, 0, "renamed file with same inode should be skipped");
+        assert_eq!(
+            processed, 0,
+            "renamed file with same inode should be skipped"
+        );
     }
 
     #[test]
@@ -257,17 +260,13 @@ mod tests {
         write_plain_file(&log_path, &sample_lines("copy-truncate", 120));
 
         let mut processor = new_processor(&db_path);
-        processor
-            .process_globs(&pattern)
-            .expect("first run");
+        processor.process_globs(&pattern).expect("first run");
 
         append_plain_file(&log_path, &sample_lines("copy-truncate-tail", 1));
         fs::copy(&log_path, &rotated_path).expect("copy rotated log");
         write_plain_file(&log_path, &sample_lines("copy-truncate-new", 1));
 
-        let processed = processor
-            .process_globs(&pattern)
-            .expect("second run");
+        let processed = processor.process_globs(&pattern).expect("second run");
         // Should process: the new line in copy-truncate-new (1) + the tail in rotated (1) = 2
         assert_eq!(processed, 2, "should process new content from both files");
     }
@@ -443,25 +442,18 @@ mod tests {
         let db_path = temp.path().join("webstat.db");
         let log_path = temp.path().join("access.log");
 
-        let lines: Vec<String> = (0..10)
-            .map(jan_line)
-            .chain((0..10).map(feb_line))
-            .collect();
+        let lines: Vec<String> = (0..10).map(jan_line).chain((0..10).map(feb_line)).collect();
         write_plain_file(&log_path, &lines);
 
         let mut processor = new_processor(&db_path);
-        let processed = processor
-            .process_globs(log_path.to_str().unwrap())
-            .unwrap();
+        let processed = processor.process_globs(log_path.to_str().unwrap()).unwrap();
         assert_eq!(processed, 20);
 
         let conn = Connection::open(&db_path).unwrap();
         let hits: i64 = conn
-            .query_row(
-                "SELECT COALESCE(SUM(hits),0) FROM hourly_stats",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT COALESCE(SUM(hits),0) FROM hourly_stats", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(hits, 20);
     }
@@ -500,8 +492,7 @@ mod tests {
 
         // Byte offset where Feb entries start (= end of Jan entries including newlines).
         let jan_bytes: u64 = jan_lines.iter().map(|l| l.len() as u64 + 1).sum();
-        let file_size: u64 =
-            jan_bytes + feb_lines.iter().map(|l| l.len() as u64 + 1).sum::<u64>();
+        let file_size: u64 = jan_bytes + feb_lines.iter().map(|l| l.len() as u64 + 1).sum::<u64>();
 
         let meta = std::fs::metadata(&log_path).unwrap();
         let inode = meta.ino();
@@ -534,9 +525,7 @@ mod tests {
 
         // Resume run: should pick up from jan_bytes and process exactly the 10 Feb lines.
         let mut processor = new_processor(&db_path);
-        let processed = processor
-            .process_globs(log_path.to_str().unwrap())
-            .unwrap();
+        let processed = processor.process_globs(log_path.to_str().unwrap()).unwrap();
         assert_eq!(
             processed, 10,
             "resume from start-of-Feb offset should process exactly the 10 Feb entries"
@@ -544,11 +533,9 @@ mod tests {
 
         let conn = Connection::open(&db_path).unwrap();
         let hits: i64 = conn
-            .query_row(
-                "SELECT COALESCE(SUM(hits),0) FROM hourly_stats",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT COALESCE(SUM(hits),0) FROM hourly_stats", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(hits, 10, "only Feb entries should be in DB after resume");
     }
@@ -565,9 +552,7 @@ mod tests {
         write_plain_file(&log_path, &[first_line.clone()]);
 
         let mut processor = new_processor(&db_path);
-        let processed = processor
-            .process_globs(&pattern)
-            .expect("first run");
+        let processed = processor.process_globs(&pattern).expect("first run");
         assert_eq!(processed, 1, "First run should process 1 line");
 
         let second_line = sample_line("5.6.7.8", "/second.html", 200, 2000);
@@ -576,10 +561,11 @@ mod tests {
         fs::rename(&log_path, &rotated_path).expect("rename to rotated path");
         write_plain_file(&log_path, &[]);
 
-        let processed_2 = processor
-            .process_globs(&pattern)
-            .expect("second run");
-        assert_eq!(processed_2, 1, "Rotated file should only process the newly appended line");
+        let processed_2 = processor.process_globs(&pattern).expect("second run");
+        assert_eq!(
+            processed_2, 1,
+            "Rotated file should only process the newly appended line"
+        );
 
         let conn = Connection::open(db_path.to_str().unwrap()).expect("open db");
         let total_hits: i64 = conn
@@ -740,13 +726,22 @@ mod tests {
         let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
         // Two hidden entries (/static/) and one visible entry (/page.html).
         let lines = vec![
-            format!(r#"1.2.3.4 - - [08/May/2026:14:00:00 +0000] "GET /static/app.js HTTP/1.1" 200 500 "https://ref.example.com/" "{ua}""#),
-            format!(r#"1.2.3.5 - - [08/May/2026:14:01:00 +0000] "GET /static/style.css HTTP/1.1" 200 300 "https://ref.example.com/" "{ua}""#),
-            format!(r#"1.2.3.6 - - [08/May/2026:14:02:00 +0000] "GET /page.html HTTP/1.1" 200 100 "https://ref.example.com/" "{ua}""#),
+            format!(
+                r#"1.2.3.4 - - [08/May/2026:14:00:00 +0000] "GET /static/app.js HTTP/1.1" 200 500 "https://ref.example.com/" "{ua}""#
+            ),
+            format!(
+                r#"1.2.3.5 - - [08/May/2026:14:01:00 +0000] "GET /static/style.css HTTP/1.1" 200 300 "https://ref.example.com/" "{ua}""#
+            ),
+            format!(
+                r#"1.2.3.6 - - [08/May/2026:14:02:00 +0000] "GET /page.html HTTP/1.1" 200 100 "https://ref.example.com/" "{ua}""#
+            ),
         ];
         write_plain_file(&log_path, &lines);
 
-        let rule_set = Some(hide_ruleset_for_url_prefix("/static/", &["urls", "hosts", "refs", "agents", "countries"]));
+        let rule_set = Some(hide_ruleset_for_url_prefix(
+            "/static/",
+            &["urls", "hosts", "refs", "agents", "countries"],
+        ));
         let mut processor = new_processor_with_rules(&db_path, rule_set);
         let processed = processor
             .process_globs(log_path.to_str().unwrap())
@@ -773,7 +768,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("site count");
-        assert_eq!(site_count, 3, "hidden entries must still count as unique sites");
+        assert_eq!(
+            site_count, 3,
+            "hidden entries must still count as unique sites"
+        );
 
         // Hidden URLs must not appear in top URLs.
         let hidden_url_rows: i64 = conn
@@ -783,7 +781,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("hidden url rows");
-        assert_eq!(hidden_url_rows, 0, "hidden URLs must not appear in top URLs");
+        assert_eq!(
+            hidden_url_rows, 0,
+            "hidden URLs must not appear in top URLs"
+        );
 
         // The visible URL must appear normally.
         let visible_hits: i64 = conn
@@ -805,12 +806,19 @@ mod tests {
         let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
         // One hidden entry, one visible entry from a different IP/referrer.
         let lines = vec![
-            format!(r#"10.0.0.1 - - [08/May/2026:14:00:00 +0000] "GET /static/x.js HTTP/1.1" 200 999 "https://hidden-ref.example.com/" "{ua}""#),
-            format!(r#"10.0.0.2 - - [08/May/2026:14:01:00 +0000] "GET /page.html HTTP/1.1" 200 100 "https://visible-ref.example.com/" "{ua}""#),
+            format!(
+                r#"10.0.0.1 - - [08/May/2026:14:00:00 +0000] "GET /static/x.js HTTP/1.1" 200 999 "https://hidden-ref.example.com/" "{ua}""#
+            ),
+            format!(
+                r#"10.0.0.2 - - [08/May/2026:14:01:00 +0000] "GET /page.html HTTP/1.1" 200 100 "https://visible-ref.example.com/" "{ua}""#
+            ),
         ];
         write_plain_file(&log_path, &lines);
 
-        let rule_set = Some(hide_ruleset_for_url_prefix("/static/", &["urls", "hosts", "refs", "agents", "countries"]));
+        let rule_set = Some(hide_ruleset_for_url_prefix(
+            "/static/",
+            &["urls", "hosts", "refs", "agents", "countries"],
+        ));
         let mut processor = new_processor_with_rules(&db_path, rule_set);
         processor
             .process_globs(log_path.to_str().unwrap())
@@ -826,7 +834,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("hidden ref");
-        assert_eq!(hidden_ref, 0, "hidden entry referrer must not appear in top refs");
+        assert_eq!(
+            hidden_ref, 0,
+            "hidden entry referrer must not appear in top refs"
+        );
 
         let visible_ref: i64 = conn
             .query_row(
@@ -835,7 +846,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("visible ref");
-        assert_eq!(visible_ref, 1, "non-hidden entry referrer must appear in top refs");
+        assert_eq!(
+            visible_ref, 1,
+            "non-hidden entry referrer must appear in top refs"
+        );
 
         // Exactly one host row (the visible entry); the hidden one must be absent.
         let host_rows: i64 = conn
@@ -845,6 +859,9 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("host rows");
-        assert_eq!(host_rows, 1, "only the non-hidden host must appear in top hosts");
+        assert_eq!(
+            host_rows, 1,
+            "only the non-hidden host must appear in top hosts"
+        );
     }
 }

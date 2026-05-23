@@ -1,4 +1,3 @@
-
 pub const METHOD_COUNT: usize = 8;
 pub const METHOD_GET: usize = 0;
 pub const METHOD_POST: usize = 1;
@@ -21,7 +20,6 @@ pub const PROTO_3_0: usize = 3;
 pub const PROTO_OTHER: usize = 4;
 
 pub const PROTO_NAMES: [&str; PROTO_COUNT] = ["1.0", "1.1", "2.0", "3.0", "other"];
-
 
 #[inline]
 pub fn method_index(method: &str) -> usize {

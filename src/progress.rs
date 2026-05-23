@@ -80,7 +80,15 @@ pub fn print_dir_progress(
 
     let msg = format!(
         "{}{} [{}/{} files] [{}] [{:.0}%] [{}] [{}] [{}]",
-        ts, month_part, files_done, files_total, lines_part, pct, lps_str, eta_str, checkpoint_status
+        ts,
+        month_part,
+        files_done,
+        files_total,
+        lines_part,
+        pct,
+        lps_str,
+        eta_str,
+        checkpoint_status
     );
     write_progress_line(&msg);
 }

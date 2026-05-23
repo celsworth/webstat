@@ -167,7 +167,12 @@ impl Database {
             let mut stmt = tx.prepare_cached(sql)?;
             for (date, ips) in data.daily_ips {
                 for ip in ips {
-                    stmt.execute(params![date, ip.kind() as i64, ip.hi() as i64, ip.lo() as i64])?;
+                    stmt.execute(params![
+                        date,
+                        ip.kind() as i64,
+                        ip.hi() as i64,
+                        ip.lo() as i64
+                    ])?;
                 }
             }
         }
@@ -391,12 +396,10 @@ impl Database {
              SELECT ?1, COUNT(*) FROM yearly_ip_log WHERE year = ?1",
             params![year],
         )?;
-        tx.execute(
-            "DELETE FROM yearly_ip_log WHERE year = ?1",
-            params![year],
-        )?;
+        tx.execute("DELETE FROM yearly_ip_log WHERE year = ?1", params![year])?;
 
-        tx.commit().context("Failed to commit finalize_year transaction")?;
+        tx.commit()
+            .context("Failed to commit finalize_year transaction")?;
         Ok(())
     }
 
@@ -421,4 +424,3 @@ impl Database {
         Ok(())
     }
 }
-

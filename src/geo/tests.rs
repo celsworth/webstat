@@ -64,12 +64,28 @@ mod tests {
     fn valid_ipv4_addresses_parsed() {
         let mut geo = Geo::new(None);
 
-        let valid_ips = ["0.0.0.0", "8.8.8.8", "255.255.255.255", "127.0.0.1", "192.168.1.1"];
+        let valid_ips = [
+            "0.0.0.0",
+            "8.8.8.8",
+            "255.255.255.255",
+            "127.0.0.1",
+            "192.168.1.1",
+        ];
 
         for ip_str in valid_ips {
             let (code, name) = lookup(&mut geo, ip_str);
-            assert_eq!(code.as_ref(), "--", "Should return unknown for IP: {}", ip_str);
-            assert_eq!(name.as_ref(), "Unknown", "Should return unknown for IP: {}", ip_str);
+            assert_eq!(
+                code.as_ref(),
+                "--",
+                "Should return unknown for IP: {}",
+                ip_str
+            );
+            assert_eq!(
+                name.as_ref(),
+                "Unknown",
+                "Should return unknown for IP: {}",
+                ip_str
+            );
             assert!(
                 geo.mem_cache.contains_key(&Ip::parse(ip_str).unwrap()),
                 "IP should be cached: {}",
@@ -86,8 +102,18 @@ mod tests {
 
         for ip_str in valid_ips {
             let (code, name) = lookup(&mut geo, ip_str);
-            assert_eq!(code.as_ref(), "--", "Should return unknown for IPv6: {}", ip_str);
-            assert_eq!(name.as_ref(), "Unknown", "Should return unknown for IPv6: {}", ip_str);
+            assert_eq!(
+                code.as_ref(),
+                "--",
+                "Should return unknown for IPv6: {}",
+                ip_str
+            );
+            assert_eq!(
+                name.as_ref(),
+                "Unknown",
+                "Should return unknown for IPv6: {}",
+                ip_str
+            );
             assert!(
                 geo.mem_cache.contains_key(&Ip::parse(ip_str).unwrap()),
                 "IPv6 should be cached: {}",
