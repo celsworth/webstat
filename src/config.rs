@@ -15,9 +15,6 @@ pub struct Config {
     pub output_dir: String,
     /// Path to a MaxMind GeoLite2-Country.mmdb file (optional).
     pub geoip_db: Option<String>,
-    /// Number of worker threads for processing multiple files in parallel.
-    /// `1` keeps existing single-thread behavior.
-    pub file_workers: usize,
     pub top_n: usize,
     /// Enable Top URLs tracking.
     pub enable_top_urls: bool,
@@ -46,7 +43,6 @@ impl Default for Config {
             database: "./webstat.db".into(),
             output_dir: "./output".into(),
             geoip_db: None,
-            file_workers: 1,
             top_n: 20,
             enable_top_urls: true,
             enable_top_hosts: true,

@@ -18,10 +18,6 @@ output_dir: /var/www/webstat
 # Leave blank to disable GeoIP lookup
 geoip_db: /etc/webstat/GeoLite2-Country.mmdb
 
-# Number of files to process in parallel (Rust importer only)
-# Start with 2-4 and benchmark; 1 keeps single-thread behavior
-file_workers: 1
-
 # Periodic checkpoint interval in minutes.
 # 0 disables intermediate checkpoints (flush only at end of run).
 checkpoint_minutes: 0

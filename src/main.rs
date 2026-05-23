@@ -55,10 +55,6 @@ struct Args {
     #[arg(long, global = true)]
     geoip_db: Option<String>,
 
-    /// Number of worker threads for file processing (default: 1)
-    #[arg(long, global = true)]
-    file_workers: Option<usize>,
-
     /// Number of rows to keep in top tables (default: 20)
     #[arg(long, global = true)]
     top_n: Option<usize>,
@@ -168,9 +164,6 @@ fn build_config(args: &Args) -> Result<config::Config> {
     }
     if let Some(v) = &args.geoip_db {
         cfg.geoip_db = Some(v.clone());
-    }
-    if let Some(v) = args.file_workers {
-        cfg.file_workers = v;
     }
     if let Some(v) = args.top_n {
         cfg.top_n = v;
