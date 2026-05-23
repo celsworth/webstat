@@ -4,40 +4,6 @@ Webstat is a single-binary Rust web log analyzer, inspired by Webalizer.
 
 It parses nginx access logs incrementally into SQLite, then generates static HTML reports from that database using Tera templates and Chart.js.
 
-## Program Flow
-
-### `process` command
-
-- Parse CLI args and load config — `src/main.rs`, `src/config.rs`
-- Initialise logging (verbosity globals) — `src/logging.rs`
-- Open SQLite database and initialise schema — `src/database.rs`
-- Expand glob patterns into a file list, sort by first-line timestamp — `src/aggregator/mod.rs` (`process_globs`)
-- For each file, fingerprint it and decide what to skip/resume — `src/fingerprint.rs`, `src/aggregator/resume.rs`
-- Seed initial progress counters from already-processed offsets — `src/aggregator/progress_seed.rs`
-- Spawn a progress display thread — `src/aggregator/mod.rs`, `src/progress.rs`
-- Run the 3-stage pipeline — `src/aggregator/pipeline.rs`:
-  - **Loader thread** — reads raw bytes, decompresses if needed, emits line batches — `src/loader.rs`, `src/compression.rs`
-  - **Parser thread** — parses combined-log-format lines into structured entries, runs UA classification and bot filtering; bots are dropped here — `src/parser/stage.rs`, `src/parser/mod.rs`, `src/ua.rs`
-  - **Aggregator (main thread)** — consumes `ParsedEntry` values, updates in-memory accumulators, detects month boundaries and triggers `finalize_month` — `src/aggregator/aggregation.rs`, `src/aggregator/flush.rs`, `src/geo.rs`
-- On month finalisation: prune top-N tables to `top_n` rows, compute and cache unique-IP counts — `src/database/writer.rs`
-- Flush accumulators to SQLite at checkpoints and on completion — `src/aggregator/flush.rs`, `src/database.rs`
-- Update per-file parse state for resume tracking — `src/database.rs`
-
-### `generate` command
-
-- Query aggregated data from SQLite — `src/database.rs`
-- Render Tera templates into static HTML — `src/reports.rs`
-- Write HTML and copy bundled assets to `output_dir` — `src/reports.rs`
-
-## Repository Layout
-
-- `src/` Rust source (ingestion, aggregation, report rendering)
-- `templates/` editable Tera templates
-- `assets/` static CSS/JS bundled into the binary
-- `webstat.yml` runtime configuration
-- `webstat.yml.example` example configuration
-- `GeoLite2-Country.mmdb` optional local GeoIP database
-
 ## Build
 
 ```bash
@@ -119,10 +85,9 @@ cp webstat.yml.example webstat.yml
 
 - **`geoip_db`** — Path to MaxMind GeoLite2-Country `.mmdb` file. Leave unset to skip GeoIP lookups. Can be relative.
 
-- **`file_workers`** — Number of parallel worker threads. Default: `1`. (Multi-file parallel dispatch is not yet wired; this setting is accepted but currently has no effect.)
-
 - **`checkpoint_minutes`** — Periodic SQLite checkpoint interval in minutes. Default: `0` (disabled).
   - Set to a positive value to flush partial aggregates and parse progress during long runs.
+  - Checkpoints run after every month is finalised but this can help if you have a very large backlog of logs.
   - Helps reduce lost work if processing is interrupted.
 
 - **`anonymise_ips`** — Anonymise IP addresses in the HTML reports by zeroing out the last octet (IPv4) or last 80 bits (IPv6). Default: `false`.
@@ -135,18 +100,13 @@ cp webstat.yml.example webstat.yml
 
 - **`bot_filter`** — Exclude known bots/crawlers from all statistics. Default: `true`.
   - Bot detection runs in the parser thread; filtered entries are discarded before reaching the aggregator and are not counted anywhere.
+  - This uses woothee crawler detection and a list of known bot user agent substrings.
 
 - **`enable_top_urls`** — Enable tracking of top URLs. Default: `true`.
 
 - **`enable_top_hosts`** — Enable tracking of top hosts/IPs. Default: `true`.
 
 - **`enable_top_refs`** — Enable tracking of top referrers. Default: `true`.
-
-### Backfill Order Requirement
-
-If you are doing the initial population of a new database across multiple import runs, run those imports strictly in date order (oldest to newest).
-
-Out-of-order backfills can cause period snapshot behavior to retain or freeze the wrong periods, which can produce unexpected aggregates.
 
 ### File Change Detection
 
@@ -188,20 +148,27 @@ bot_filter: true
 - Generated site at `output_dir` (often `./output`)
 - Extracted report assets at `output_dir/assets`
 
-## Assumptions and Limitations
+## Program Flow
 
-### Unique visitor counts are exact
+### `process` command
 
-Unique visitor counts (displayed as "Sites" in reports) are counted exactly. Every unique IP address seen on a given day is recorded in the `daily_ip_log` table; the composite primary key `(date, ip_kind, ip_hi, ip_lo)` deduplicates naturally via `INSERT OR IGNORE`. Monthly and yearly unique-IP counts are precomputed into `site_count_cache` using `SELECT DISTINCT` when each month is finalised.
+- Parse CLI args and load config — `src/main.rs`, `src/config.rs`
+- Initialise logging (verbosity globals) — `src/logging.rs`
+- Open SQLite database and initialise schema — `src/database.rs`
+- Expand glob patterns into a file list, sort by first-line timestamp — `src/aggregator/mod.rs` (`process_globs`)
+- For each file, fingerprint it and decide what to skip/resume — `src/fingerprint.rs`, `src/aggregator/resume.rs`
+- Seed initial progress counters from already-processed offsets — `src/aggregator/progress_seed.rs`
+- Spawn a progress display thread — `src/aggregator/mod.rs`, `src/progress.rs`
+- Run the 3-stage pipeline — `src/aggregator/pipeline.rs`:
+  - **Loader thread** — reads raw bytes, decompresses if needed, emits line batches — `src/loader.rs`, `src/compression.rs`
+  - **Parser thread** — parses combined-log-format lines into structured entries, runs UA classification and bot filtering; bots are dropped here — `src/parser/stage.rs`, `src/parser/mod.rs`, `src/ua.rs`
+  - **Aggregator (main thread)** — consumes `ParsedEntry` values, updates in-memory accumulators, detects month boundaries and triggers `finalize_month` — `src/aggregator/aggregation.rs`, `src/aggregator/flush.rs`, `src/geo.rs`
+- On month finalisation: prune top-N tables to `top_n` rows, compute and cache unique-IP counts — `src/database/writer.rs`
+- Flush accumulators to SQLite at checkpoints and on completion — `src/aggregator/flush.rs`, `src/database.rs`
+- Update per-file parse state for resume tracking — `src/database.rs`
 
-IPv4 and IPv6 addresses are stored in decomposed numeric form (`ip_hi`/`ip_lo` as integers), not as text, for efficient deduplication and compact storage.
+### `generate` command
 
-### Visits Metric Tradeoff
-
-Webstat defines a visit using a 30-minute inactivity window per remote host.
-
-Visit state is loaded from SQLite at the start of each run and written back on completion. This means visit continuity is correctly maintained across separate process invocations, but a single visit that crosses a logfile boundary within a single run may be counted as two visits if files are not processed in strict chronological order.
-
-### Top tables
-
-URL, hostname, referrer, user-agent, and country tables accumulate exact counts during ingestion. When a month is finalised, each table is pruned to the `top_n` highest-count rows for that period. Items outside the top N are discarded at finalisation time and are not recoverable.
+- Query aggregated data from SQLite — `src/database.rs`
+- Render Tera templates into static HTML — `src/reports.rs`
+- Write HTML and copy bundled assets to `output_dir` — `src/reports.rs`
