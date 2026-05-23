@@ -1,3 +1,6 @@
+// Progress seeding: queries the database for already-processed byte/line counts so the
+// progress display starts from the correct baseline when resuming a run.
+
 use super::*;
 
 pub(super) struct SeededProgress {

@@ -1,3 +1,6 @@
+// Flush: writes RunAccumulators to SQLite, handles month-boundary finalisation,
+// and saves parse/visit state after each checkpoint.
+
 use std::sync::Arc;
 use std::time::Instant;
 

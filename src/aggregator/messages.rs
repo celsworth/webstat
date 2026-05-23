@@ -1,6 +1,8 @@
-pub use crate::parser::OwnedLogEntry;
-pub use crate::rules::HideMask;
+// Channel message types for the three-stage pipeline: LoaderMsg (loader→parser),
+// ParserMsg / ParsedEntry (parser→aggregator), and the push/pop blocking helpers.
 
+use crate::parser::OwnedLogEntry;
+use crate::rules::HideMask;
 use std::sync::Arc;
 
 /// A parsed log entry with its UA family already resolved.

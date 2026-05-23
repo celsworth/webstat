@@ -1,3 +1,6 @@
+// Processor: top-level orchestration — file discovery, resume planning, progress thread,
+// checkpoint scheduling, and the public process_globs entry point.
+
 use std::collections::BTreeSet;
 use std::os::unix::fs::MetadataExt;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};

@@ -1,3 +1,6 @@
+// Per-entry aggregation: maps each ParsedEntry into the in-memory RunAccumulators
+// (hourly stats, URLs, hosts, referrers, agents, countries, IPs, status codes, etc.).
+
 use super::messages::ParsedEntry;
 use super::*;
 use crate::ip::Ip;

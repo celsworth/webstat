@@ -1,3 +1,6 @@
+// Resume planning: for each file determines whether to skip, resume mid-file, or
+// reprocess, using inode, size, mtime, and head fingerprints to identify files.
+
 use std::io::{BufRead, BufReader, Read};
 
 use super::*;

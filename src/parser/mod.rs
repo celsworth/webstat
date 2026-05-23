@@ -1,3 +1,6 @@
+// Pure log-format parser: converts a raw nginx combined-format line into an OwnedLogEntry.
+// No pipeline, UA, or rule dependencies.
+
 use std::ops::Range;
 
 #[derive(Debug)]

@@ -1,3 +1,6 @@
+// Three-stage pipeline: spawns loader and parser threads, runs the aggregator on the
+// calling thread, and drives checkpointing and file-done accounting.
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;

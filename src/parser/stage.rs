@@ -1,3 +1,6 @@
+// Pipeline parser thread: receives raw lines from the loader, parses them, applies UA
+// classification, bot filtering, and rules, then forwards batches to the aggregator.
+
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
