@@ -295,8 +295,6 @@ fn daily_stats(
         "SELECT date,
                 SUM(hits) AS hits,
                 SUM(visits) AS visits,
-                SUM(files) AS files,
-                SUM(pages) AS pages,
                 SUM(bandwidth) AS bandwidth
          FROM hourly_stats
          WHERE date LIKE ?1
@@ -310,32 +308,24 @@ fn daily_stats(
             row.get::<_, i64>(1)? as u64,
             row.get::<_, i64>(2)? as u64,
             row.get::<_, i64>(3)? as u64,
-            row.get::<_, i64>(4)? as u64,
-            row.get::<_, i64>(5)? as u64,
         ))
     })?;
 
     let mut out = Vec::new();
     for row in rows.by_ref() {
-        let (date, hits, visits, files, pages, bandwidth) = row?;
+        let (date, hits, visits, bandwidth) = row?;
         let sites = daily_sites.get(&date).copied().unwrap_or(0);
         out.push(DailyRow {
             is_weekend: is_weekend_date(&date),
             date,
             hits,
             visits,
-            files,
-            pages,
             sites,
             bandwidth,
             hits_fmt: count_fmt(hits, compact_counts),
             hits_exact_fmt: super::number_fmt(hits),
             visits_fmt: count_fmt(visits, compact_counts),
             visits_exact_fmt: super::number_fmt(visits),
-            files_fmt: count_fmt(files, compact_counts),
-            files_exact_fmt: super::number_fmt(files),
-            pages_fmt: count_fmt(pages, compact_counts),
-            pages_exact_fmt: super::number_fmt(pages),
             sites_fmt: count_fmt(sites, compact_counts),
             sites_exact_fmt: super::number_fmt(sites),
             bandwidth_fmt: format_bytes(bandwidth),
@@ -363,8 +353,6 @@ fn hourly_distribution(
         "SELECT hour,
                 SUM(hits) AS hits,
                 SUM(visits) AS visits,
-                SUM(files) AS files,
-                SUM(pages) AS pages,
                 SUM(bandwidth) AS bandwidth
          FROM hourly_stats
          WHERE date LIKE ?1
@@ -378,37 +366,28 @@ fn hourly_distribution(
             row.get::<_, i64>(1)? as u64,
             row.get::<_, i64>(2)? as u64,
             row.get::<_, i64>(3)? as u64,
-            row.get::<_, i64>(4)? as u64,
-            row.get::<_, i64>(5)? as u64,
         ))
     })?;
 
-    let mut by_hour = BTreeMap::<u8, (u64, u64, u64, u64, u64)>::new();
+    let mut by_hour = BTreeMap::<u8, (u64, u64, u64)>::new();
     for row in rows {
-        let (hour, hits, visits, files, pages, bandwidth) = row?;
-        by_hour.insert(hour, (hits, visits, files, pages, bandwidth));
+        let (hour, hits, visits, bandwidth) = row?;
+        by_hour.insert(hour, (hits, visits, bandwidth));
     }
 
     let mut out = Vec::with_capacity(24);
     for hour in 0u8..24u8 {
-        let (hits, visits, files, pages, bandwidth) =
-            by_hour.get(&hour).copied().unwrap_or((0, 0, 0, 0, 0));
+        let (hits, visits, bandwidth) = by_hour.get(&hour).copied().unwrap_or((0, 0, 0));
         out.push(HourlyRow {
             hour,
             label: format!("{hour:02}:00"),
             hits,
             visits,
-            files,
-            pages,
             bandwidth,
             hits_fmt: count_fmt(hits, compact_counts),
             hits_exact_fmt: super::number_fmt(hits),
             visits_fmt: count_fmt(visits, compact_counts),
             visits_exact_fmt: super::number_fmt(visits),
-            files_fmt: count_fmt(files, compact_counts),
-            files_exact_fmt: super::number_fmt(files),
-            pages_fmt: count_fmt(pages, compact_counts),
-            pages_exact_fmt: super::number_fmt(pages),
             bandwidth_fmt: format_bytes(bandwidth),
         });
     }
@@ -426,8 +405,6 @@ fn monthly_totals(
     let mut stmt = conn.prepare(
         "SELECT COALESCE(SUM(hits), 0),
                 COALESCE(SUM(visits), 0),
-                COALESCE(SUM(files), 0),
-                COALESCE(SUM(pages), 0),
                 COALESCE(SUM(bandwidth), 0)
          FROM hourly_stats
          WHERE date LIKE ?1",
@@ -438,30 +415,18 @@ fn monthly_totals(
             row.get::<_, i64>(0)? as u64,
             row.get::<_, i64>(1)? as u64,
             row.get::<_, i64>(2)? as u64,
-            row.get::<_, i64>(3)? as u64,
-            row.get::<_, i64>(4)? as u64,
         ))
     })?;
 
     let sites = site_count_for_scope(conn, &prefix)?;
 
-    Ok(format_totals(
-        row.0,
-        row.1,
-        row.2,
-        sites,
-        row.3,
-        row.4,
-        compact_counts,
-    ))
+    Ok(format_totals(row.0, row.1, sites, row.2, compact_counts))
 }
 
 fn yearly_totals(conn: &Connection, year: i32, compact_counts: bool) -> Result<TotalsView> {
     let mut stmt = conn.prepare(
         "SELECT COALESCE(SUM(hits), 0),
                 COALESCE(SUM(visits), 0),
-                COALESCE(SUM(files), 0),
-                COALESCE(SUM(pages), 0),
                 COALESCE(SUM(bandwidth), 0)
          FROM hourly_stats
          WHERE date LIKE ?1",
@@ -472,22 +437,12 @@ fn yearly_totals(conn: &Connection, year: i32, compact_counts: bool) -> Result<T
             row.get::<_, i64>(0)? as u64,
             row.get::<_, i64>(1)? as u64,
             row.get::<_, i64>(2)? as u64,
-            row.get::<_, i64>(3)? as u64,
-            row.get::<_, i64>(4)? as u64,
         ))
     })?;
 
     let sites = site_count_for_scope(conn, &year.to_string())?;
 
-    Ok(format_totals(
-        row.0,
-        row.1,
-        row.2,
-        sites,
-        row.3,
-        row.4,
-        compact_counts,
-    ))
+    Ok(format_totals(row.0, row.1, sites, row.2, compact_counts))
 }
 
 fn monthly_rows(conn: &Connection, year: i32, compact_counts: bool) -> Result<Vec<MonthRow>> {
@@ -495,8 +450,6 @@ fn monthly_rows(conn: &Connection, year: i32, compact_counts: bool) -> Result<Ve
         "SELECT substr(date, 1, 7) AS ym,
                 SUM(hits) AS hits,
                 SUM(visits) AS visits,
-                SUM(files) AS files,
-                SUM(pages) AS pages,
                 SUM(bandwidth) AS bandwidth
          FROM hourly_stats
          WHERE date LIKE ?1
@@ -510,14 +463,12 @@ fn monthly_rows(conn: &Connection, year: i32, compact_counts: bool) -> Result<Ve
             row.get::<_, i64>(1)? as u64,
             row.get::<_, i64>(2)? as u64,
             row.get::<_, i64>(3)? as u64,
-            row.get::<_, i64>(4)? as u64,
-            row.get::<_, i64>(5)? as u64,
         ))
     })?;
 
     let mut out = Vec::new();
     for row in rows {
-        let (ym, hits, visits, files, pages, bandwidth) = row?;
+        let (ym, hits, visits, bandwidth) = row?;
         let sites = site_count_for_scope(conn, &ym)?;
         let month = ym
             .split('-')
@@ -531,18 +482,12 @@ fn monthly_rows(conn: &Connection, year: i32, compact_counts: bool) -> Result<Ve
             month_name: month_name(month).to_string(),
             hits,
             visits,
-            files,
-            pages,
             sites,
             bandwidth,
             hits_fmt: count_fmt(hits, compact_counts),
             hits_exact_fmt: super::number_fmt(hits),
             visits_fmt: count_fmt(visits, compact_counts),
             visits_exact_fmt: super::number_fmt(visits),
-            files_fmt: count_fmt(files, compact_counts),
-            files_exact_fmt: super::number_fmt(files),
-            pages_fmt: count_fmt(pages, compact_counts),
-            pages_exact_fmt: super::number_fmt(pages),
             sites_fmt: count_fmt(sites, compact_counts),
             sites_exact_fmt: super::number_fmt(sites),
             bandwidth_fmt: format_bytes(bandwidth),
@@ -557,8 +502,6 @@ fn yearly_rows(conn: &Connection, compact_counts: bool) -> Result<Vec<YearAggreg
         "SELECT substr(date, 1, 4) AS yr,
                 SUM(hits) AS hits,
                 SUM(visits) AS visits,
-                SUM(files) AS files,
-                SUM(pages) AS pages,
                 SUM(bandwidth) AS bandwidth
          FROM hourly_stats
          GROUP BY yr
@@ -571,14 +514,12 @@ fn yearly_rows(conn: &Connection, compact_counts: bool) -> Result<Vec<YearAggreg
             row.get::<_, i64>(1)? as u64,
             row.get::<_, i64>(2)? as u64,
             row.get::<_, i64>(3)? as u64,
-            row.get::<_, i64>(4)? as u64,
-            row.get::<_, i64>(5)? as u64,
         ))
     })?;
 
     let mut out = Vec::new();
     for row in rows {
-        let (yr, hits, visits, files, pages, bandwidth) = row?;
+        let (yr, hits, visits, bandwidth) = row?;
         let sites = site_count_for_scope(conn, &yr)?;
         let year = yr.parse::<i32>().unwrap_or(0);
         if year <= 0 {
@@ -589,18 +530,12 @@ fn yearly_rows(conn: &Connection, compact_counts: bool) -> Result<Vec<YearAggreg
             year,
             hits,
             visits,
-            files,
-            pages,
             sites,
             bandwidth,
             hits_fmt: count_fmt(hits, compact_counts),
             hits_exact_fmt: super::number_fmt(hits),
             visits_fmt: count_fmt(visits, compact_counts),
             visits_exact_fmt: super::number_fmt(visits),
-            files_fmt: count_fmt(files, compact_counts),
-            files_exact_fmt: super::number_fmt(files),
-            pages_fmt: count_fmt(pages, compact_counts),
-            pages_exact_fmt: super::number_fmt(pages),
             sites_fmt: count_fmt(sites, compact_counts),
             sites_exact_fmt: super::number_fmt(sites),
             bandwidth_fmt: format_bytes(bandwidth),
@@ -614,8 +549,6 @@ fn overall_totals(conn: &Connection, compact_counts: bool) -> Result<TotalsView>
     let mut stmt = conn.prepare(
         "SELECT COALESCE(SUM(hits), 0),
                 COALESCE(SUM(visits), 0),
-                COALESCE(SUM(files), 0),
-                COALESCE(SUM(pages), 0),
                 COALESCE(SUM(bandwidth), 0)
          FROM hourly_stats",
     )?;
@@ -625,22 +558,12 @@ fn overall_totals(conn: &Connection, compact_counts: bool) -> Result<TotalsView>
             row.get::<_, i64>(0)? as u64,
             row.get::<_, i64>(1)? as u64,
             row.get::<_, i64>(2)? as u64,
-            row.get::<_, i64>(3)? as u64,
-            row.get::<_, i64>(4)? as u64,
         ))
     })?;
 
     let sites = all_time_site_count(conn)?;
 
-    Ok(format_totals(
-        row.0,
-        row.1,
-        row.2,
-        sites,
-        row.3,
-        row.4,
-        compact_counts,
-    ))
+    Ok(format_totals(row.0, row.1, sites, row.2, compact_counts))
 }
 
 fn site_count_for_scope(conn: &Connection, scope: &str) -> Result<u64> {
@@ -1284,10 +1207,6 @@ fn daily_avg_max_from_rows(daily: &[DailyRow], compact_counts: bool) -> DailyAvg
     let max_hits = daily.iter().map(|r| r.hits).max().unwrap_or(0);
     let avg_visits = daily.iter().map(|r| r.visits).sum::<u64>() / days;
     let max_visits = daily.iter().map(|r| r.visits).max().unwrap_or(0);
-    let avg_files = daily.iter().map(|r| r.files).sum::<u64>() / days;
-    let max_files = daily.iter().map(|r| r.files).max().unwrap_or(0);
-    let avg_pages = daily.iter().map(|r| r.pages).sum::<u64>() / days;
-    let max_pages = daily.iter().map(|r| r.pages).max().unwrap_or(0);
     let avg_sites = daily.iter().map(|r| r.sites).sum::<u64>() / days;
     let max_sites = daily.iter().map(|r| r.sites).max().unwrap_or(0);
     let avg_bandwidth = daily.iter().map(|r| r.bandwidth).sum::<u64>() / days;
@@ -1306,18 +1225,6 @@ fn daily_avg_max_from_rows(daily: &[DailyRow], compact_counts: bool) -> DailyAvg
         avg_visits_exact_fmt: super::number_fmt(avg_visits),
         max_visits_fmt: count_fmt(max_visits, compact_counts),
         max_visits_exact_fmt: super::number_fmt(max_visits),
-        avg_files,
-        max_files,
-        avg_files_fmt: count_fmt(avg_files, compact_counts),
-        avg_files_exact_fmt: super::number_fmt(avg_files),
-        max_files_fmt: count_fmt(max_files, compact_counts),
-        max_files_exact_fmt: super::number_fmt(max_files),
-        avg_pages,
-        max_pages,
-        avg_pages_fmt: count_fmt(avg_pages, compact_counts),
-        avg_pages_exact_fmt: super::number_fmt(avg_pages),
-        max_pages_fmt: count_fmt(max_pages, compact_counts),
-        max_pages_exact_fmt: super::number_fmt(max_pages),
         avg_sites,
         max_sites,
         avg_sites_fmt: count_fmt(avg_sites, compact_counts),

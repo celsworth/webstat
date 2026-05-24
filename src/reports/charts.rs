@@ -14,8 +14,6 @@ pub(super) fn daily_chart(daily: &[DailyRow]) -> Result<String> {
         .map(|d| d.date.split('-').next_back().unwrap_or("").to_string())
         .collect();
     let hits: Vec<u64> = daily.iter().map(|d| d.hits).collect();
-    let pages: Vec<u64> = daily.iter().map(|d| d.pages).collect();
-    let files: Vec<u64> = daily.iter().map(|d| d.files).collect();
     let bandwidth: Vec<f64> = daily
         .iter()
         .map(|d| ((d.bandwidth as f64) / 1_048_576.0 * 100.0).round() / 100.0)
@@ -27,8 +25,6 @@ pub(super) fn daily_chart(daily: &[DailyRow]) -> Result<String> {
         "labels": labels,
         "datasets": [
           { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Pages", "data": pages, "backgroundColor": PALETTE[1], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Files", "data": files, "backgroundColor": PALETTE[4], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
           { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 2, "fill": false }
         ]
       },
@@ -62,8 +58,6 @@ pub(super) fn daily_visits_chart(daily: &[DailyRow]) -> Result<String> {
 pub(super) fn hourly_chart(hourly: &[HourlyRow]) -> Result<String> {
     let labels: Vec<String> = hourly.iter().map(|h| h.label.clone()).collect();
     let hits: Vec<u64> = hourly.iter().map(|h| h.hits).collect();
-    let pages: Vec<u64> = hourly.iter().map(|h| h.pages).collect();
-    let files: Vec<u64> = hourly.iter().map(|h| h.files).collect();
     let bandwidth: Vec<f64> = hourly
         .iter()
         .map(|h| ((h.bandwidth as f64) / 1_048_576.0 * 100.0).round() / 100.0)
@@ -75,8 +69,6 @@ pub(super) fn hourly_chart(hourly: &[HourlyRow]) -> Result<String> {
         "labels": labels,
         "datasets": [
           { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Pages", "data": pages, "backgroundColor": PALETTE[1], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Files", "data": files, "backgroundColor": PALETTE[4], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
           { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 2, "fill": false }
         ]
       },
@@ -91,8 +83,6 @@ pub(super) fn monthly_overview_chart(monthly: &[MonthRow]) -> Result<String> {
         .map(|m| m.month_name.chars().take(3).collect::<String>())
         .collect();
     let hits: Vec<u64> = monthly.iter().map(|m| m.hits).collect();
-    let pages: Vec<u64> = monthly.iter().map(|m| m.pages).collect();
-    let files: Vec<u64> = monthly.iter().map(|m| m.files).collect();
     let bandwidth: Vec<f64> = monthly
         .iter()
         .map(|m| ((m.bandwidth as f64) / 1_048_576.0 * 100.0).round() / 100.0)
@@ -104,8 +94,6 @@ pub(super) fn monthly_overview_chart(monthly: &[MonthRow]) -> Result<String> {
         "labels": labels,
         "datasets": [
           { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Pages", "data": pages, "backgroundColor": PALETTE[1], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Files", "data": files, "backgroundColor": PALETTE[4], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
           { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 3, "fill": false }
         ]
       },
@@ -139,8 +127,6 @@ pub(super) fn monthly_visits_chart(monthly: &[MonthRow]) -> Result<String> {
 pub(super) fn yearly_overview_chart(yearly: &[YearAggregateRow]) -> Result<String> {
     let labels: Vec<String> = yearly.iter().map(|y| y.year.to_string()).collect();
     let hits: Vec<u64> = yearly.iter().map(|y| y.hits).collect();
-    let pages: Vec<u64> = yearly.iter().map(|y| y.pages).collect();
-    let files: Vec<u64> = yearly.iter().map(|y| y.files).collect();
     let bandwidth: Vec<f64> = yearly
         .iter()
         .map(|y| ((y.bandwidth as f64) / 1_048_576.0 * 100.0).round() / 100.0)
@@ -152,8 +138,6 @@ pub(super) fn yearly_overview_chart(yearly: &[YearAggregateRow]) -> Result<Strin
         "labels": labels,
         "datasets": [
           { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Pages", "data": pages, "backgroundColor": PALETTE[1], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Files", "data": files, "backgroundColor": PALETTE[4], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
           { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 3, "fill": false }
         ]
       },

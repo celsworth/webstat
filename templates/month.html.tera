@@ -7,14 +7,6 @@
     <span class="stat-value" title="{{ totals.hits_exact_fmt }}">{{ totals.hits_fmt }}</span>
     <span class="stat-label">Total Hits</span>
   </div>
-  <div class="stat-card stat-card--pages">
-    <span class="stat-value" title="{{ totals.pages_exact_fmt }}">{{ totals.pages_fmt }}</span>
-    <span class="stat-label">Total Pages</span>
-  </div>
-  <div class="stat-card stat-card--files">
-    <span class="stat-value" title="{{ totals.files_exact_fmt }}">{{ totals.files_fmt }}</span>
-    <span class="stat-label">Total Files</span>
-  </div>
   <div class="stat-card stat-card--visits">
     <span class="stat-value" title="{{ totals.visits_exact_fmt }}">{{ totals.visits_fmt }}</span>
     <span class="stat-label">Total Visits</span>
@@ -89,16 +81,6 @@
           <td>Visits per Day</td>
           <td title="{{ daily_avg_max.avg_visits_exact_fmt }}">{{ daily_avg_max.avg_visits_fmt }}</td>
           <td title="{{ daily_avg_max.max_visits_exact_fmt }}">{{ daily_avg_max.max_visits_fmt }}</td>
-        </tr>
-        <tr>
-          <td>Files per Day</td>
-          <td title="{{ daily_avg_max.max_sites_exact_fmt }}">{{ daily_avg_max.max_sites_fmt }}</td>
-          <td title="{{ daily_avg_max.max_files_exact_fmt }}">{{ daily_avg_max.max_files_fmt }}</td>
-        </tr>
-        <tr>
-          <td>Pages per Day</td>
-          <td title="{{ daily_avg_max.avg_pages_exact_fmt }}">{{ daily_avg_max.avg_pages_fmt }}</td>
-          <td title="{{ daily_avg_max.max_pages_exact_fmt }}">{{ daily_avg_max.max_pages_fmt }}</td>
         </tr>
         <tr>
           <td>Sites per Day</td>
@@ -176,12 +158,10 @@
 <div class="stats-panel">
   <table class="data-table stats-panel__table">
     <thead>
-      <tr><th colspan="7" class="stats-panel__heading">Daily Statistics</th></tr>
+      <tr><th colspan="5" class="stats-panel__heading">Daily Statistics</th></tr>
       <tr>
         <th>Day</th>
         <th class="metric-hits">Hits</th>
-        <th class="metric-pages">Pages</th>
-        <th class="metric-files">Files</th>
         <th class="metric-visits">Visits</th>
         <th class="metric-sites">Sites</th>
         <th class="metric-bandwidth">Bandwidth</th>
@@ -192,8 +172,6 @@
       <tr{% if row.is_weekend %} class="daily-row--weekend"{% endif %}>
         <td>{{ row.date }}</td>
         <td data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
-        <td data-value="{{ row.pages }}" title="{{ row.pages_exact_fmt }}">{{ row.pages_fmt }}</td>
-        <td data-value="{{ row.files }}" title="{{ row.files_exact_fmt }}">{{ row.files_fmt }}</td>
         <td data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">{{ row.visits_fmt }}</td>
         <td data-value="{{ row.sites }}" title="{{ row.sites_exact_fmt }}">{{ row.sites_fmt }}</td>
         <td data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
@@ -208,12 +186,10 @@
 <div class="stats-panel">
   <table class="data-table stats-panel__table">
     <thead>
-      <tr><th colspan="6" class="stats-panel__heading">Hourly Statistics</th></tr>
+      <tr><th colspan="4" class="stats-panel__heading">Hourly Statistics</th></tr>
       <tr>
         <th>Hour</th>
         <th class="metric-hits">Hits</th>
-        <th class="metric-pages">Pages</th>
-        <th class="metric-files">Files</th>
         <th class="metric-visits">Visits</th>
         <th class="metric-bandwidth">Bandwidth</th>
       </tr>
@@ -223,8 +199,6 @@
       <tr>
         <td>{{ row.label }}</td>
         <td data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
-        <td data-value="{{ row.pages }}" title="{{ row.pages_exact_fmt }}">{{ row.pages_fmt }}</td>
-        <td data-value="{{ row.files }}" title="{{ row.files_exact_fmt }}">{{ row.files_fmt }}</td>
         <td data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">{{ row.visits_fmt }}</td>
         <td data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
       </tr>

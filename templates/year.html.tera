@@ -7,14 +7,6 @@
     <span class="stat-value" title="{{ totals.hits_exact_fmt }}">{{ totals.hits_fmt }}</span>
     <span class="stat-label">Total Hits</span>
   </div>
-  <div class="stat-card stat-card--pages">
-    <span class="stat-value" title="{{ totals.pages_exact_fmt }}">{{ totals.pages_fmt }}</span>
-    <span class="stat-label">Total Pages</span>
-  </div>
-  <div class="stat-card stat-card--files">
-    <span class="stat-value" title="{{ totals.files_exact_fmt }}">{{ totals.files_fmt }}</span>
-    <span class="stat-label">Total Files</span>
-  </div>
   <div class="stat-card stat-card--visits">
     <span class="stat-value" title="{{ totals.visits_exact_fmt }}">{{ totals.visits_fmt }}</span>
     <span class="stat-label">Total Visits</span>
@@ -66,12 +58,10 @@
 <div class="stats-panel">
   <table class="data-table stats-panel__table">
     <thead>
-      <tr><th colspan="8" class="stats-panel__heading">Monthly Breakdown</th></tr>
+      <tr><th colspan="6" class="stats-panel__heading">Monthly Breakdown</th></tr>
       <tr>
         <th>Month</th>
         <th class="num-col metric-hits">Hits</th>
-        <th class="num-col metric-pages">Pages</th>
-        <th class="num-col metric-files">Files</th>
         <th class="num-col metric-visits">Visits</th>
         <th class="num-col metric-sites">Sites</th>
         <th class="num-col metric-bandwidth">Bandwidth</th>
@@ -83,8 +73,6 @@
       <tr>
         <td>{{ row.month_name }}</td>
         <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
-        <td class="num-col" data-value="{{ row.pages }}" title="{{ row.pages_exact_fmt }}">{{ row.pages_fmt }}</td>
-        <td class="num-col" data-value="{{ row.files }}" title="{{ row.files_exact_fmt }}">{{ row.files_fmt }}</td>
         <td class="num-col" data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">{{ row.visits_fmt }}</td>
         <td class="num-col" data-value="{{ row.sites }}" title="{{ row.sites_exact_fmt }}">{{ row.sites_fmt }}</td>
         <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>

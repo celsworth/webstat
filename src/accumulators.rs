@@ -9,8 +9,6 @@ pub struct HourlyStats {
     pub hits: u64,
     pub visits: u64,
     pub bandwidth: u64,
-    pub files: u64,
-    pub pages: u64,
     pub status_2xx: u64,
     pub status_3xx: u64,
     pub status_4xx: u64,

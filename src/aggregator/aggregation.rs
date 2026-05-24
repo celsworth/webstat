@@ -1,7 +1,7 @@
 // Per-entry aggregation: maps each ParsedEntry into the in-memory RunAccumulators
 // (hourly stats, URLs, hosts, referrers, agents, countries, IPs, status codes, etc.).
 
-use memchr::{memchr, memrchr};
+use memchr::memchr;
 
 use super::messages::ParsedEntry;
 use super::*;
@@ -11,33 +11,12 @@ use crate::rules::HideMask;
 
 // ── URL / path helpers ────────────────────────────────────────────────────────
 
-const FILE_EXTS: &[&str] = &[
-    ".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".otf", ".woff",
-    ".woff2", ".ttf", ".eot", ".mp4", ".mp3", ".zip", ".tar", ".gz", ".br", ".pdf", ".xml",
-    ".json", ".txt",
-];
-
 /// Strip the query string from a path (`/foo?bar=1` → `/foo`).
 #[inline]
 fn strip_query(path: &str) -> &str {
     match memchr(b'?', path.as_bytes()) {
         Some(i) => &path[..i],
         None => path,
-    }
-}
-
-/// Return the file extension of a path (e.g. `".html"`), or `""` if none.
-///
-/// Searches only within the last path component to avoid matching dots in
-/// directory names.
-#[inline]
-fn file_ext(path: &str) -> &str {
-    let b = path.as_bytes();
-    let start = memrchr(b'/', b).map_or(0, |p| p + 1);
-    let filename = &path[start..];
-    match memrchr(b'.', filename.as_bytes()) {
-        Some(i) => &filename[i..],
-        None => "",
     }
 }
 
@@ -208,12 +187,6 @@ impl Processor {
         let status_class = status / 100;
         if status_class == 2 {
             stats.status_2xx += 1;
-            let ext = file_ext(clean_path);
-            if FILE_EXTS.contains(&ext) {
-                stats.files += 1;
-            } else {
-                stats.pages += 1;
-            }
         } else if status_class == 3 {
             stats.status_3xx += 1;
         } else if status_class == 4 {
@@ -387,49 +360,6 @@ mod tests {
     #[test]
     fn strip_query_leading_question_mark() {
         assert_eq!(strip_query("?foo=bar"), "");
-    }
-
-    // ── file_ext ──────────────────────────────────────────────────────────────
-
-    #[test]
-    fn file_ext_returns_extension() {
-        assert_eq!(file_ext("/foo/bar.html"), ".html");
-    }
-
-    #[test]
-    fn file_ext_no_extension_returns_empty() {
-        assert_eq!(file_ext("/foo/bar"), "");
-    }
-
-    #[test]
-    fn file_ext_dot_in_dir_not_matched() {
-        assert_eq!(file_ext("/foo.d/bar"), "");
-    }
-
-    #[test]
-    fn file_ext_trailing_slash() {
-        assert_eq!(file_ext("/foo/"), "");
-    }
-
-    #[test]
-    fn file_ext_multiple_dots_returns_last() {
-        assert_eq!(file_ext("/foo/archive.tar.gz"), ".gz");
-    }
-
-    #[test]
-    fn file_ext_leading_dot_filename() {
-        // Hidden files: the leading dot is treated as extension start.
-        assert_eq!(file_ext("/foo/.gitignore"), ".gitignore");
-    }
-
-    #[test]
-    fn file_ext_root_path_empty() {
-        assert_eq!(file_ext("/"), "");
-    }
-
-    #[test]
-    fn file_ext_just_dot_in_filename() {
-        assert_eq!(file_ext("/foo/."), ".");
     }
 
     // ── extract_host_from_url ─────────────────────────────────────────────────

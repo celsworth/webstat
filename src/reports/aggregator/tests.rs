@@ -14,8 +14,6 @@ mod tests {
                  hour       INTEGER NOT NULL,
                  hits       INTEGER DEFAULT 0,
                  visits     INTEGER DEFAULT 0,
-                 files      INTEGER DEFAULT 0,
-                 pages      INTEGER DEFAULT 0,
                  bandwidth  INTEGER DEFAULT 0,
                  status_2xx INTEGER DEFAULT 0,
                  status_3xx INTEGER DEFAULT 0,
@@ -64,8 +62,8 @@ mod tests {
     fn insert_hourly(conn: &Connection, date: &str, hour: i64, hits: i64, visits: i64) {
         conn.execute(
             "INSERT INTO hourly_stats
-             (date, hour, hits, visits, files, pages, bandwidth, status_2xx, status_3xx, status_4xx, status_5xx)
-             VALUES (?1, ?2, ?3, ?4, 1, 1, 100, 1, 0, 0, 0)",
+             (date, hour, hits, visits, bandwidth, status_2xx, status_3xx, status_4xx, status_5xx)
+             VALUES (?1, ?2, ?3, ?4, 100, 1, 0, 0, 0)",
             params![date, hour, hits, visits],
         )
         .expect("insert hourly row");

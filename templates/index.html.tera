@@ -10,14 +10,6 @@
     <span class="stat-value" title="{{ totals.hits_exact_fmt }}">{{ totals.hits_fmt }}</span>
     <span class="stat-label">Total Hits</span>
   </div>
-  <div class="stat-card stat-card--pages">
-    <span class="stat-value" title="{{ totals.pages_exact_fmt }}">{{ totals.pages_fmt }}</span>
-    <span class="stat-label">Total Pages</span>
-  </div>
-  <div class="stat-card stat-card--files">
-    <span class="stat-value" title="{{ totals.files_exact_fmt }}">{{ totals.files_fmt }}</span>
-    <span class="stat-label">Total Files</span>
-  </div>
   <div class="stat-card stat-card--visits">
     <span class="stat-value" title="{{ totals.visits_exact_fmt }}">{{ totals.visits_fmt }}</span>
     <span class="stat-label">Total Visits</span>
@@ -74,14 +66,6 @@
     <div class="mini-stat-card stat-card--hits">
       <span class="mini-stat-value" title="{{ yr.hits_exact_fmt }}">{{ yr.hits_fmt }}</span>
       <span class="mini-stat-label">Hits</span>
-    </div>
-    <div class="mini-stat-card stat-card--files">
-      <span class="mini-stat-value" title="{{ yr.files_exact_fmt }}">{{ yr.files_fmt }}</span>
-      <span class="mini-stat-label">Files</span>
-    </div>
-    <div class="mini-stat-card stat-card--pages">
-      <span class="mini-stat-value" title="{{ yr.pages_exact_fmt }}">{{ yr.pages_fmt }}</span>
-      <span class="mini-stat-label">Pages</span>
     </div>
     <div class="mini-stat-card stat-card--visits">
       <span class="mini-stat-value" title="{{ yr.visits_exact_fmt }}">{{ yr.visits_fmt }}</span>

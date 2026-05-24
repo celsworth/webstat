@@ -78,8 +78,6 @@ CREATE TABLE IF NOT EXISTS hourly_stats (
     hour       INTEGER NOT NULL,
     hits       INTEGER DEFAULT 0,
     visits     INTEGER DEFAULT 0,
-    files      INTEGER DEFAULT 0,
-    pages      INTEGER DEFAULT 0,
     bandwidth  INTEGER DEFAULT 0,
     status_2xx INTEGER DEFAULT 0,
     status_3xx INTEGER DEFAULT 0,

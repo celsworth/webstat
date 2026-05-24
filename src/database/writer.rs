@@ -62,12 +62,11 @@ impl Database {
         // hourly_stats
         {
             let sql = "INSERT INTO hourly_stats \
-                       (date,hour,hits,visits,files,pages,bandwidth,\
+                       (date,hour,hits,visits,bandwidth,\
                         status_2xx,status_3xx,status_4xx,status_5xx) \
-                       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) \
+                       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9) \
                        ON CONFLICT (date,hour) DO UPDATE SET \
                          hits=hits+excluded.hits, visits=visits+excluded.visits, \
-                         files=files+excluded.files, pages=pages+excluded.pages, \
                          bandwidth=bandwidth+excluded.bandwidth, \
                          status_2xx=status_2xx+excluded.status_2xx, \
                          status_3xx=status_3xx+excluded.status_3xx, \
@@ -82,8 +81,6 @@ impl Database {
                         *hr as i64,
                         s.hits as i64,
                         s.visits as i64,
-                        s.files as i64,
-                        s.pages as i64,
                         s.bandwidth as i64,
                         s.status_2xx as i64,
                         s.status_3xx as i64,
