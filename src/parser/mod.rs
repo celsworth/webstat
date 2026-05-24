@@ -6,7 +6,7 @@ use std::ops::Range;
 
 #[derive(Debug)]
 pub struct OwnedLogEntry {
-    raw: Box<str>,
+    raw: String,
 
     ip: Range<usize>,
     time: Range<usize>,
@@ -23,7 +23,7 @@ pub struct OwnedLogEntry {
 
 impl OwnedLogEntry {
     pub fn parse(line: String) -> Option<Self> {
-        parse_line(&line)
+        parse_line(line)
     }
 
     #[inline]
@@ -66,8 +66,8 @@ impl OwnedLogEntry {
 ///   IP IDENT USER [TIMESTAMP] "REQUEST" STATUS BYTES "REFERER" "UA"
 ///
 /// Returns `None` for blank or malformed lines.
-pub fn parse_line(line: &str) -> Option<OwnedLogEntry> {
-    let raw: Box<str> = line.into();
+pub fn parse_line(line: impl Into<String>) -> Option<OwnedLogEntry> {
+    let line = line.into();
     let b = line.as_bytes();
     let len = b.len();
 
@@ -149,7 +149,7 @@ pub fn parse_line(line: &str) -> Option<OwnedLogEntry> {
     let req_b = &b[request.clone()];
 
     // reject non-ASCII characters in request
-    if req_b.iter().any(|&c| c > 127) {
+    if !req_b.is_ascii() {
         return None;
     }
 
@@ -279,7 +279,7 @@ pub fn parse_line(line: &str) -> Option<OwnedLogEntry> {
     let proto = request.start + j..request.end;
 
     Some(OwnedLogEntry {
-        raw,
+        raw: line,
         ip,
         time,
         method,
