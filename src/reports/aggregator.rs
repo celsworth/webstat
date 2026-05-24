@@ -256,6 +256,7 @@ pub(super) fn overall_summary(
         .collect();
 
     let status_codes = status_codes_all(conn, compact_counts)?;
+    let all_time_available = all_time_visitor_count(conn)? > 0;
 
     Ok(OverallSummary {
         yearly_rows,
@@ -263,6 +264,7 @@ pub(super) fn overall_summary(
         top_countries,
         status_codes,
         totals,
+        all_time_available,
     })
 }
 

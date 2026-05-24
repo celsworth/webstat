@@ -345,15 +345,17 @@ impl Database {
 
     /// Finalize a completed month: populate all_time_ips and yearly_unique_ips,
     /// prune monthly tables to top_n rows, mark month complete in meta.
-    pub fn finalize_month(&mut self, period: &str, top_n: usize) -> Result<()> {
+    pub fn finalize_month(&mut self, period: &str, top_n: usize, enable_all_time_unique_hosts: bool) -> Result<()> {
         let tx = self.conn.transaction()?;
 
         let like_pattern = format!("{}-%", period);
-        tx.execute(
-            "INSERT OR IGNORE INTO all_time_ips (host_kind,host_hi,host_lo,host_text) \
-             SELECT ip_kind, ip_hi, ip_lo, '' FROM daily_unique_ips WHERE date LIKE ?1",
-            params![like_pattern],
-        )?;
+        if enable_all_time_unique_hosts {
+            tx.execute(
+                "INSERT OR IGNORE INTO all_time_ips (host_kind,host_hi,host_lo,host_text) \
+                 SELECT ip_kind, ip_hi, ip_lo, '' FROM daily_unique_ips WHERE date LIKE ?1",
+                params![like_pattern],
+            )?;
+        }
 
         let year = &period[..4];
         tx.execute(

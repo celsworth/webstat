@@ -103,6 +103,7 @@ mod tests {
                 enable_top_hosts: true,
                 enable_top_refs: true,
                 enable_top_agents: true,
+                enable_all_time_unique_hosts: true,
                 rule_set,
             },
         )
@@ -121,6 +122,7 @@ mod tests {
                 enable_top_hosts: true,
                 enable_top_refs: true,
                 enable_top_agents,
+                enable_all_time_unique_hosts: true,
                 rule_set: None,
             },
         )

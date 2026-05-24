@@ -244,6 +244,7 @@ fn run_processing(cfg: &config::Config) -> Result<()> {
             enable_top_hosts: cfg.enable_top_hosts,
             enable_top_refs: cfg.enable_top_refs,
             enable_top_agents: cfg.enable_top_agents,
+            enable_all_time_unique_hosts: cfg.enable_all_time_unique_hosts,
             rule_set,
         },
     );

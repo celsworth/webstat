@@ -304,6 +304,7 @@ struct OverallSummary {
     top_countries: Vec<TopCountryRow>,
     status_codes: Vec<StatusRow>,
     totals: TotalsView,
+    all_time_available: bool,
 }
 
 pub fn generate_html(cfg: &Config) -> Result<()> {
@@ -425,6 +426,7 @@ fn render_index_page(
     page_ctx.insert("yearly_rows", &overall.yearly_rows);
     page_ctx.insert("months", months);
     page_ctx.insert("totals", &overall.totals);
+    page_ctx.insert("all_time_available", &overall.all_time_available);
     page_ctx.insert("status_codes", &overall.status_codes);
     page_ctx.insert("top_countries", &overall.top_countries);
     page_ctx.insert("top_agents", &overall.top_agents);

@@ -26,6 +26,9 @@ pub struct Config {
     pub enable_top_refs: bool,
     /// Enable Top Agents tracking.
     pub enable_top_agents: bool,
+    /// Enable all-time unique hosts (all_time_ips) tracking.
+    /// Disable to save space — the all_time_ips table can grow very large.
+    pub enable_all_time_unique_hosts: bool,
     /// Run SQLite VACUUM after pruning top tables.
     pub vacuum_after_prune: bool,
     pub bot_filter: bool,
@@ -52,6 +55,7 @@ impl Default for Config {
             enable_top_hosts: true,
             enable_top_refs: true,
             enable_top_agents: true,
+            enable_all_time_unique_hosts: true,
             vacuum_after_prune: false,
             bot_filter: true,
             checkpoint_minutes: 0,

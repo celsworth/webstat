@@ -37,6 +37,11 @@ enable_top_hosts: true
 enable_top_refs: true
 enable_top_agents: true
 
+# Track all-time unique hosts in the all_time_ips table.
+# Disable to save space — this table can grow very large on high-traffic sites.
+# When disabled, the Unique Sites box is hidden on the overview report.
+enable_all_time_unique_hosts: true
+
 # Rule-based filtering
 # Rules are evaluated in the parser thread in order; the first matching rule wins.
 # See RULES.md for full field/operator reference.

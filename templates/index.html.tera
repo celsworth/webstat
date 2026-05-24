@@ -14,10 +14,10 @@
     <span class="stat-value" title="{{ totals.visits_exact_fmt }}">{{ totals.visits_fmt }}</span>
     <span class="stat-label">Total Visits</span>
   </div>
-  <div class="stat-card stat-card--sites">
+  {% if all_time_available %}<div class="stat-card stat-card--sites">
     <span class="stat-value" title="{{ totals.visitors_exact_fmt }}">{{ totals.visitors_fmt }}</span>
     <span class="stat-label">Unique Sites</span>
-  </div>
+  </div>{% endif %}
   <div class="stat-card stat-card--bandwidth">
     <span class="stat-value">{{ totals.bandwidth_fmt }}</span>
     <span class="stat-label">Bandwidth</span>

@@ -46,6 +46,7 @@ webstat \
 | `--enable-top-urls <true\|false>` | |
 | `--enable-top-hosts <true\|false>` | |
 | `--enable-top-refs <true\|false>` | |
+| `--enable-all-time-unique-hosts <true\|false>` | |
 | `--bot-filter <true\|false>` | |
 | `--site-host <HOST>` | |
 
@@ -78,6 +79,7 @@ cp webstat.yml.example webstat.yml
 | `enable_top_hosts` | `true` | |
 | `enable_top_refs` | `true` | |
 | `enable_top_agents` | `true` | |
+| `enable_all_time_unique_hosts` | `true` | Populate the `all_time_ips` table for the Unique Sites overview stat. Disable to save space on high-traffic sites; hides the stat box when empty. |
 
 ### Rules
 
