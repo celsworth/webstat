@@ -9,7 +9,7 @@ use crate::aggregator::messages::{
     pop_blocking, push_blocking, LoaderMsg, ParsedEntry, ParserMsg,
 };
 use crate::aggregator::{ProgressState, PARSER_BATCH_SIZE};
-use crate::parser::OwnedLogEntry;
+use crate::parser::LogEntry;
 use crate::rules::{Action, HideMask, SharedRuleSet};
 use crate::ua::UaParser;
 use rand::Rng as _;
@@ -44,7 +44,7 @@ pub(crate) fn run_parser(
             } => {
                 current_offset = offset;
                 for (line, line_start) in batch {
-                    if let Some(entry) = OwnedLogEntry::parse(line) {
+                    if let Some(entry) = LogEntry::parse(line) {
                         let ua_result = ua.parse(entry.user_agent());
                         if bot_filter && ua_result.is_bot {
                             bot_filtered += 1;

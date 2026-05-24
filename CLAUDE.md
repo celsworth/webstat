@@ -13,8 +13,8 @@ cargo test
 
 - **`src/main.rs`** — CLI entry point (clap), subcommands, config loading
 - **`src/config.rs`** — YAML config parsing and path resolution
-- **`src/parser/mod.rs`** — combined-log-format line parser → `OwnedLogEntry`
-- **`src/parser/stage.rs`** — parser pipeline thread: converts raw strings to `OwnedLogEntry`, runs UA parsing and bot filtering; bots are dropped here and never reach the aggregator
+- **`src/parser/mod.rs`** — combined-log-format line parser → `LogEntry`
+- **`src/parser/stage.rs`** — parser pipeline thread: converts raw strings to `LogEntry`, runs UA parsing and bot filtering; bots are dropped here and never reach the aggregator
 - **`src/loader.rs`** — reads raw bytes, decompresses if needed, emits `LoaderMsg::Lines` batches
 - **`src/aggregator/mod.rs`** — `Processor` struct: orchestration, file discovery, resume planning, progress thread, pipeline entry point
 - **`src/aggregator/pipeline.rs`** — 3-stage Loader→Parser→Aggregator pipeline; aggregator runs on the calling thread
@@ -35,9 +35,10 @@ cargo test
 - **`src/database/visit_state.rs`** — visit state load/save
 - **`src/database/maintenance.rs`** — vacuum, meta key-value ops
 - **`src/progress.rs`** — `print_dir_progress`: the single progress-line formatter
+- **`src/ip.rs`** — `Ip` enum: IPv4 stored as `u32`, IPv6 as `u128`; used as hash key for geo lookups and daily-unique-IP sets
+- **`src/rules.rs`** — YAML-configured per-entry filtering rules (`ignore`, `hide`, `sample` actions); compiled from `RawRule` in config and evaluated in the parser thread
 - **`src/logging.rs`** — verbosity globals
 - **`src/method_proto.rs`** — HTTP method/protocol index arrays
-- **`src/util.rs`** — date/IP/URL utility helpers
 - **`src/reports.rs`** — HTML report generation via Tera templates
 - **`src/reports/aggregator.rs`** — report-specific SQL summarisation
 - **`src/reports/charts.rs`** — Chart.js dataset assembly
@@ -51,7 +52,7 @@ Loader thread  →(LoaderMsg)→  Parser thread  →(ParserMsg)→  Aggregator (
 ```
 
 - **Loader** reads files sequentially, decompresses if needed, emits `LoaderMsg::Lines` batches of `(String, offset)` pairs.
-- **Parser** calls `OwnedLogEntry::parse`, then `UaParser::parse` for each line. If `bot_filter` is enabled, bot entries are dropped immediately — they never enter the ring buffer or reach the aggregator. Non-bot entries are wrapped in `ParsedEntry { entry, ua_family }` and sent as `ParserMsg::Entries` batches.
+- **Parser** calls `LogEntry::parse`, then `UaParser::parse` for each line. If `bot_filter` is enabled, bot entries are dropped immediately — they never enter the ring buffer or reach the aggregator. Compiled `rules` (from config) are also evaluated here; entries can be ignored, hidden from top-N tables, or sampled. Non-bot entries are wrapped in `ParsedEntry { entry, ua_family }` and sent as `ParserMsg::Entries` batches.
 - **Aggregator** calls `aggregate_entry` for each `ParsedEntry`, updating `RunAccumulators`. It detects month boundaries and calls `finalize_and_advance_month` as needed.
 
 `UaParser` lives entirely in the parser thread; `Processor` does not own one.
@@ -78,7 +79,7 @@ When `finalize_month` runs, it computes and stores monthly and yearly distinct-I
 
 ## Top-N tables
 
-Top-N tables (`monthly_urls_hits`, `monthly_urls_bandwidth`, `monthly_hosts_hits`, `monthly_hosts_bandwidth`, `monthly_refs`, `monthly_agents`) accumulate exact counts during ingestion. `finalize_month` prunes each table to the top `top_n` rows per period via `DELETE … WHERE … NOT IN (SELECT … ORDER BY … LIMIT top_n)`.
+Top-N tables (`monthly_urls_hits`, `monthly_urls_bandwidth`, `monthly_sites_hits`, `monthly_sites_bandwidth`, `monthly_refs`, `monthly_agents`) accumulate exact counts during ingestion. `finalize_month` prunes each table to the top `top_n` rows per period via `DELETE … WHERE … NOT IN (SELECT … ORDER BY … LIMIT top_n)`. Each table can be individually disabled via config flags (`enable_top_urls`, `enable_top_sites`, `enable_top_refs`, `enable_top_agents`). All-time unique IP tracking (`all_time_ips` table) can be disabled via `enable_all_time_unique_sites` to save space.
 
 ## Resume / dedup system
 
@@ -99,6 +100,6 @@ The pipeline writes into `Arc<Atomic*>` counters (`files_done`, `bytes_done`, `l
 ## Key types
 
 - `FileResumePlan` — per-file plan produced by `resolve_resume_plan`; carries `compression: CompressionType`, offsets, fingerprints
-- `ParsedEntry` — output of the parser stage: `OwnedLogEntry` + `ua_family: Arc<str>`
+- `ParsedEntry` — output of the parser stage: `LogEntry` + `ua_family: Arc<str>`
 - `RunAccumulators` — in-memory aggregation buffers flushed to SQLite at checkpoints and end-of-run
 - `VisitStateKey` — `(ip_kind, ip_hi, ip_lo, ip_text)` used to track per-IP visit timestamps

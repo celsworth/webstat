@@ -1,14 +1,14 @@
 // Channel message types for the three-stage pipeline: LoaderMsg (loader→parser),
 // ParserMsg / ParsedEntry (parser→aggregator), and the push/pop blocking helpers.
 
-use crate::parser::OwnedLogEntry;
+use crate::parser::LogEntry;
 use crate::rules::HideMask;
 use std::sync::Arc;
 
 /// A parsed log entry with its UA family already resolved.
 /// Bot entries are filtered out in the parser stage and never reach the aggregator.
 pub(crate) struct ParsedEntry {
-    pub entry: OwnedLogEntry,
+    pub entry: LogEntry,
     pub ua_family: Arc<str>,
     /// Which top-N tables to exclude this entry from (zero = not hidden from anything).
     pub hidden: HideMask,

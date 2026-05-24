@@ -1,11 +1,11 @@
-// Pure log-format parser: converts a raw nginx combined-format line into an OwnedLogEntry,
+// Pure log-format parser: converts a raw nginx combined-format line into an LogEntry,
 // plus timestamp arithmetic for nginx time strings.
 // No pipeline, UA, or rule dependencies.
 
 use std::ops::Range;
 
 #[derive(Debug)]
-pub struct OwnedLogEntry {
+pub struct LogEntry {
     raw: String,
 
     ip: Range<usize>,
@@ -21,7 +21,7 @@ pub struct OwnedLogEntry {
     pub bytes: u64,
 }
 
-impl OwnedLogEntry {
+impl LogEntry {
     pub fn parse(line: String) -> Option<Self> {
         parse_line(line)
     }
@@ -66,7 +66,7 @@ impl OwnedLogEntry {
 ///   IP IDENT USER [TIMESTAMP] "REQUEST" STATUS BYTES "REFERER" "UA"
 ///
 /// Returns `None` for blank or malformed lines.
-pub fn parse_line(line: impl Into<String>) -> Option<OwnedLogEntry> {
+pub fn parse_line(line: impl Into<String>) -> Option<LogEntry> {
     let line = line.into();
     let b = line.as_bytes();
     let len = b.len();
@@ -278,7 +278,7 @@ pub fn parse_line(line: impl Into<String>) -> Option<OwnedLogEntry> {
 
     let proto = request.start + j..request.end;
 
-    Some(OwnedLogEntry {
+    Some(LogEntry {
         raw: line,
         ip,
         time,

@@ -7,7 +7,7 @@ use anyhow::{bail, Context, Result};
 use regex::Regex;
 use serde::Deserialize;
 
-use crate::parser::OwnedLogEntry;
+use crate::parser::LogEntry;
 
 // ── Raw config types (YAML deserialization) ────────────────────────────────
 
@@ -497,7 +497,7 @@ impl RuleSet {
     }
 
     /// Returns the (name, action) from the first matching rule, or `None`.
-    pub fn apply(&self, entry: &OwnedLogEntry) -> Option<(&Arc<str>, &Action)> {
+    pub fn apply(&self, entry: &LogEntry) -> Option<(&Arc<str>, &Action)> {
         self.0
             .iter()
             .find(|rule| rule.matches(entry))
@@ -507,7 +507,7 @@ impl RuleSet {
 
 // ── Evaluation ─────────────────────────────────────────────────────────────
 
-impl OwnedLogEntry {
+impl LogEntry {
     #[inline]
     fn rule_str(&self, field: Field) -> &str {
         match field {
@@ -533,7 +533,7 @@ impl OwnedLogEntry {
 
 impl Condition {
     #[inline]
-    pub fn matches(&self, entry: &OwnedLogEntry) -> bool {
+    pub fn matches(&self, entry: &LogEntry) -> bool {
         match self {
             Condition::Eq { field, value } => entry.rule_str(*field) == value.as_str(),
             Condition::Neq { field, value } => entry.rule_str(*field) != value.as_str(),
@@ -576,7 +576,7 @@ impl Condition {
 
 impl Rule {
     #[inline]
-    pub fn matches(&self, entry: &OwnedLogEntry) -> bool {
+    pub fn matches(&self, entry: &LogEntry) -> bool {
         match self.mode {
             MatchMode::All => self.conditions.iter().all(|c| c.matches(entry)),
             MatchMode::Any => self.conditions.iter().any(|c| c.matches(entry)),
@@ -593,8 +593,8 @@ mod tests {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    fn make_entry(line: &str) -> OwnedLogEntry {
-        OwnedLogEntry::parse(line.to_string()).expect("test entry must parse")
+    fn make_entry(line: &str) -> LogEntry {
+        LogEntry::parse(line.to_string()).expect("test entry must parse")
     }
 
     fn single(field: &str, op: &str, value: serde_yaml::Value) -> RuleSet {
@@ -627,7 +627,7 @@ mod tests {
         serde_yaml::Value::Sequence(items.iter().map(|n| num(*n)).collect())
     }
 
-    fn is_ignored(rs: &RuleSet, entry: &OwnedLogEntry) -> bool {
+    fn is_ignored(rs: &RuleSet, entry: &LogEntry) -> bool {
         matches!(rs.apply(entry), Some((_, Action::Ignore)))
     }
 
