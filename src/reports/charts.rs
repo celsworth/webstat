@@ -24,8 +24,8 @@ pub(super) fn daily_chart(daily: &[DailyRow]) -> Result<String> {
       "data": {
         "labels": labels,
         "datasets": [
-          { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 2, "fill": false }
+          { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2, "order": 1 },
+          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 2, "fill": false, "order": 0 }
         ]
       },
       "options": dual_axis_options("Daily Activity")
@@ -68,8 +68,8 @@ pub(super) fn hourly_chart(hourly: &[HourlyRow]) -> Result<String> {
       "data": {
         "labels": labels,
         "datasets": [
-          { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 2, "fill": false }
+          { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2, "order": 1 },
+          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 2, "fill": false, "order": 0 }
         ]
       },
       "options": dual_axis_options("Hourly Distribution")
@@ -93,8 +93,8 @@ pub(super) fn monthly_overview_chart(monthly: &[MonthRow]) -> Result<String> {
       "data": {
         "labels": labels,
         "datasets": [
-          { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 3, "fill": false }
+          { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2, "order": 1 },
+          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 3, "fill": false, "order": 0 }
         ]
       },
       "options": dual_axis_options("Monthly Overview")
@@ -137,8 +137,8 @@ pub(super) fn yearly_overview_chart(yearly: &[YearAggregateRow]) -> Result<Strin
       "data": {
         "labels": labels,
         "datasets": [
-          { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 3, "fill": false }
+          { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2, "order": 1 },
+          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 3, "fill": false, "order": 0 }
         ]
       },
       "options": dual_axis_options("Yearly Overview")
