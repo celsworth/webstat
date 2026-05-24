@@ -99,7 +99,6 @@ pub fn parse_ipv4_u32(ip: &str) -> Option<u32> {
 }
 
 /// Parse an IPv6 address string into a `u128`.
-#[inline]
 pub fn parse_ipv6_u128(ip: &str) -> Option<u128> {
     ip.parse::<Ipv6Addr>().ok().map(u128::from)
 }

@@ -1,6 +1,6 @@
 // HTTP method and protocol index constants and string-label arrays used for per-entry accounting.
 
-pub const METHOD_COUNT: usize = 8;
+pub const METHOD_COUNT: usize = 9;
 pub const METHOD_GET: usize = 0;
 pub const METHOD_POST: usize = 1;
 pub const METHOD_HEAD: usize = 2;
@@ -8,10 +8,11 @@ pub const METHOD_PUT: usize = 3;
 pub const METHOD_DELETE: usize = 4;
 pub const METHOD_OPTIONS: usize = 5;
 pub const METHOD_PATCH: usize = 6;
-pub const METHOD_OTHER: usize = 7;
+pub const METHOD_CONNECT: usize = 7;
+pub const METHOD_OTHER: usize = 8;
 
 pub const METHOD_NAMES: [&str; METHOD_COUNT] = [
-    "GET", "POST", "HEAD", "PUT", "DELETE", "OPTIONS", "PATCH", "other",
+    "GET", "POST", "HEAD", "PUT", "DELETE", "OPTIONS", "PATCH", "CONNECT", "other",
 ];
 
 pub const PROTO_COUNT: usize = 5;
@@ -33,11 +34,11 @@ pub fn method_index(method: &str) -> usize {
         b"DELETE" => METHOD_DELETE,
         b"OPTIONS" => METHOD_OPTIONS,
         b"PATCH" => METHOD_PATCH,
+        b"CONNECT" => METHOD_CONNECT,
         _ => METHOD_OTHER,
     }
 }
 
-/// Strips the "HTTP/" prefix (e.g. "HTTP/1.1" → "1.1") then classifies.
 #[inline]
 pub fn proto_index(proto: &str) -> usize {
     match proto.as_bytes() {
@@ -62,11 +63,11 @@ mod tests {
         assert_eq!(method_index("DELETE"), METHOD_DELETE);
         assert_eq!(method_index("OPTIONS"), METHOD_OPTIONS);
         assert_eq!(method_index("PATCH"), METHOD_PATCH);
+        assert_eq!(method_index("CONNECT"), METHOD_CONNECT);
     }
 
     #[test]
     fn method_index_unknown_maps_to_other() {
-        assert_eq!(method_index("CONNECT"), METHOD_OTHER);
         assert_eq!(method_index("TRACE"), METHOD_OTHER);
         assert_eq!(method_index("get"), METHOD_OTHER); // case-sensitive
         assert_eq!(method_index(""), METHOD_OTHER);
@@ -100,6 +101,7 @@ mod tests {
         assert_eq!(METHOD_NAMES[METHOD_DELETE], "DELETE");
         assert_eq!(METHOD_NAMES[METHOD_OPTIONS], "OPTIONS");
         assert_eq!(METHOD_NAMES[METHOD_PATCH], "PATCH");
+        assert_eq!(METHOD_NAMES[METHOD_CONNECT], "CONNECT");
         assert_eq!(METHOD_NAMES[METHOD_OTHER], "other");
         assert_eq!(METHOD_NAMES.len(), METHOD_COUNT);
     }
@@ -129,6 +131,7 @@ mod tests {
         assert!(METHOD_DELETE < METHOD_COUNT);
         assert!(METHOD_OPTIONS < METHOD_COUNT);
         assert!(METHOD_PATCH < METHOD_COUNT);
+        assert!(METHOD_CONNECT < METHOD_COUNT);
         assert!(METHOD_OTHER < METHOD_COUNT);
 
         assert!(PROTO_1_0 < PROTO_COUNT);
@@ -148,6 +151,7 @@ mod tests {
             METHOD_DELETE,
             METHOD_OPTIONS,
             METHOD_PATCH,
+            METHOD_CONNECT,
             METHOD_OTHER,
         ];
         let unique: std::collections::HashSet<usize> = indices.iter().copied().collect();
