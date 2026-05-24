@@ -13,23 +13,23 @@ cargo test
 
 - **`src/main.rs`** — CLI entry point (clap), subcommands, config loading
 - **`src/config.rs`** — YAML config parsing and path resolution
-- **`src/parser/mod.rs`** — combined-log-format line parser → `LogEntry`
-- **`src/parser/stage.rs`** — parser pipeline thread: converts raw strings to `LogEntry`, runs UA parsing and bot filtering; bots are dropped here and never reach the aggregator
+- **`src/parser/mod.rs`** — combined-log-format line parser → `LogEntry`; plus timestamp arithmetic; no pipeline, UA, or rule dependencies
+- **`src/parser/stage.rs`** — parser pipeline thread: receives raw lines from the loader, parses them, applies UA classification, bot filtering, and rules, then forwards batches to the aggregator
 - **`src/loader.rs`** — reads raw bytes, decompresses if needed, emits `LoaderMsg::Lines` batches
-- **`src/aggregator/mod.rs`** — `Processor` struct: orchestration, file discovery, resume planning, progress thread, pipeline entry point
-- **`src/aggregator/pipeline.rs`** — 3-stage Loader→Parser→Aggregator pipeline; aggregator runs on the calling thread
+- **`src/aggregator/mod.rs`** — `Processor` struct: top-level orchestration — file discovery, resume planning, progress thread, checkpoint scheduling, and the public `process_globs` entry point
+- **`src/aggregator/pipeline.rs`** — 3-stage Loader→Parser→Aggregator pipeline; aggregator runs on the calling thread; drives checkpointing and file-done accounting
 - **`src/aggregator/aggregation.rs`** — per-entry aggregation into `RunAccumulators`
-- **`src/aggregator/flush.rs`** — flushes `RunAccumulators` to SQLite; calls `finalize_month` on month boundaries
-- **`src/aggregator/messages.rs`** — `LoaderMsg`, `ParserMsg`, `ParsedEntry` channel types
+- **`src/aggregator/flush.rs`** — flushes `RunAccumulators` to SQLite; handles month-boundary finalisation and saves parse/visit state after each checkpoint
+- **`src/aggregator/messages.rs`** — `LoaderMsg`, `ParserMsg`, `ParsedEntry` channel types; push/pop blocking helpers
 - **`src/aggregator/resume.rs`** — per-file skip/resume decisions using fingerprints and stored state
 - **`src/aggregator/progress_seed.rs`** — seeds initial progress counters from DB state
 - **`src/accumulators.rs`** — `HourlyStats`, `HourlyAcc`, `HourlyMap` types
-- **`src/run_accumulators.rs`** — `RunAccumulators`: in-memory aggregation buffers (hourly, urls, hosts, refs, agents, countries, status codes, etc.)
+- **`src/run_accumulators.rs`** — `RunAccumulators`: in-memory aggregation buffers (hourly, URLs, hosts, refs, agents, countries, IPs, status codes, etc.) flushed to SQLite at checkpoints and end-of-run
 - **`src/compression.rs`** — `CompressionType` enum (`Plain`, `Gz`, `Bz2`) and extension detection
 - **`src/fingerprint.rs`** — file identity (head hash, logical size); decompressed/compressed head fingerprints
 - **`src/geo.rs`** — GeoIP lookup and cache
 - **`src/ua.rs`** — UA family classification and bot detection; runs in the parser thread
-- **`src/database.rs`** — SQLite schema initialisation and connection wrapper
+- **`src/database.rs`** — SQLite connection wrapper: schema initialisation, WAL mode, and module re-exports
 - **`src/database/writer.rs`** — `flush_data`, `finalize_month`, per-period pruning
 - **`src/database/parse_state.rs`** — parse state load/save
 - **`src/database/visit_state.rs`** — visit state load/save
@@ -37,7 +37,7 @@ cargo test
 - **`src/progress.rs`** — `print_dir_progress`: the single progress-line formatter
 - **`src/ip.rs`** — `Ip` enum: IPv4 stored as `u32`, IPv6 as `u128`; used as hash key for geo lookups and daily-unique-IP sets
 - **`src/rules.rs`** — YAML-configured per-entry filtering rules (`ignore`, `hide`, `sample` actions); compiled from `RawRule` in config and evaluated in the parser thread
-- **`src/logging.rs`** — verbosity globals
+- **`src/logging.rs`** — verbosity control: atomic log-level flag and helpers that interleave safely with the progress line
 - **`src/method_proto.rs`** — HTTP method/protocol index arrays
 - **`src/reports.rs`** — HTML report generation via Tera templates
 - **`src/reports/aggregator.rs`** — report-specific SQL summarisation

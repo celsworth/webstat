@@ -1,4 +1,4 @@
-// Pure log-format parser: converts a raw nginx combined-format line into an LogEntry,
+// Pure log-format parser: converts a raw nginx combined-format line into a LogEntry,
 // plus timestamp arithmetic for nginx time strings.
 // No pipeline, UA, or rule dependencies.
 
