@@ -31,10 +31,11 @@ vacuum_after_prune: false
 # Exclude known bots/crawlers from main statistics
 bot_filter: true
 
-# Track top URLs/hosts/referrers (disable to go faster and reduce processing CPU/memory if not required)
+# Track top URLs/hosts/referrers/agents (disable to go faster and reduce processing CPU/memory if not required)
 enable_top_urls: true
 enable_top_hosts: true
 enable_top_refs: true
+enable_top_agents: true
 
 # Rule-based filtering
 # Rules are evaluated in the parser thread in order; the first matching rule wins.

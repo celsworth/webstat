@@ -51,6 +51,7 @@ mod tests {
                 enable_top_urls: cfg.enable_top_urls,
                 enable_top_hosts: cfg.enable_top_hosts,
                 enable_top_refs: cfg.enable_top_refs,
+                enable_top_agents: cfg.enable_top_agents,
                 rule_set: if cfg.rules.is_empty() {
                     None
                 } else {
@@ -151,6 +152,7 @@ mod tests {
             enable_top_urls: true,
             enable_top_hosts: true,
             enable_top_refs: true,
+            enable_top_agents: true,
             vacuum_after_prune: false,
             bot_filter: true,
             checkpoint_minutes: 0,
@@ -257,6 +259,7 @@ mod tests {
             enable_top_urls: true,
             enable_top_hosts: true,
             enable_top_refs: true,
+            enable_top_agents: true,
             vacuum_after_prune: false,
             bot_filter: true,
             checkpoint_minutes: 0,

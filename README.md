@@ -77,6 +77,7 @@ cp webstat.yml.example webstat.yml
 | `enable_top_urls` | `true` | |
 | `enable_top_hosts` | `true` | |
 | `enable_top_refs` | `true` | |
+| `enable_top_agents` | `true` | |
 
 ### Rules
 

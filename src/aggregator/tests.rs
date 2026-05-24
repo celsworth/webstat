@@ -102,7 +102,26 @@ mod tests {
                 enable_top_urls: true,
                 enable_top_hosts: true,
                 enable_top_refs: true,
+                enable_top_agents: true,
                 rule_set,
+            },
+        )
+    }
+
+    fn new_processor_with_agents_flag(db_path: &Path, enable_top_agents: bool) -> Processor {
+        let db = Database::open(db_path.to_str().expect("db path utf-8")).expect("open db");
+        Processor::new(
+            db,
+            Geo::new(None),
+            ProcessorConfig {
+                top_n: 20,
+                vacuum_after_prune: false,
+                bot_filter: false,
+                enable_top_urls: true,
+                enable_top_hosts: true,
+                enable_top_refs: true,
+                enable_top_agents,
+                rule_set: None,
             },
         )
     }
@@ -798,6 +817,91 @@ mod tests {
             )
             .expect("visible url hits");
         assert_eq!(visible_hits, 1, "non-hidden URL must appear in top URLs");
+    }
+
+    // ── enable_top_agents flag ────────────────────────────────────────────────
+
+    fn agent_log_lines() -> Vec<String> {
+        // Three entries with a recognisable UA; bot_filter is off so they go through.
+        let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+        (0..3)
+            .map(|i| {
+                format!(
+                    r#"1.2.3.{i} - - [08/May/2026:14:00:0{i} +0000] "GET /page.html HTTP/1.1" 200 100 "-" "{ua}""#
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn enable_top_agents_true_persists_agents_table() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let log_path = temp.path().join("agents.log");
+
+        write_plain_file(&log_path, &agent_log_lines());
+
+        let mut processor = new_processor_with_agents_flag(&db_path, true);
+        let processed = processor
+            .process_globs(log_path.to_str().unwrap())
+            .expect("process");
+        assert_eq!(processed, 3);
+
+        let conn = Connection::open(&db_path).expect("open db");
+        let agent_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM monthly_agents WHERE period = '2026-05'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count agent rows");
+        assert!(agent_rows > 0, "enable_top_agents=true must populate monthly_agents");
+
+        let total_hits: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(hits), 0) FROM monthly_agents WHERE period = '2026-05'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("sum agent hits");
+        assert_eq!(total_hits, 3, "all 3 entries should be counted in monthly_agents");
+    }
+
+    #[test]
+    fn enable_top_agents_false_skips_agents_table() {
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let log_path = temp.path().join("agents-off.log");
+
+        write_plain_file(&log_path, &agent_log_lines());
+
+        let mut processor = new_processor_with_agents_flag(&db_path, false);
+        let processed = processor
+            .process_globs(log_path.to_str().unwrap())
+            .expect("process");
+        assert_eq!(processed, 3);
+
+        let conn = Connection::open(&db_path).expect("open db");
+
+        // Hits must still be counted.
+        let hits: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(hits), 0) FROM hourly_stats",
+                [],
+                |row| row.get(0),
+            )
+            .expect("sum hourly hits");
+        assert_eq!(hits, 3, "hits must be recorded regardless of enable_top_agents");
+
+        // But monthly_agents must remain empty.
+        let agent_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM monthly_agents WHERE period = '2026-05'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count agent rows");
+        assert_eq!(agent_rows, 0, "enable_top_agents=false must not populate monthly_agents");
     }
 
     #[test]

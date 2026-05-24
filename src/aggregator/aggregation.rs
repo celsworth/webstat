@@ -229,7 +229,7 @@ impl Processor {
             }
         }
 
-        if !hide.contains(HideMask::AGENTS) {
+        if self.enable_top_agents && !hide.contains(HideMask::AGENTS) {
             if let Some(v) = run_acc.agents.get_mut(agent.as_ref()) {
                 *v += 1;
             } else {

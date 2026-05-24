@@ -72,6 +72,10 @@ struct Args {
     #[arg(long, global = true)]
     enable_top_refs: Option<bool>,
 
+    /// Enable top agents tracking (true/false, default: true)
+    #[arg(long, global = true)]
+    enable_top_agents: Option<bool>,
+
     /// Periodic database checkpoint interval in minutes (0 = disabled)
     #[arg(long, global = true)]
     checkpoint_minutes: Option<u64>,
@@ -175,6 +179,9 @@ fn build_config(args: &Args) -> Result<config::Config> {
     if let Some(v) = args.enable_top_refs {
         cfg.enable_top_refs = v;
     }
+    if let Some(v) = args.enable_top_agents {
+        cfg.enable_top_agents = v;
+    }
     if let Some(v) = args.checkpoint_minutes {
         cfg.checkpoint_minutes = v;
     }
@@ -236,6 +243,7 @@ fn run_processing(cfg: &config::Config) -> Result<()> {
             enable_top_urls: cfg.enable_top_urls,
             enable_top_hosts: cfg.enable_top_hosts,
             enable_top_refs: cfg.enable_top_refs,
+            enable_top_agents: cfg.enable_top_agents,
             rule_set,
         },
     );

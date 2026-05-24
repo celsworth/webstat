@@ -24,6 +24,8 @@ pub struct Config {
     pub enable_top_hosts: bool,
     /// Enable Top Referrers tracking.
     pub enable_top_refs: bool,
+    /// Enable Top Agents tracking.
+    pub enable_top_agents: bool,
     /// Run SQLite VACUUM after pruning top tables.
     pub vacuum_after_prune: bool,
     pub bot_filter: bool,
@@ -49,6 +51,7 @@ impl Default for Config {
             enable_top_urls: true,
             enable_top_hosts: true,
             enable_top_refs: true,
+            enable_top_agents: true,
             vacuum_after_prune: false,
             bot_filter: true,
             checkpoint_minutes: 0,

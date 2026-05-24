@@ -78,6 +78,7 @@ pub struct Processor {
     enable_top_urls: bool,
     enable_top_hosts: bool,
     enable_top_refs: bool,
+    enable_top_agents: bool,
     rule_set: Option<SharedRuleSet>,
     checkpoint_every: Option<Duration>,
     time_cache: AHashMap<u32, (Arc<str>, Arc<str>)>,
@@ -95,6 +96,7 @@ pub struct ProcessorConfig {
     pub enable_top_urls: bool,
     pub enable_top_hosts: bool,
     pub enable_top_refs: bool,
+    pub enable_top_agents: bool,
     pub rule_set: Option<SharedRuleSet>,
 }
 
@@ -109,6 +111,7 @@ impl Processor {
             enable_top_urls: config.enable_top_urls,
             enable_top_hosts: config.enable_top_hosts,
             enable_top_refs: config.enable_top_refs,
+            enable_top_agents: config.enable_top_agents,
             rule_set: config.rule_set,
             checkpoint_every: None,
             time_cache: AHashMap::with_capacity(8_192),
