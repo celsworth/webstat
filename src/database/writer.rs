@@ -18,7 +18,7 @@ pub struct FlushData<'a> {
     pub host_geo: &'a AHashMap<String, (Arc<str>, Arc<str>)>,
     pub refs: &'a AHashMap<String, u64>,
     pub agents: &'a AHashMap<String, u64>,
-    pub daily_ips: &'a AHashMap<String, AHashSet<Ip>>,
+    pub daily_ips: &'a AHashMap<Arc<str>, AHashSet<Ip>>,
     pub countries: &'a AHashMap<String, u64>,
     pub status_codes: &'a AHashMap<u16, u64>,
     pub method_counts: &'a [u64],
@@ -193,7 +193,7 @@ impl Database {
             for (date, ips) in data.daily_ips {
                 for ip in ips {
                     stmt.execute(params![
-                        date,
+                        date.as_ref(),
                         ip.kind() as i64,
                         ip.hi() as i64,
                         ip.lo() as i64

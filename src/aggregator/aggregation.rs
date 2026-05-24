@@ -205,7 +205,7 @@ impl Processor {
         if let Some(ip) = parsed_ip {
             run_acc
                 .daily_ips
-                .entry(date.to_string())
+                .entry(Arc::clone(&date))
                 .or_default()
                 .insert(ip);
         }

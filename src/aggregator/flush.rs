@@ -114,18 +114,22 @@ fn pretrim_hits_bw_map(map: &mut ahash::AHashMap<String, (u64, u64)>, top_n: usi
     if map.len() <= top_n {
         return;
     }
-    let mut by_hits: Vec<(String, u64)> = map.iter().map(|(k, &(h, _))| (k.clone(), h)).collect();
-    by_hits.sort_unstable_by_key(|a| std::cmp::Reverse(a.1));
-    let mut by_bw: Vec<(String, u64)> = map.iter().map(|(k, &(_, b))| (k.clone(), b)).collect();
-    by_bw.sort_unstable_by_key(|a| std::cmp::Reverse(a.1));
+    let n = top_n.min(map.len());
+    let mut entries: Vec<(String, u64, u64)> =
+        map.iter().map(|(k, &(h, b))| (k.clone(), h, b)).collect();
 
-    let mut keep: ahash::AHashSet<String> = ahash::AHashSet::with_capacity(top_n * 2);
-    for (k, _) in by_hits.into_iter().take(top_n) {
-        keep.insert(k);
+    entries.sort_unstable_by_key(|a| std::cmp::Reverse(a.1));
+    let mut keep: ahash::AHashSet<String> = ahash::AHashSet::with_capacity(n * 2);
+    for (k, _, _) in &entries[..n] {
+        keep.insert(k.clone());
     }
-    for (k, _) in by_bw.into_iter().take(top_n) {
-        keep.insert(k);
+
+    // O(n) average: partition so entries[..n] hold the top-n by bandwidth.
+    entries.select_nth_unstable_by_key(n - 1, |a| std::cmp::Reverse(a.2));
+    for (k, _, _) in &entries[..n] {
+        keep.insert(k.clone());
     }
+
     map.retain(|k, _| keep.contains(k.as_str()));
 }
 
@@ -138,4 +142,101 @@ fn pretrim_count_map(map: &mut ahash::AHashMap<String, u64>, top_n: usize) {
     entries.sort_unstable_by_key(|a| std::cmp::Reverse(a.1));
     let keep: ahash::AHashSet<String> = entries.into_iter().take(top_n).map(|(k, _)| k).collect();
     map.retain(|k, _| keep.contains(k.as_str()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_hits_bw(pairs: &[(&str, u64, u64)]) -> ahash::AHashMap<String, (u64, u64)> {
+        pairs.iter().map(|&(k, h, b)| (k.to_string(), (h, b))).collect()
+    }
+
+    fn make_counts(pairs: &[(&str, u64)]) -> ahash::AHashMap<String, u64> {
+        pairs.iter().map(|&(k, v)| (k.to_string(), v)).collect()
+    }
+
+    fn sorted_keys(map: &ahash::AHashMap<String, (u64, u64)>) -> Vec<String> {
+        let mut v: Vec<_> = map.keys().cloned().collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn hits_bw_no_op_when_at_or_below_top_n() {
+        let mut map = make_hits_bw(&[("a", 10, 1), ("b", 20, 2)]);
+        pretrim_hits_bw_map(&mut map, 2);
+        assert_eq!(map.len(), 2);
+        pretrim_hits_bw_map(&mut map, 5);
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn hits_bw_drops_entry_low_on_both() {
+        // d is bottom by both hits and bw; all others are top-2 by one criterion
+        // hits top-2: a(100), b(90); bw top-2: a(100), b(90); d(1,1) dropped
+        let mut map = make_hits_bw(&[("a", 100, 100), ("b", 90, 90), ("c", 5, 5), ("d", 1, 1)]);
+        pretrim_hits_bw_map(&mut map, 2);
+        assert_eq!(sorted_keys(&map), ["a", "b"]);
+    }
+
+    #[test]
+    fn hits_bw_high_bw_entry_kept_despite_low_hits() {
+        // c has low hits but top bw → saved; d is bottom on both → dropped
+        // hits top-2: a(100), b(90); bw top-2: c(200), b(20); union: a,b,c
+        let mut map =
+            make_hits_bw(&[("a", 100, 10), ("b", 90, 20), ("c", 5, 200), ("d", 3, 1)]);
+        pretrim_hits_bw_map(&mut map, 2);
+        assert_eq!(sorted_keys(&map), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn hits_bw_high_hits_entry_kept_despite_low_bw() {
+        // c has low bw but top hits → saved; d is bottom on both → dropped
+        // hits top-2: c(200), b(20); bw top-2: a(100), b(90); union: a,b,c
+        let mut map =
+            make_hits_bw(&[("a", 10, 100), ("b", 20, 90), ("c", 200, 5), ("d", 1, 3)]);
+        pretrim_hits_bw_map(&mut map, 2);
+        assert_eq!(sorted_keys(&map), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn hits_bw_keeps_union_of_top_n_by_hits_and_bw() {
+        // hits ranking: b(50) > a(40) > d(30) > c(10)  → top-2: b, a
+        // bw   ranking: c(200) > d(150) > a(100) > b(5) → top-2: c, d
+        // union: a, b, c, d — all four kept; e(1,1) dropped
+        let mut map = make_hits_bw(&[
+            ("a", 40, 100),
+            ("b", 50, 5),
+            ("c", 10, 200),
+            ("d", 30, 150),
+            ("e", 1, 1),
+        ]);
+        pretrim_hits_bw_map(&mut map, 2);
+        assert_eq!(sorted_keys(&map), ["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn hits_bw_exact_top_n_overlap() {
+        // hits top-2: a(100), b(90); bw top-2: a(500), b(400) — same two entries
+        let mut map = make_hits_bw(&[("a", 100, 500), ("b", 90, 400), ("c", 1, 1)]);
+        pretrim_hits_bw_map(&mut map, 2);
+        assert_eq!(sorted_keys(&map), ["a", "b"]);
+    }
+
+    #[test]
+    fn count_map_no_op_when_at_or_below_top_n() {
+        let mut map = make_counts(&[("a", 1), ("b", 2)]);
+        pretrim_count_map(&mut map, 2);
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn count_map_keeps_top_n_by_count() {
+        let mut map = make_counts(&[("a", 5), ("b", 50), ("c", 20), ("d", 1)]);
+        pretrim_count_map(&mut map, 2);
+        let mut keys: Vec<_> = map.keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["b", "c"]);
+    }
 }

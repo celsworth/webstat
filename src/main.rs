@@ -1,16 +1,16 @@
 // CLI entry point: parses arguments with clap, loads config, and dispatches to subcommands.
 
 mod accumulators;
+mod aggregator;
 mod compression;
 mod config;
 mod database;
 mod fingerprint;
 mod geo;
 mod ip;
+mod loader;
 mod logging;
 mod method_proto;
-mod aggregator;
-mod loader;
 mod parser;
 mod progress;
 mod reports;
@@ -21,9 +21,9 @@ mod ua;
 use anyhow::{bail, Result};
 use clap::{ArgAction, Parser, Subcommand};
 
+use aggregator::{Processor, ProcessorConfig};
 use database::Database;
 use geo::Geo;
-use aggregator::{Processor, ProcessorConfig};
 
 /// Webstat — web access-log processor
 #[derive(Parser, Debug)]
@@ -143,12 +143,9 @@ fn build_config(args: &Args) -> Result<config::Config> {
         None
     };
 
-    let mut cfg = if let Some(path) = explicit_config {
-        config::load(path)?
-    } else if let Some(path) = auto_config {
-        config::load(path)?
-    } else {
-        config::Config::default()
+    let mut cfg = match explicit_config.or(auto_config) {
+        Some(path) => config::load(path)?,
+        None => config::Config::default(),
     };
 
     if let Some(v) = &args.site_name {

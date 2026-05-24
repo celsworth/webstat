@@ -1,6 +1,8 @@
 // RunAccumulators: in-memory aggregation buffers (hourly, URLs, hosts, refs, agents, countries,
 // IPs, status codes, etc.) flushed to SQLite at checkpoints and end-of-run.
 
+use std::sync::Arc;
+
 use ahash::{AHashMap, AHashSet};
 
 use crate::ip::Ip;
@@ -15,7 +17,7 @@ pub(crate) struct RunAccumulators {
     pub(crate) hosts: AHashMap<String, (u64, u64)>,
     pub(crate) refs: AHashMap<String, u64>,
     pub(crate) agents: AHashMap<String, u64>,
-    pub(crate) daily_ips: AHashMap<String, AHashSet<Ip>>,
+    pub(crate) daily_ips: AHashMap<Arc<str>, AHashSet<Ip>>,
     pub(crate) countries: AHashMap<String, u64>,
     pub(crate) status_codes: AHashMap<u16, u64>,
     pub(crate) method_counts: [u64; METHOD_COUNT],
@@ -151,7 +153,7 @@ mod tests {
     fn daily_ips_not_counted_in_is_empty() {
         let mut acc = RunAccumulators::new("2026-05".to_string());
         acc.daily_ips
-            .entry("2026-05-01".to_string())
+            .entry(Arc::from("2026-05-01"))
             .or_default()
             .insert(crate::ip::Ip::V4(0x01020304));
         // daily_ips does not affect is_empty (it's just a write buffer)

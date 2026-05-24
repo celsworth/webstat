@@ -4,6 +4,8 @@ use super::*;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::method_proto::{
         METHOD_COUNT, METHOD_GET, METHOD_POST, PROTO_1_1, PROTO_2_0, PROTO_COUNT,
@@ -213,12 +215,12 @@ mod tests {
         ips1.insert(ip1);
         ips1.insert(ip2);
         let mut daily1 = ahash::AHashMap::new();
-        daily1.insert("2026-05-01".to_string(), ips1);
+        daily1.insert(Arc::from("2026-05-01"), ips1);
 
         let mut ips2: AHashSet<crate::ip::Ip> = AHashSet::new();
         ips2.insert(ip1); // duplicate
         let mut daily2 = ahash::AHashMap::new();
-        daily2.insert("2026-05-01".to_string(), ips2);
+        daily2.insert(Arc::from("2026-05-01"), ips2);
 
         let empty_urls: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
         let empty_hosts: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
@@ -267,7 +269,7 @@ mod tests {
             ip_set.insert(ip);
         }
         let mut daily = ahash::AHashMap::new();
-        daily.insert(date.to_string(), ip_set);
+        daily.insert(Arc::from(date), ip_set);
         db.flush(crate::database::writer::FlushData {
             period,
             hourly: &ahash::AHashMap::new(),
@@ -300,7 +302,7 @@ mod tests {
         ips.insert(ip1);
         ips.insert(ip2);
         let mut daily = ahash::AHashMap::new();
-        daily.insert("2026-05-01".to_string(), ips);
+        daily.insert(Arc::from("2026-05-01"), ips);
 
         let empty_hosts: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
         let empty_geo: ahash::AHashMap<String, (std::sync::Arc<str>, std::sync::Arc<str>)> =
