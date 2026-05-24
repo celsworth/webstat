@@ -220,7 +220,7 @@ impl Processor {
             }
         }
 
-        if self.enable_top_hosts && !hide.contains(HideMask::HOSTS) {
+        if self.enable_top_sites && !hide.contains(HideMask::HOSTS) {
             if let Some(e) = run_acc.hosts.get_mut(ip) {
                 e.0 += 1;
                 e.1 += bytes;

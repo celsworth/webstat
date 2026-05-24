@@ -88,7 +88,7 @@ impl Processor {
         self.flush_run(run_acc, pending_parse_states, retired_parse_states)?;
         let old_month = run_acc.current_month.clone();
         if !old_month.is_empty() {
-            self.db.finalize_month(&old_month, self.top_n, self.enable_all_time_unique_hosts)?;
+            self.db.finalize_month(&old_month, self.top_n, self.enable_all_time_unique_sites)?;
             if old_month.len() >= 4 && new_month.len() >= 4 && old_month[..4] != new_month[..4] {
                 self.db.finalize_year(&old_month[..4])?;
             }

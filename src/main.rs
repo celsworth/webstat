@@ -66,7 +66,7 @@ struct Args {
 
     /// Enable top hosts tracking (true/false, default: true)
     #[arg(long, global = true)]
-    enable_top_hosts: Option<bool>,
+    enable_top_sites: Option<bool>,
 
     /// Enable top referrers tracking (true/false, default: true)
     #[arg(long, global = true)]
@@ -173,8 +173,8 @@ fn build_config(args: &Args) -> Result<config::Config> {
     if let Some(v) = args.enable_top_urls {
         cfg.enable_top_urls = v;
     }
-    if let Some(v) = args.enable_top_hosts {
-        cfg.enable_top_hosts = v;
+    if let Some(v) = args.enable_top_sites {
+        cfg.enable_top_sites = v;
     }
     if let Some(v) = args.enable_top_refs {
         cfg.enable_top_refs = v;
@@ -241,10 +241,10 @@ fn run_processing(cfg: &config::Config) -> Result<()> {
             vacuum_after_prune: cfg.vacuum_after_prune,
             bot_filter: cfg.bot_filter,
             enable_top_urls: cfg.enable_top_urls,
-            enable_top_hosts: cfg.enable_top_hosts,
+            enable_top_sites: cfg.enable_top_sites,
             enable_top_refs: cfg.enable_top_refs,
             enable_top_agents: cfg.enable_top_agents,
-            enable_all_time_unique_hosts: cfg.enable_all_time_unique_hosts,
+            enable_all_time_unique_sites: cfg.enable_all_time_unique_sites,
             rule_set,
         },
     );

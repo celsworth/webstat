@@ -21,14 +21,14 @@ pub struct Config {
     /// Enable Top URLs tracking.
     pub enable_top_urls: bool,
     /// Enable Top Hosts tracking.
-    pub enable_top_hosts: bool,
+    pub enable_top_sites: bool,
     /// Enable Top Referrers tracking.
     pub enable_top_refs: bool,
     /// Enable Top Agents tracking.
     pub enable_top_agents: bool,
     /// Enable all-time unique hosts (all_time_ips) tracking.
     /// Disable to save space — the all_time_ips table can grow very large.
-    pub enable_all_time_unique_hosts: bool,
+    pub enable_all_time_unique_sites: bool,
     /// Run SQLite VACUUM after pruning top tables.
     pub vacuum_after_prune: bool,
     pub bot_filter: bool,
@@ -52,10 +52,10 @@ impl Default for Config {
             geoip_db: None,
             top_n: 20,
             enable_top_urls: true,
-            enable_top_hosts: true,
+            enable_top_sites: true,
             enable_top_refs: true,
             enable_top_agents: true,
-            enable_all_time_unique_hosts: true,
+            enable_all_time_unique_sites: true,
             vacuum_after_prune: false,
             bot_filter: true,
             checkpoint_minutes: 0,

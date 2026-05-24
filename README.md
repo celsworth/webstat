@@ -44,9 +44,9 @@ webstat \
 | `--top-n <N>` | |
 | `--vacuum-after-prune <true\|false>` | |
 | `--enable-top-urls <true\|false>` | |
-| `--enable-top-hosts <true\|false>` | |
+| `--enable-top-sites <true\|false>` | |
 | `--enable-top-refs <true\|false>` | |
-| `--enable-all-time-unique-hosts <true\|false>` | |
+| `--enable-all-time-unique-sites <true\|false>` | |
 | `--bot-filter <true\|false>` | |
 | `--site-host <HOST>` | |
 
@@ -60,15 +60,15 @@ cp webstat.yml.example webstat.yml
 
 | Key | Description |
 |---|---|
-| `site_name` | Display name in HTML reports |
 | `log_glob` | Comma-separated file paths or glob patterns. Relative paths resolve from the config file location. |
-| `database` | SQLite database path (created if absent) |
-| `output_dir` | Directory for generated HTML reports |
 
 ### Optional
 
 | Key | Default | Description |
 |---|---|---|
+| `site_name` | `My Site` | Display name in HTML reports |
+| `database` | `./webstat.db` | SQLite database path (created if absent) |
+| `output_dir` | `./output` | Directory for generated HTML reports |
 | `geoip_db` | — | Path to a MaxMind GeoLite2-Country `.mmdb` file |
 | `checkpoint_minutes` | `0` | Flush partial progress to SQLite periodically. Useful for large backlogs. `0` disables. |
 | `anonymise_ips` | `false` | Zero out the last IPv4 octet / last 80 IPv6 bits in reports |
@@ -76,10 +76,17 @@ cp webstat.yml.example webstat.yml
 | `vacuum_after_prune` | `false` | Run `VACUUM` after pruning top-N rows. Reclaims space but is expensive. |
 | `bot_filter` | `true` | Drop known bots/crawlers before aggregation (woothee + substring list) |
 | `enable_top_urls` | `true` | |
-| `enable_top_hosts` | `true` | |
+| `enable_top_sites` | `true` | |
 | `enable_top_refs` | `true` | |
 | `enable_top_agents` | `true` | |
-| `enable_all_time_unique_hosts` | `true` | Populate the `all_time_ips` table for the Unique Sites overview stat. Disable to save space on high-traffic sites; hides the stat box when empty. |
+| `enable_all_time_unique_sites` | `true` | Store data for the All-time Unique Sites stat |
+
+#### enable_all_time_unique_sites
+
+This option controls whether Webstat tracks the set of unique hosts (IP addresses) that have ever visited the site across all time. This can consume significant storage space, as the number of IPs grows.
+
+If disabled, Webstat will not track this data, and the Unique Sites stat box will be hidden from the overview report. Note that this does not affect the Unique Sites stat for individual months, which is computed from the aggregated data for that month and does not require tracking all-time unique hosts.
+
 
 ### Rules
 

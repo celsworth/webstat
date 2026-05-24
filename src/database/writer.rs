@@ -345,11 +345,11 @@ impl Database {
 
     /// Finalize a completed month: populate all_time_ips and yearly_unique_ips,
     /// prune monthly tables to top_n rows, mark month complete in meta.
-    pub fn finalize_month(&mut self, period: &str, top_n: usize, enable_all_time_unique_hosts: bool) -> Result<()> {
+    pub fn finalize_month(&mut self, period: &str, top_n: usize, enable_all_time_unique_sites: bool) -> Result<()> {
         let tx = self.conn.transaction()?;
 
         let like_pattern = format!("{}-%", period);
-        if enable_all_time_unique_hosts {
+        if enable_all_time_unique_sites {
             tx.execute(
                 "INSERT OR IGNORE INTO all_time_ips (host_kind,host_hi,host_lo,host_text) \
                  SELECT ip_kind, ip_hi, ip_lo, '' FROM daily_unique_ips WHERE date LIKE ?1",
