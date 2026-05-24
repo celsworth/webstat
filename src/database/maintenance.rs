@@ -1,3 +1,5 @@
+// Database maintenance: VACUUM and meta key-value read/write ops.
+
 use super::*;
 
 impl Database {

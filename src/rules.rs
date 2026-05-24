@@ -1,3 +1,5 @@
+// Request rules: YAML-configured include/exclude/rewrite rules applied to log entries during parsing.
+
 use std::collections::HashSet;
 use std::sync::Arc;
 

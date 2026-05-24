@@ -1,3 +1,5 @@
+// Visit state persistence: load and save VisitStateUpdate rows for per-IP session tracking.
+
 use super::*;
 
 impl Database {

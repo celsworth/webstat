@@ -1,3 +1,5 @@
+// Utility helpers: date formatting, IP parsing, URL normalisation, and miscellaneous string ops.
+
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 

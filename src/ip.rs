@@ -1,3 +1,5 @@
+// Ip type: a parsed IPv4/IPv6 address stored as an integer for efficient hashing and geo lookups.
+
 use crate::util::{parse_ipv4_u32, parse_ipv6_u128};
 
 /// A parsed IP address stored as its integer value.

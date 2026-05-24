@@ -1,3 +1,5 @@
+// Tests for the combined-log-format parser and OwnedLogEntry field extraction.
+
 use super::*;
 
 #[cfg(test)]

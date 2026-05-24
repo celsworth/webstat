@@ -1,3 +1,5 @@
+// Tests for HTML report rendering and template correctness.
+
 use super::*;
 
 #[cfg(test)]

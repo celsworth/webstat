@@ -1,10 +1,5 @@
-/// Benchmark the individual operations that make up the resume/skip decision,
-/// to establish which order minimises wall-time for the common "already done" case.
-///
-/// Usage (from repo root):
-///   cargo run --release --bin bench_resume
-///
-/// Files used are logs/ relative to the working directory.
+// Benchmark the resume/skip decision operations to find the lowest-latency ordering
+// for the common "already processed" case.
 use std::hash::Hasher;
 use std::hint::black_box;
 use std::io::{BufRead, BufReader, Read};

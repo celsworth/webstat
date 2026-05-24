@@ -1,3 +1,5 @@
+// Tests for report aggregator SQL queries and summary structures.
+
 use super::*;
 
 #[cfg(test)]

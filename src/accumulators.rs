@@ -1,3 +1,5 @@
+// HourlyStats, HourlyAcc, and HourlyMap: per-hour traffic counters keyed by (site, hour).
+
 use std::sync::Arc;
 
 use ahash::AHashMap;

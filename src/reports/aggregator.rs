@@ -1,3 +1,5 @@
+// Report aggregation: SQL queries that summarise the database into per-period statistics for templates.
+
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 

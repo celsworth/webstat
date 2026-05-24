@@ -1,3 +1,5 @@
+// Chart.js dataset assembly: builds JSON series for traffic, status-code, and bandwidth charts.
+
 use anyhow::{Context, Result};
 use serde_json::json;
 

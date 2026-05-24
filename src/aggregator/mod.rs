@@ -216,7 +216,7 @@ impl Processor {
         // Sort by the timestamp on the first parseable log line in each file so
         // files are processed in chronological order regardless of mtime.
         files.sort_by_key(|f| {
-            first_line_timestamp(f)
+            resume::read_first_line_ts(f)
                 .unwrap_or_else(|| std::fs::metadata(f).map(|m| m.mtime()).unwrap_or(0))
         });
 
@@ -466,62 +466,6 @@ impl Processor {
             }
         })
     }
-}
-
-/// Read up to 20 lines of `path` (decompressing if needed) and return the
-/// Unix timestamp of the first parseable log entry, or `None` on failure.
-fn first_line_timestamp(path: &str) -> Option<i64> {
-    use std::io::{BufRead, BufReader};
-
-    let file = std::fs::File::open(path).ok()?;
-    let reader: Box<dyn std::io::Read> = match CompressionType::from_path(path) {
-        CompressionType::Gz => Box::new(flate2::read::MultiGzDecoder::new(file)),
-        CompressionType::Bz2 => Box::new(bzip2::read::MultiBzDecoder::new(file)),
-        CompressionType::Plain => Box::new(file),
-    };
-    let mut buf = BufReader::new(reader);
-    let mut line = String::new();
-    for _ in 0..20 {
-        line.clear();
-        if buf.read_line(&mut line).ok()? == 0 {
-            break;
-        }
-        if let Some(entry) =
-            crate::parser::OwnedLogEntry::parse(line.trim_end_matches('\n').to_string())
-        {
-            if let Some(ts) = parse_entry_timestamp(entry.time_str(), entry.month_num) {
-                return Some(ts);
-            }
-        }
-    }
-    None
-}
-
-/// Parse a Unix timestamp from a combined-log time string and month number.
-fn parse_entry_timestamp(time_str: &str, mon_num: u8) -> Option<i64> {
-    use aggregation::{parse_2d, parse_4d};
-    let b = time_str.as_bytes();
-    if b.len() < 26 {
-        return None;
-    }
-    let day = parse_2d(b, 0)? as u32;
-    let year = parse_4d(b, 7)?;
-    let hour = parse_2d(b, 12)? as i64;
-    let minute = parse_2d(b, 15)? as i64;
-    let second = parse_2d(b, 18)? as i64;
-    let sign = b[21];
-    let tz_hour = parse_2d(b, 22)? as i64;
-    let tz_min = parse_2d(b, 24)? as i64;
-    let offset = tz_hour * 3600 + tz_min * 60;
-    let offset = match sign {
-        b'+' => offset,
-        b'-' => -offset,
-        _ => return None,
-    };
-    Some(
-        days_from_civil(year, mon_num as u32, day) * 86_400 + hour * 3_600 + minute * 60 + second
-            - offset,
-    )
 }
 
 #[cfg(test)]

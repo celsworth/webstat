@@ -1,3 +1,5 @@
+// GeoIP lookup: wraps maxminddb with an AHashMap cache to map IPs to ISO country codes.
+
 use ahash::AHashMap;
 use std::sync::Arc;
 

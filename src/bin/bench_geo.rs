@@ -1,6 +1,4 @@
-/// Quick benchmark: direct mmdb lookups vs AHashMap cache.
-///
-/// Usage: cargo run --release --bin bench_geo -- /path/to/GeoLite2-Country.mmdb
+// Benchmark direct mmdb lookups vs AHashMap-cached lookups to measure geo cache benefit.
 use std::hint::black_box;
 use std::net::Ipv4Addr;
 use std::time::Instant;

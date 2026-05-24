@@ -1,3 +1,5 @@
+// HTML report generation: renders Tera templates with per-site statistics from the database.
+
 use std::fs;
 use std::path::Path;
 

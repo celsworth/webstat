@@ -1,3 +1,5 @@
+// CompressionType enum (Plain, Gz, Bz2): detection by file extension and decoder construction.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompressionType {
     Plain,

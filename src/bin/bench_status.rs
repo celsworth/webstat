@@ -1,4 +1,4 @@
-// cargo run --release --bin bench_status
+// Benchmark status-code index lookup strategies to validate the chosen array approach.
 
 use std::time::Instant;
 

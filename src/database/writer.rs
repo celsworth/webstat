@@ -1,3 +1,5 @@
+// flush_data and finalize_month: writes RunAccumulators to SQLite and prunes top-N tables.
+
 use std::sync::Arc;
 
 use ahash::{AHashMap, AHashSet};

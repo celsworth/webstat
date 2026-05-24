@@ -1,3 +1,5 @@
+// SQLite connection wrapper: schema initialisation, WAL mode, and module re-exports.
+
 use std::net::IpAddr;
 use std::time::Duration;
 

@@ -1,3 +1,5 @@
+// Loader thread: reads files sequentially, decompresses if needed, and emits LoaderMsg::Lines batches.
+
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek};
 use std::sync::atomic::Ordering;

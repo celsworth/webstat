@@ -1,3 +1,5 @@
+// Verbosity control: atomic log-level flag and helpers that interleave safely with the progress line.
+
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::progress::clear_progress_line;

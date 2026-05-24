@@ -1,3 +1,5 @@
+// HTTP method and protocol index constants and string-label arrays used for per-entry accounting.
+
 pub const METHOD_COUNT: usize = 8;
 pub const METHOD_GET: usize = 0;
 pub const METHOD_POST: usize = 1;

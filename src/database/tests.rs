@@ -1,3 +1,5 @@
+// Integration tests for database schema, state persistence, and writer correctness.
+
 use super::*;
 
 #[cfg(test)]

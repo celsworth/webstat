@@ -1,3 +1,5 @@
+// Progress display: formats and prints the single directory-level progress line to stderr.
+
 use std::io::{IsTerminal, Write};
 use std::time::Instant;
 

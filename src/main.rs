@@ -1,3 +1,5 @@
+// CLI entry point: parses arguments with clap, loads config, and dispatches to subcommands.
+
 mod accumulators;
 mod compression;
 mod config;

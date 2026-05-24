@@ -1,3 +1,5 @@
+// Parse state persistence: load and save per-file ParseState rows that drive resume decisions.
+
 use super::*;
 
 impl Database {

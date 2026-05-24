@@ -1,3 +1,5 @@
+// YAML config parsing: deserialises webstat.yaml into Config and resolves relative paths.
+
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_yaml::Value;

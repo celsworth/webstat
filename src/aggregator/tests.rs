@@ -1,3 +1,5 @@
+// Integration tests for the aggregator pipeline, resume logic, and accumulator flushing.
+
 use super::*;
 
 #[cfg(test)]

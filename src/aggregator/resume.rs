@@ -25,7 +25,7 @@ pub(super) fn read_first_line_ts(filepath: &str) -> Option<i64> {
 
     let mut buf_reader = BufReader::new(reader);
     let mut line = String::new();
-    loop {
+    for _ in 0..20 {
         line.clear();
         match buf_reader.read_line(&mut line) {
             Ok(0) | Err(_) => return None,
@@ -36,6 +36,7 @@ pub(super) fn read_first_line_ts(filepath: &str) -> Option<i64> {
             return crate::util::parse_unix_timestamp(entry.time_str(), entry.month_num);
         }
     }
+    None
 }
 
 impl Processor {
@@ -555,5 +556,80 @@ impl Processor {
             skipped_parse_state: None,
             retired_parse_states,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_first_line_ts;
+    use flate2::{write::GzEncoder, Compression};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn log_line(ts: &str) -> String {
+        format!(
+            r#"1.2.3.4 - - [{ts}] "GET /index.html HTTP/1.1" 200 100 "-" "Mozilla/5.0""#
+        )
+    }
+
+    fn write_plain(lines: &[&str]) -> NamedTempFile {
+        let mut f = NamedTempFile::new().unwrap();
+        for line in lines {
+            writeln!(f, "{line}").unwrap();
+        }
+        f
+    }
+
+    fn write_gz(lines: &[&str]) -> NamedTempFile {
+        let f = NamedTempFile::with_suffix(".gz").unwrap();
+        let mut enc = GzEncoder::new(f.reopen().unwrap(), Compression::default());
+        for line in lines {
+            writeln!(enc, "{line}").unwrap();
+        }
+        enc.finish().unwrap();
+        f
+    }
+
+    #[test]
+    fn plain_file_returns_correct_timestamp() {
+        let line = log_line("01/Jan/1970:00:00:00 +0000");
+        let f = write_plain(&[&line]);
+        let ts = read_first_line_ts(f.path().to_str().unwrap());
+        assert_eq!(ts, Some(0));
+    }
+
+    #[test]
+    fn gz_file_returns_correct_timestamp() {
+        let line = log_line("01/Jan/1970:01:00:00 +0100");
+        let f = write_gz(&[&line]);
+        let ts = read_first_line_ts(f.path().to_str().unwrap());
+        assert_eq!(ts, Some(0));
+    }
+
+    #[test]
+    fn nonexistent_file_returns_none() {
+        assert_eq!(read_first_line_ts("/nonexistent/path/access.log"), None);
+    }
+
+    #[test]
+    fn all_garbage_lines_returns_none() {
+        let f = write_plain(&["not a log line", "also not a log line", "garbage"]);
+        assert_eq!(read_first_line_ts(f.path().to_str().unwrap()), None);
+    }
+
+    #[test]
+    fn skips_garbage_prefix_to_find_parseable_line() {
+        let good = log_line("01/Jan/1970:00:00:42 +0000");
+        let f = write_plain(&["junk", "more junk", &good]);
+        let ts = read_first_line_ts(f.path().to_str().unwrap());
+        assert_eq!(ts, Some(42));
+    }
+
+    #[test]
+    fn stops_at_twenty_line_limit() {
+        let garbage: Vec<String> = (0..21).map(|i| format!("garbage line {i}")).collect();
+        let refs: Vec<&str> = garbage.iter().map(String::as_str).collect();
+        let f = write_plain(&refs);
+        assert_eq!(read_first_line_ts(f.path().to_str().unwrap()), None);
     }
 }

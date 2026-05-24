@@ -1,3 +1,5 @@
+// UA classification and bot detection: parses user-agent strings into family names and filters bots.
+
 use std::sync::Arc;
 
 use ahash::AHashMap;

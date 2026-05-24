@@ -1,3 +1,5 @@
+// File identity: computes head-hash fingerprints and logical sizes for plain and compressed files.
+
 use std::fs::File;
 use std::hash::Hasher;
 use std::io::Read;

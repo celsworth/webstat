@@ -1,3 +1,6 @@
+// RunAccumulators: in-memory aggregation buffers (hourly, URLs, hosts, refs, agents, countries,
+// IPs, status codes, etc.) flushed to SQLite at checkpoints and end-of-run.
+
 use ahash::{AHashMap, AHashSet};
 
 use crate::ip::Ip;
