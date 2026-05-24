@@ -17,7 +17,6 @@ mod reports;
 mod rules;
 mod run_accumulators;
 mod ua;
-mod util;
 
 use anyhow::{bail, Result};
 use clap::{ArgAction, Parser, Subcommand};

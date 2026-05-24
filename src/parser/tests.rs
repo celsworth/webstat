@@ -600,4 +600,78 @@ mod tests {
         let entry = parse_line(line).expect("should parse");
         assert_eq!(entry.proto(), "HTTP/2.0");
     }
+
+    // ── parse_unix_timestamp ──────────────────────────────────────────────────
+
+    #[test]
+    fn parse_unix_timestamp_utc() {
+        // 01/Jan/1970:00:00:00 +0000 → 0
+        let ts = parse_unix_timestamp("01/Jan/1970:00:00:00 +0000", 1).unwrap();
+        assert_eq!(ts, 0);
+    }
+
+    #[test]
+    fn parse_unix_timestamp_positive_offset() {
+        // 01/Jan/1970:01:00:00 +0100 → still 0 (UTC)
+        let ts = parse_unix_timestamp("01/Jan/1970:01:00:00 +0100", 1).unwrap();
+        assert_eq!(ts, 0);
+    }
+
+    #[test]
+    fn parse_unix_timestamp_rejects_short() {
+        assert!(parse_unix_timestamp("short", 1).is_none());
+    }
+
+    #[test]
+    fn parse_unix_timestamp_negative_offset() {
+        // 00:00 in UTC-01:00 = 01:00 UTC = 3600 s
+        let ts = parse_unix_timestamp("01/Jan/1970:00:00:00 -0100", 1).unwrap();
+        assert_eq!(ts, 3600);
+    }
+
+    #[test]
+    fn parse_unix_timestamp_invalid_sign_returns_none() {
+        let ts = parse_unix_timestamp("01/Jan/1970:00:00:00 *0000", 1);
+        assert!(ts.is_none());
+    }
+
+    // ── days_from_civil ───────────────────────────────────────────────────────
+
+    #[test]
+    fn days_from_civil_epoch() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+    }
+
+    #[test]
+    fn days_from_civil_known_date() {
+        assert_eq!(days_from_civil(2000, 1, 1), 10957);
+    }
+
+    #[test]
+    fn days_from_civil_second_day() {
+        assert_eq!(days_from_civil(1970, 1, 2), 1);
+    }
+
+    #[test]
+    fn days_from_civil_end_of_first_year() {
+        // 1970 has 365 days; Dec 31 is day 364 (0-indexed from Jan 1).
+        assert_eq!(days_from_civil(1970, 12, 31), 364);
+    }
+
+    #[test]
+    fn days_from_civil_day_before_epoch() {
+        assert_eq!(days_from_civil(1969, 12, 31), -1);
+    }
+
+    #[test]
+    fn days_from_civil_leap_day_2000() {
+        // 2000 is divisible by 400 → leap year; Feb 29 exists.
+        // 2000-01-01=10957, +31 (Jan) +28 (Feb 1..28) = 10957+59 = 11016
+        assert_eq!(days_from_civil(2000, 2, 29), 11016);
+    }
+
+    #[test]
+    fn days_from_civil_march_1_after_leap_day() {
+        assert_eq!(days_from_civil(2000, 3, 1), 11017);
+    }
 }

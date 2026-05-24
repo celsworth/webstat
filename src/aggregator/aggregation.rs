@@ -1,11 +1,67 @@
 // Per-entry aggregation: maps each ParsedEntry into the in-memory RunAccumulators
 // (hourly stats, URLs, hosts, referrers, agents, countries, IPs, status codes, etc.).
 
+use memchr::{memchr, memrchr};
+
 use super::messages::ParsedEntry;
 use super::*;
 use crate::ip::Ip;
 use crate::method_proto::{method_index, proto_index};
 use crate::rules::HideMask;
+
+// ── URL / path helpers ────────────────────────────────────────────────────────
+
+const FILE_EXTS: &[&str] = &[
+    ".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".otf", ".woff",
+    ".woff2", ".ttf", ".eot", ".mp4", ".mp3", ".zip", ".tar", ".gz", ".br", ".pdf", ".xml",
+    ".json", ".txt",
+];
+
+/// Strip the query string from a path (`/foo?bar=1` → `/foo`).
+#[inline]
+fn strip_query(path: &str) -> &str {
+    match memchr(b'?', path.as_bytes()) {
+        Some(i) => &path[..i],
+        None => path,
+    }
+}
+
+/// Return the file extension of a path (e.g. `".html"`), or `""` if none.
+///
+/// Searches only within the last path component to avoid matching dots in
+/// directory names.
+#[inline]
+fn file_ext(path: &str) -> &str {
+    let b = path.as_bytes();
+    let start = memrchr(b'/', b).map_or(0, |p| p + 1);
+    let filename = &path[start..];
+    match memrchr(b'.', filename.as_bytes()) {
+        Some(i) => &filename[i..],
+        None => "",
+    }
+}
+
+/// Extract just the hostname from a full URL using a byte scan.
+///
+/// Returns `None` if `url` has no `://` scheme or an empty host.
+#[inline]
+fn extract_host_from_url(url: &str) -> Option<Arc<str>> {
+    let scheme = url.find("://")?;
+    let start = scheme + 3;
+    if start >= url.len() {
+        return None;
+    }
+    let rest = &url[start..];
+    let end = rest
+        .as_bytes()
+        .iter()
+        .position(|&b| b == b'/' || b == b':' || b == b'?')
+        .unwrap_or(rest.len());
+    if end == 0 {
+        return None;
+    }
+    Some(Arc::from(&rest[..end]))
+}
 
 const MONTHS: [&str; 13] = [
     "", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12",
@@ -297,5 +353,123 @@ impl Processor {
                 .insert(url.to_string(), Arc::clone(host_value));
         }
         host
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── strip_query ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn strip_query_removes_query_string() {
+        assert_eq!(strip_query("/foo?bar=1"), "/foo");
+    }
+
+    #[test]
+    fn strip_query_no_query_returns_whole_path() {
+        assert_eq!(strip_query("/foo/bar"), "/foo/bar");
+    }
+
+    #[test]
+    fn strip_query_empty_path() {
+        assert_eq!(strip_query(""), "");
+    }
+
+    #[test]
+    fn strip_query_multiple_question_marks_splits_at_first() {
+        assert_eq!(strip_query("/foo?a=1?b=2"), "/foo");
+    }
+
+    #[test]
+    fn strip_query_leading_question_mark() {
+        assert_eq!(strip_query("?foo=bar"), "");
+    }
+
+    // ── file_ext ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn file_ext_returns_extension() {
+        assert_eq!(file_ext("/foo/bar.html"), ".html");
+    }
+
+    #[test]
+    fn file_ext_no_extension_returns_empty() {
+        assert_eq!(file_ext("/foo/bar"), "");
+    }
+
+    #[test]
+    fn file_ext_dot_in_dir_not_matched() {
+        assert_eq!(file_ext("/foo.d/bar"), "");
+    }
+
+    #[test]
+    fn file_ext_trailing_slash() {
+        assert_eq!(file_ext("/foo/"), "");
+    }
+
+    #[test]
+    fn file_ext_multiple_dots_returns_last() {
+        assert_eq!(file_ext("/foo/archive.tar.gz"), ".gz");
+    }
+
+    #[test]
+    fn file_ext_leading_dot_filename() {
+        // Hidden files: the leading dot is treated as extension start.
+        assert_eq!(file_ext("/foo/.gitignore"), ".gitignore");
+    }
+
+    #[test]
+    fn file_ext_root_path_empty() {
+        assert_eq!(file_ext("/"), "");
+    }
+
+    #[test]
+    fn file_ext_just_dot_in_filename() {
+        assert_eq!(file_ext("/foo/."), ".");
+    }
+
+    // ── extract_host_from_url ─────────────────────────────────────────────────
+
+    #[test]
+    fn extract_host_basic() {
+        let h = extract_host_from_url("https://example.com/path").unwrap();
+        assert_eq!(h.as_ref(), "example.com");
+    }
+
+    #[test]
+    fn extract_host_strips_port() {
+        let h = extract_host_from_url("http://example.com:8080/").unwrap();
+        assert_eq!(h.as_ref(), "example.com");
+    }
+
+    #[test]
+    fn extract_host_no_scheme_returns_none() {
+        assert!(extract_host_from_url("example.com/path").is_none());
+    }
+
+    #[test]
+    fn extract_host_empty_host_returns_none() {
+        assert!(extract_host_from_url("http:///path").is_none());
+    }
+
+    #[test]
+    fn extract_host_no_trailing_slash() {
+        let h = extract_host_from_url("https://example.com").unwrap();
+        assert_eq!(h.as_ref(), "example.com");
+    }
+
+    #[test]
+    fn extract_host_query_immediately_after_host() {
+        let h = extract_host_from_url("https://example.com?foo=bar").unwrap();
+        assert_eq!(h.as_ref(), "example.com");
+    }
+
+    #[test]
+    fn extract_host_scheme_separator_only_returns_none() {
+        assert!(extract_host_from_url("://").is_none());
     }
 }

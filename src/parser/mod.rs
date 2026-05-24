@@ -1,4 +1,5 @@
-// Pure log-format parser: converts a raw nginx combined-format line into an OwnedLogEntry.
+// Pure log-format parser: converts a raw nginx combined-format line into an OwnedLogEntry,
+// plus timestamp arithmetic for nginx time strings.
 // No pipeline, UA, or rule dependencies.
 
 use std::ops::Range;
@@ -339,6 +340,58 @@ fn parse_u64(bytes: &[u8]) -> Option<u64> {
     }
 
     Some(n)
+}
+
+// ── Timestamp arithmetic ──────────────────────────────────────────────────────
+
+/// Parse a nginx timestamp (`DD/Mon/YYYY:HH:MM:SS ±HHMM`) into a Unix
+/// timestamp (seconds since epoch, UTC).
+///
+/// Returns `None` on any parse failure.
+pub(crate) fn parse_unix_timestamp(time_str: &str, month_num: u8) -> Option<i64> {
+    let b = time_str.as_bytes();
+    if b.len() < 26 {
+        return None;
+    }
+
+    let day: u32 = std::str::from_utf8(&b[0..2]).ok()?.parse().ok()?;
+    let year: i32 = std::str::from_utf8(&b[7..11]).ok()?.parse().ok()?;
+    let hour: i64 = std::str::from_utf8(&b[12..14]).ok()?.parse().ok()?;
+    let minute: i64 = std::str::from_utf8(&b[15..17]).ok()?.parse().ok()?;
+    let second: i64 = std::str::from_utf8(&b[18..20]).ok()?.parse().ok()?;
+
+    let sign = b[21];
+    let tz_hour: i64 = std::str::from_utf8(&b[22..24]).ok()?.parse().ok()?;
+    let tz_min: i64 = std::str::from_utf8(&b[24..26]).ok()?.parse().ok()?;
+    let offset = tz_hour * 3600 + tz_min * 60;
+    let offset = match sign {
+        b'+' => offset,
+        b'-' => -offset,
+        _ => return None,
+    };
+
+    let days = days_from_civil(year, month_num as u32, day);
+    Some(days * 86_400 + hour * 3_600 + minute * 60 + second - offset)
+}
+
+/// Convert a civil (proleptic Gregorian) date to a day count.
+///
+/// Day 0 = 1970-01-01. Uses the algorithm from Howard Hinnant's
+/// "chrono-Compatible Low-Level Date Algorithms".
+#[inline]
+pub fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let mut y = year as i64;
+    let m = month as i64;
+    let d = day as i64;
+
+    y -= (m <= 2) as i64;
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = m + if m > 2 { -3 } else { 9 };
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+
+    era * 146_097 + doe - 719_468
 }
 
 pub mod stage;

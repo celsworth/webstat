@@ -18,7 +18,7 @@ use crate::logging;
 use crate::progress::print_dir_progress;
 use crate::rules::SharedRuleSet;
 use crate::run_accumulators::RunAccumulators;
-use crate::util::{days_from_civil, extract_host_from_url, file_ext, strip_query, FILE_EXTS};
+use crate::parser::days_from_civil;
 
 mod aggregation;
 mod flush;

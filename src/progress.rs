@@ -3,7 +3,7 @@
 use std::io::{IsTerminal, Write};
 use std::time::Instant;
 
-use crate::util::current_log_timestamp;
+use crate::logging::current_log_timestamp;
 
 const CHECKPOINT_NONE: u64 = u64::MAX;
 const ANSI_CLEAR_LINE: &str = "\r\x1b[2K";

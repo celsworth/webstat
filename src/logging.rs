@@ -2,8 +2,9 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
+use chrono::Local;
+
 use crate::progress::clear_progress_line;
-use crate::util::current_log_timestamp;
 
 static LOG_VERBOSE: AtomicU8 = AtomicU8::new(0);
 static LOG_DEBUG: AtomicU8 = AtomicU8::new(0);
@@ -41,4 +42,10 @@ fn emit(msg: &str) {
     clear_progress_line();
     let ts = current_log_timestamp();
     eprintln!("{ts} {msg}");
+}
+
+/// Current local timestamp for log lines. Format: `[YYYY-MM-DD HH:MM:SS.mmm]`
+#[inline]
+pub fn current_log_timestamp() -> String {
+    Local::now().format("[%Y-%m-%d %H:%M:%S%.3f]").to_string()
 }
