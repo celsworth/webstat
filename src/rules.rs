@@ -98,6 +98,7 @@ pub enum Field {
     Bytes,
 }
 
+#[derive(Debug)]
 pub enum Condition {
     // String ops
     Eq {
@@ -224,6 +225,7 @@ impl HideMask {
     }
 }
 
+#[derive(Debug)]
 pub enum Action {
     Ignore,
     /// Count hits/visits/unique IPs but exclude the named top-N tables.
@@ -339,6 +341,9 @@ fn compile_condition(raw: &RawCondition, rule_name: &str) -> Result<Condition> {
                 serde_yaml::Value::Sequence(seq) if seq.len() == 2 => {
                     let low = yaml_as_u64(&seq[0], &ctx)?;
                     let high = yaml_as_u64(&seq[1], &ctx)?;
+                    if low > high {
+                        bail!("{ctx}: 'between' low ({low}) must be <= high ({high})");
+                    }
                     Ok(Condition::Between { field, low, high })
                 }
                 _ => bail!("{ctx}: 'between' requires [low, high]"),
@@ -414,6 +419,9 @@ fn compile_condition(raw: &RawCondition, rule_name: &str) -> Result<Condition> {
             serde_yaml::Value::Sequence(seq) if seq.len() == 2 => {
                 let low = yaml_as_usize(&seq[0], &ctx)?;
                 let high = yaml_as_usize(&seq[1], &ctx)?;
+                if low > high {
+                    bail!("{ctx}: 'len_between' low ({low}) must be <= high ({high})");
+                }
                 Ok(Condition::LenBetween { field, low, high })
             }
             _ => bail!("{ctx}: 'len_between' requires [low, high]"),
@@ -447,6 +455,13 @@ fn compile_rule(raw: &RawRule) -> Result<Rule> {
         .iter()
         .map(|c| compile_condition(c, &raw.name))
         .collect::<Result<Vec<_>>>()?;
+
+    if conditions.is_empty() {
+        bail!(
+            "rule '{}': 'when' must contain at least one condition",
+            raw.name
+        );
+    }
 
     let action = match &raw.action {
         RawAction::Ignore => Action::Ignore,

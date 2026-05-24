@@ -28,8 +28,8 @@ pub const PROTO_NAMES: [&str; PROTO_COUNT] = ["1.0", "1.1", "2.0", "3.0", "other
 pub fn method_index(method: &str) -> usize {
     match method.as_bytes() {
         b"GET" => METHOD_GET,
-        b"POST" => METHOD_POST,
         b"HEAD" => METHOD_HEAD,
+        b"POST" => METHOD_POST,
         b"PUT" => METHOD_PUT,
         b"DELETE" => METHOD_DELETE,
         b"OPTIONS" => METHOD_OPTIONS,
@@ -42,10 +42,10 @@ pub fn method_index(method: &str) -> usize {
 #[inline]
 pub fn proto_index(proto: &str) -> usize {
     match proto.as_bytes() {
-        b"HTTP/1.0" => PROTO_1_0,
-        b"HTTP/1.1" => PROTO_1_1,
         b"HTTP/2" | b"HTTP/2.0" => PROTO_2_0,
         b"HTTP/3" | b"HTTP/3.0" => PROTO_3_0,
+        b"HTTP/1.1" => PROTO_1_1,
+        b"HTTP/1.0" => PROTO_1_0,
         _ => PROTO_OTHER,
     }
 }
