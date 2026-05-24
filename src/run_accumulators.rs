@@ -21,7 +21,7 @@ pub(crate) struct RunAccumulators {
     pub(crate) countries: AHashMap<String, u64>,
     pub(crate) status_codes: AHashMap<u16, u64>,
     pub(crate) method_counts: [u64; METHOD_COUNT],
-    pub(crate) proto_counts: [u64; PROTO_COUNT],
+    pub(crate) protocol_counts: [u64; PROTO_COUNT],
 }
 
 impl RunAccumulators {
@@ -37,7 +37,7 @@ impl RunAccumulators {
             countries: AHashMap::with_capacity(256),
             status_codes: AHashMap::with_capacity(32),
             method_counts: [0; METHOD_COUNT],
-            proto_counts: [0; PROTO_COUNT],
+            protocol_counts: [0; PROTO_COUNT],
         }
     }
 
@@ -50,7 +50,7 @@ impl RunAccumulators {
             && self.countries.is_empty()
             && self.status_codes.is_empty()
             && self.method_counts.iter().all(|&c| c == 0)
-            && self.proto_counts.iter().all(|&c| c == 0)
+            && self.protocol_counts.iter().all(|&c| c == 0)
     }
 
     pub(crate) fn clear_for_new_month(&mut self, new_month: String) {
@@ -85,9 +85,9 @@ mod tests {
     }
 
     #[test]
-    fn proto_counts_nonzero_makes_non_empty() {
+    fn protocol_counts_nonzero_makes_non_empty() {
         let mut acc = RunAccumulators::new("2026-05".to_string());
-        acc.proto_counts[PROTO_1_1] = 3;
+        acc.protocol_counts[PROTO_1_1] = 3;
         assert!(!acc.is_empty());
     }
 
@@ -143,7 +143,7 @@ mod tests {
         let mut acc = RunAccumulators::new("2026-05".to_string());
         acc.urls.insert("/index.html".to_string(), (5, 1024));
         acc.method_counts[METHOD_GET] = 10;
-        acc.proto_counts[PROTO_1_1] = 10;
+        acc.protocol_counts[PROTO_1_1] = 10;
         acc.clear_for_new_month("2026-06".to_string());
         assert!(acc.is_empty());
         assert_eq!(acc.current_month, "2026-06");

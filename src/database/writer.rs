@@ -22,7 +22,7 @@ pub struct FlushData<'a> {
     pub countries: &'a AHashMap<String, u64>,
     pub status_codes: &'a AHashMap<u16, u64>,
     pub method_counts: &'a [u64],
-    pub proto_counts: &'a [u64],
+    pub protocol_counts: &'a [u64],
     pub parse_states: &'a [ParseStateUpdate],
     pub retired_parse_states: &'a [ParseStateUpdate],
     pub visit_states: &'a [VisitStateUpdate],
@@ -91,13 +91,13 @@ impl Database {
             }
         }
 
-        // monthly_urls_hits and monthly_urls_bandwidth (same data, different tables)
+        // monthly_top_urls_hits and monthly_top_urls_bandwidth (same data, different tables)
         if !data.urls.is_empty() {
-            let sql_hits = "INSERT INTO monthly_urls_hits (period,url,hits,bandwidth) \
+            let sql_hits = "INSERT INTO monthly_top_urls_hits (period,url,hits,bandwidth) \
                             VALUES (?1,?2,?3,?4) \
                             ON CONFLICT (period,url) DO UPDATE SET \
                               hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth";
-            let sql_bw = "INSERT INTO monthly_urls_bandwidth (period,url,hits,bandwidth) \
+            let sql_bw = "INSERT INTO monthly_top_urls_bandwidth (period,url,hits,bandwidth) \
                           VALUES (?1,?2,?3,?4) \
                           ON CONFLICT (period,url) DO UPDATE SET \
                             hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth";
@@ -111,15 +111,15 @@ impl Database {
 
         let unknown_geo: (Arc<str>, Arc<str>) = (Arc::from("--"), Arc::from("Unknown"));
 
-        // monthly_hosts_hits and monthly_hosts_bandwidth
+        // monthly_top_ips_hits and monthly_top_ips_bandwidth
         if !data.hosts.is_empty() {
-            let sql_hits = "INSERT INTO monthly_hosts_hits \
+            let sql_hits = "INSERT INTO monthly_top_ips_hits \
                             (period,host_kind,host_hi,host_lo,host_text,hits,bandwidth,country_code) \
                             VALUES (?1,?2,?3,?4,?5,?6,?7,?8) \
                             ON CONFLICT (period,host_kind,host_hi,host_lo,host_text) DO UPDATE SET \
                               hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth, \
                               country_code=COALESCE(NULLIF(excluded.country_code,'--'),country_code)";
-            let sql_bw = "INSERT INTO monthly_hosts_bandwidth \
+            let sql_bw = "INSERT INTO monthly_top_ips_bandwidth \
                           (period,host_kind,host_hi,host_lo,host_text,hits,bandwidth,country_code) \
                           VALUES (?1,?2,?3,?4,?5,?6,?7,?8) \
                           ON CONFLICT (period,host_kind,host_hi,host_lo,host_text) DO UPDATE SET \
@@ -128,13 +128,13 @@ impl Database {
             let mut stmt_hits = tx.prepare_cached(sql_hits)?;
             let mut stmt_bw = tx.prepare_cached(sql_bw)?;
             let mut cn_stmt = tx.prepare_cached(
-                "INSERT INTO country_code_names (country_code, country_name) VALUES (?1, ?2)
+                "INSERT INTO countries (country_code, country_name) VALUES (?1, ?2)
                  ON CONFLICT (country_code) DO UPDATE SET
                    country_name = CASE
-                     WHEN country_code_names.country_name = 'Unknown'
+                     WHEN countries.country_name = 'Unknown'
                           AND excluded.country_name <> 'Unknown'
                        THEN excluded.country_name
-                     ELSE country_code_names.country_name
+                     ELSE countries.country_name
                    END",
             )?;
 
@@ -165,9 +165,9 @@ impl Database {
             }
         }
 
-        // monthly_refs
+        // monthly_referrers
         if !data.refs.is_empty() {
-            let sql = "INSERT INTO monthly_refs (period,referrer,hits) VALUES (?1,?2,?3) \
+            let sql = "INSERT INTO monthly_referrers (period,referrer,hits) VALUES (?1,?2,?3) \
                        ON CONFLICT (period,referrer) DO UPDATE SET hits=hits+excluded.hits";
             let mut stmt = tx.prepare_cached(sql)?;
             for (referrer, hits) in data.refs {
@@ -185,9 +185,9 @@ impl Database {
             }
         }
 
-        // daily_ip_log — INSERT OR IGNORE for deduplication across flushes/resumes
+        // daily_unique_ips — INSERT OR IGNORE for deduplication across flushes/resumes
         if !data.daily_ips.is_empty() {
-            let sql = "INSERT OR IGNORE INTO daily_ip_log (date,ip_kind,ip_hi,ip_lo) \
+            let sql = "INSERT OR IGNORE INTO daily_unique_ips (date,ip_kind,ip_hi,ip_lo) \
                        VALUES (?1,?2,?3,?4)";
             let mut stmt = tx.prepare_cached(sql)?;
             for (date, ips) in data.daily_ips {
@@ -234,12 +234,12 @@ impl Database {
             }
         }
 
-        // proto_counts
+        // protocol_counts
         {
-            let sql = "INSERT INTO proto_counts (period,proto,hits) VALUES (?1,?2,?3) \
+            let sql = "INSERT INTO protocol_counts (period,proto,hits) VALUES (?1,?2,?3) \
                        ON CONFLICT (period,proto) DO UPDATE SET hits=hits+excluded.hits";
             let mut stmt = tx.prepare_cached(sql)?;
-            for (i, &hits) in data.proto_counts.iter().enumerate() {
+            for (i, &hits) in data.protocol_counts.iter().enumerate() {
                 if hits > 0 {
                     stmt.execute(params![data.period, PROTO_NAMES[i], hits as i64])?;
                 }
@@ -343,58 +343,58 @@ impl Database {
         Ok(())
     }
 
-    /// Finalize a completed month: populate all_time_hosts and yearly_ip_log,
+    /// Finalize a completed month: populate all_time_ips and yearly_unique_ips,
     /// prune monthly tables to top_n rows, mark month complete in meta.
     pub fn finalize_month(&mut self, period: &str, top_n: usize) -> Result<()> {
         let tx = self.conn.transaction()?;
 
         let like_pattern = format!("{}-%", period);
         tx.execute(
-            "INSERT OR IGNORE INTO all_time_hosts (host_kind,host_hi,host_lo,host_text) \
-             SELECT ip_kind, ip_hi, ip_lo, '' FROM daily_ip_log WHERE date LIKE ?1",
+            "INSERT OR IGNORE INTO all_time_ips (host_kind,host_hi,host_lo,host_text) \
+             SELECT ip_kind, ip_hi, ip_lo, '' FROM daily_unique_ips WHERE date LIKE ?1",
             params![like_pattern],
         )?;
 
         let year = &period[..4];
         tx.execute(
-            "INSERT OR IGNORE INTO yearly_ip_log (year,ip_kind,ip_hi,ip_lo) \
-             SELECT ?1, ip_kind, ip_hi, ip_lo FROM daily_ip_log WHERE date LIKE ?2",
+            "INSERT OR IGNORE INTO yearly_unique_ips (year,ip_kind,ip_hi,ip_lo) \
+             SELECT ?1, ip_kind, ip_hi, ip_lo FROM daily_unique_ips WHERE date LIKE ?2",
             params![year, like_pattern],
         )?;
 
         // Cache monthly unique-IP count so reports don't need to run DISTINCT at query time.
         tx.execute(
-            "INSERT OR REPLACE INTO site_count_cache (period, count) \
+            "INSERT OR REPLACE INTO unique_visitor_counts (period, count) \
              SELECT ?1, COUNT(*) FROM (
-               SELECT DISTINCT ip_kind, ip_hi, ip_lo FROM daily_ip_log WHERE date LIKE ?2
+               SELECT DISTINCT ip_kind, ip_hi, ip_lo FROM daily_unique_ips WHERE date LIKE ?2
              )",
             params![period, like_pattern],
         )?;
 
-        // Update yearly cached count from yearly_ip_log, which accumulates all finalized months.
+        // Update yearly cached count from yearly_unique_ips, which accumulates all finalized months.
         tx.execute(
-            "INSERT OR REPLACE INTO site_count_cache (period, count) \
-             SELECT ?1, COUNT(*) FROM yearly_ip_log WHERE year = ?1",
+            "INSERT OR REPLACE INTO unique_visitor_counts (period, count) \
+             SELECT ?1, COUNT(*) FROM yearly_unique_ips WHERE year = ?1",
             params![year],
         )?;
 
-        // Cache per-day unique-IP counts then prune daily_ip_log for this month.
+        // Cache per-day unique-IP counts then prune daily_unique_ips for this month.
         tx.execute(
-            "INSERT OR REPLACE INTO daily_site_counts (date, count) \
-             SELECT date, COUNT(*) FROM daily_ip_log WHERE date LIKE ?1 GROUP BY date",
+            "INSERT OR REPLACE INTO daily_visitor_counts (date, count) \
+             SELECT date, COUNT(*) FROM daily_unique_ips WHERE date LIKE ?1 GROUP BY date",
             params![like_pattern],
         )?;
         tx.execute(
-            "DELETE FROM daily_ip_log WHERE date LIKE ?1",
+            "DELETE FROM daily_unique_ips WHERE date LIKE ?1",
             params![like_pattern],
         )?;
 
         for (table, col) in [
-            ("monthly_urls_hits", "hits"),
-            ("monthly_urls_bandwidth", "bandwidth"),
-            ("monthly_hosts_hits", "hits"),
-            ("monthly_hosts_bandwidth", "bandwidth"),
-            ("monthly_refs", "hits"),
+            ("monthly_top_urls_hits", "hits"),
+            ("monthly_top_urls_bandwidth", "bandwidth"),
+            ("monthly_top_ips_hits", "hits"),
+            ("monthly_top_ips_bandwidth", "bandwidth"),
+            ("monthly_referrers", "hits"),
             ("monthly_agents", "hits"),
         ] {
             Self::prune_monthly_table(&tx, table, period, col, top_n)?;
@@ -412,16 +412,16 @@ impl Database {
     }
 
     /// Finalize a completed year: write the definitive yearly site count and
-    /// discard the yearly_ip_log rows (all_time_hosts already has them).
+    /// discard the yearly_unique_ips rows (all_time_ips already has them).
     pub fn finalize_year(&mut self, year: &str) -> Result<()> {
         let tx = self.conn.transaction()?;
 
         tx.execute(
-            "INSERT OR REPLACE INTO site_count_cache (period, count) \
-             SELECT ?1, COUNT(*) FROM yearly_ip_log WHERE year = ?1",
+            "INSERT OR REPLACE INTO unique_visitor_counts (period, count) \
+             SELECT ?1, COUNT(*) FROM yearly_unique_ips WHERE year = ?1",
             params![year],
         )?;
-        tx.execute("DELETE FROM yearly_ip_log WHERE year = ?1", params![year])?;
+        tx.execute("DELETE FROM yearly_unique_ips WHERE year = ?1", params![year])?;
 
         tx.commit()
             .context("Failed to commit finalize_year transaction")?;

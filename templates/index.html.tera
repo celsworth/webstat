@@ -15,7 +15,7 @@
     <span class="stat-label">Total Visits</span>
   </div>
   <div class="stat-card stat-card--sites">
-    <span class="stat-value" title="{{ totals.sites_exact_fmt }}">{{ totals.sites_fmt }}</span>
+    <span class="stat-value" title="{{ totals.visitors_exact_fmt }}">{{ totals.visitors_fmt }}</span>
     <span class="stat-label">Unique Sites</span>
   </div>
   <div class="stat-card stat-card--bandwidth">
@@ -72,7 +72,7 @@
       <span class="mini-stat-label">Visits</span>
     </div>
     <div class="mini-stat-card stat-card--sites">
-      <span class="mini-stat-value" title="{{ yr.sites_exact_fmt }}">{{ yr.sites_fmt }}</span>
+      <span class="mini-stat-value" title="{{ yr.visitors_exact_fmt }}">{{ yr.visitors_fmt }}</span>
       <span class="mini-stat-label">Sites</span>
     </div>
     <div class="mini-stat-card stat-card--bandwidth">

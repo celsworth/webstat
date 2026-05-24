@@ -12,7 +12,7 @@
     <span class="stat-label">Total Visits</span>
   </div>
   <div class="stat-card stat-card--sites">
-    <span class="stat-value" title="{{ totals.sites_exact_fmt }}">{{ totals.sites_fmt }}</span>
+    <span class="stat-value" title="{{ totals.visitors_exact_fmt }}">{{ totals.visitors_fmt }}</span>
     <span class="stat-label">Unique Sites</span>
   </div>
   <div class="stat-card stat-card--bandwidth">
@@ -74,7 +74,7 @@
         <td>{{ row.month_name }}</td>
         <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
         <td class="num-col" data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">{{ row.visits_fmt }}</td>
-        <td class="num-col" data-value="{{ row.sites }}" title="{{ row.sites_exact_fmt }}">{{ row.sites_fmt }}</td>
+        <td class="num-col" data-value="{{ row.visitors }}" title="{{ row.visitors_exact_fmt }}">{{ row.visitors_fmt }}</td>
         <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
         <td><a href="../{{ row.period }}/index.html" class="btn-link">View -></a></td>
       </tr>
@@ -189,9 +189,9 @@
 </div>
 {% endif %}
 
-{% if top_sites_hits | length > 0 or top_sites_bandwidth | length > 0 %}
+{% if top_ips_hits | length > 0 or top_ips_bandwidth | length > 0 %}
 <div class="paired-tables-grid">
-{% if top_sites_hits | length > 0 %}
+{% if top_ips_hits | length > 0 %}
 <div class="stats-panel">
   <table class="data-table stats-panel__table">
     <thead>
@@ -199,7 +199,7 @@
       <tr><th>#</th><th>Site</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
     </thead>
     <tbody>
-      {% for row in top_sites_hits %}
+      {% for row in top_ips_hits %}
       <tr>
         <td>{{ loop.index }}</td>
         <td>{{ row.host }}</td>
@@ -213,7 +213,7 @@
 </div>
 {% endif %}
 
-{% if top_sites_bandwidth | length > 0 %}
+{% if top_ips_bandwidth | length > 0 %}
 <div class="stats-panel">
   <table class="data-table stats-panel__table">
     <thead>
@@ -221,7 +221,7 @@
       <tr><th>#</th><th>Site</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
     </thead>
     <tbody>
-      {% for row in top_sites_bandwidth %}
+      {% for row in top_ips_bandwidth %}
       <tr>
         <td>{{ loop.index }}</td>
         <td>{{ row.host }}</td>

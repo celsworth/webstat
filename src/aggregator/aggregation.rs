@@ -257,7 +257,7 @@ impl Processor {
 
         *run_acc.status_codes.entry(status).or_insert(0) += 1;
         run_acc.method_counts[method_index(entry.method())] += 1;
-        run_acc.proto_counts[proto_index(entry.proto())] += 1;
+        run_acc.protocol_counts[proto_index(entry.proto())] += 1;
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────

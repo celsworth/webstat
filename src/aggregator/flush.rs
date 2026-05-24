@@ -56,7 +56,7 @@ impl Processor {
             countries: &run_acc.countries,
             status_codes: &run_acc.status_codes,
             method_counts: &run_acc.method_counts,
-            proto_counts: &run_acc.proto_counts,
+            protocol_counts: &run_acc.protocol_counts,
             parse_states: pending_parse_states,
             retired_parse_states,
             visit_states: &visit_state_updates,

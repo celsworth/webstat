@@ -621,14 +621,14 @@ mod tests {
         assert_eq!(processed, 5);
 
         let conn = Connection::open(&db_path).expect("open db");
-        let sites: i64 = conn
+        let visitors: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM daily_ip_log WHERE date = '2026-05-08'",
+                "SELECT COUNT(*) FROM daily_unique_ips WHERE date = '2026-05-08'",
                 [],
                 |row| row.get(0),
             )
             .expect("sites");
-        assert_eq!(sites, 1, "same IP in same hour should count as 1 site");
+        assert_eq!(visitors, 1, "same IP in same hour should count as 1 site");
     }
 
     #[test]
@@ -655,14 +655,14 @@ mod tests {
         assert_eq!(processed, 5);
 
         let conn = Connection::open(&db_path).expect("open db");
-        let sites: i64 = conn
+        let visitors: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM daily_ip_log WHERE date = '2026-05-08'",
+                "SELECT COUNT(*) FROM daily_unique_ips WHERE date = '2026-05-08'",
                 [],
                 |row| row.get(0),
             )
             .expect("sites");
-        assert_eq!(sites, 5, "different IPs should each count as a site");
+        assert_eq!(visitors, 5, "different IPs should each count as a site");
     }
 
     #[test]
@@ -695,7 +695,7 @@ mod tests {
 
         let (month_hits, month_bw): (i64, i64) = conn
             .query_row(
-                "SELECT hits, bandwidth FROM monthly_urls_hits WHERE period = '2026-05' AND url = '/popular.html'",
+                "SELECT hits, bandwidth FROM monthly_top_urls_hits WHERE period = '2026-05' AND url = '/popular.html'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -782,10 +782,10 @@ mod tests {
             .expect("hits");
         assert_eq!(hits, 3, "hidden entries must still count as hits");
 
-        // Both hidden IPs appear in daily_ip_log (unique site counting).
+        // Both hidden IPs appear in daily_unique_ips (unique site counting).
         let site_count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM daily_ip_log WHERE date = '2026-05-08'",
+                "SELECT COUNT(*) FROM daily_unique_ips WHERE date = '2026-05-08'",
                 [],
                 |row| row.get(0),
             )
@@ -798,7 +798,7 @@ mod tests {
         // Hidden URLs must not appear in top URLs.
         let hidden_url_rows: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_urls_hits WHERE url LIKE '/static/%'",
+                "SELECT COUNT(*) FROM monthly_top_urls_hits WHERE url LIKE '/static/%'",
                 [],
                 |row| row.get(0),
             )
@@ -811,7 +811,7 @@ mod tests {
         // The visible URL must appear normally.
         let visible_hits: i64 = conn
             .query_row(
-                "SELECT COALESCE(SUM(hits), 0) FROM monthly_urls_hits WHERE url = '/page.html'",
+                "SELECT COALESCE(SUM(hits), 0) FROM monthly_top_urls_hits WHERE url = '/page.html'",
                 [],
                 |row| row.get(0),
             )
@@ -936,7 +936,7 @@ mod tests {
         // Hidden referrer must not appear; visible one must.
         let hidden_ref: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_refs WHERE referrer LIKE '%hidden-ref%'",
+                "SELECT COUNT(*) FROM monthly_referrers WHERE referrer LIKE '%hidden-ref%'",
                 [],
                 |row| row.get(0),
             )
@@ -948,7 +948,7 @@ mod tests {
 
         let visible_ref: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_refs WHERE referrer LIKE '%visible-ref%'",
+                "SELECT COUNT(*) FROM monthly_referrers WHERE referrer LIKE '%visible-ref%'",
                 [],
                 |row| row.get(0),
             )
@@ -961,7 +961,7 @@ mod tests {
         // Exactly one host row (the visible entry); the hidden one must be absent.
         let host_rows: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_hosts_hits WHERE period = '2026-05'",
+                "SELECT COUNT(*) FROM monthly_top_ips_hits WHERE period = '2026-05'",
                 [],
                 |row| row.get(0),
             )

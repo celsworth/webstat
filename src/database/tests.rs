@@ -16,7 +16,7 @@ mod tests {
         Database::open(":memory:").expect("open in-memory db")
     }
 
-    fn empty_flush(db: &mut Database, period: &str, method_counts: &[u64], proto_counts: &[u64]) {
+    fn empty_flush(db: &mut Database, period: &str, method_counts: &[u64], protocol_counts: &[u64]) {
         let empty_hourly = ahash::AHashMap::new();
         let empty_urls = ahash::AHashMap::new();
         let empty_hosts = ahash::AHashMap::new();
@@ -38,7 +38,7 @@ mod tests {
             countries: &empty_countries,
             status_codes: &empty_status,
             method_counts,
-            proto_counts,
+            protocol_counts,
             parse_states: &[],
             retired_parse_states: &[],
             visit_states: &[],
@@ -131,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn proto_counts_stored_with_version_strings_not_http_prefix() {
+    fn protocol_counts_stored_with_version_strings_not_http_prefix() {
         let mut db = open_test_db();
 
         let mut counts = [0u64; PROTO_COUNT];
@@ -142,7 +142,7 @@ mod tests {
         let h11: i64 = db
             .conn
             .query_row(
-                "SELECT hits FROM proto_counts WHERE period='2026-05' AND proto='1.1'",
+                "SELECT hits FROM protocol_counts WHERE period='2026-05' AND proto='1.1'",
                 [],
                 |r| r.get(0),
             )
@@ -152,7 +152,7 @@ mod tests {
         let h2: i64 = db
             .conn
             .query_row(
-                "SELECT hits FROM proto_counts WHERE period='2026-05' AND proto='2.0'",
+                "SELECT hits FROM protocol_counts WHERE period='2026-05' AND proto='2.0'",
                 [],
                 |r| r.get(0),
             )
@@ -162,7 +162,7 @@ mod tests {
         let http_rows: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM proto_counts WHERE proto LIKE 'HTTP/%'",
+                "SELECT COUNT(*) FROM protocol_counts WHERE proto LIKE 'HTTP/%'",
                 [],
                 |r| r.get(0),
             )
@@ -171,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn proto_counts_accumulate_across_flushes() {
+    fn protocol_counts_accumulate_across_flushes() {
         let mut db = open_test_db();
 
         let mut p1 = [0u64; PROTO_COUNT];
@@ -186,7 +186,7 @@ mod tests {
         let h11: i64 = db
             .conn
             .query_row(
-                "SELECT hits FROM proto_counts WHERE period='2026-05' AND proto='1.1'",
+                "SELECT hits FROM protocol_counts WHERE period='2026-05' AND proto='1.1'",
                 [],
                 |r| r.get(0),
             )
@@ -196,7 +196,7 @@ mod tests {
         let h2: i64 = db
             .conn
             .query_row(
-                "SELECT hits FROM proto_counts WHERE period='2026-05' AND proto='2.0'",
+                "SELECT hits FROM protocol_counts WHERE period='2026-05' AND proto='2.0'",
                 [],
                 |r| r.get(0),
             )
@@ -205,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn daily_ip_log_deduplicates_across_flushes() {
+    fn daily_unique_ips_deduplicates_across_flushes() {
         let mut db = open_test_db();
 
         let ip1 = crate::ip::Ip::V4(0x01020304);
@@ -243,7 +243,7 @@ mod tests {
                 countries: &empty_countries,
                 status_codes: &empty_status,
                 method_counts: &[0u64; METHOD_COUNT],
-                proto_counts: &[0u64; PROTO_COUNT],
+                protocol_counts: &[0u64; PROTO_COUNT],
                 parse_states: &[],
                 retired_parse_states: &[],
                 visit_states: &[],
@@ -255,7 +255,7 @@ mod tests {
         let count: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM daily_ip_log WHERE date='2026-05-01'",
+                "SELECT COUNT(*) FROM daily_unique_ips WHERE date='2026-05-01'",
                 [],
                 |r| r.get(0),
             )
@@ -282,7 +282,7 @@ mod tests {
             countries: &ahash::AHashMap::new(),
             status_codes: &ahash::AHashMap::new(),
             method_counts: &[0u64; METHOD_COUNT],
-            proto_counts: &[0u64; PROTO_COUNT],
+            protocol_counts: &[0u64; PROTO_COUNT],
             parse_states: &[],
             retired_parse_states: &[],
             visit_states: &[],
@@ -292,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn finalize_month_populates_all_time_hosts_and_yearly_ip_log() {
+    fn finalize_month_populates_all_time_ips_and_yearly_unique_ips() {
         let mut db = open_test_db();
 
         let ip1 = crate::ip::Ip::V4(0x01020304);
@@ -326,7 +326,7 @@ mod tests {
             countries: &ahash::AHashMap::new(),
             status_codes: &ahash::AHashMap::new(),
             method_counts: &[0u64; METHOD_COUNT],
-            proto_counts: &[0u64; PROTO_COUNT],
+            protocol_counts: &[0u64; PROTO_COUNT],
             parse_states: &[],
             retired_parse_states: &[],
             visit_states: &[],
@@ -338,24 +338,24 @@ mod tests {
 
         let host_count: i64 = db
             .conn
-            .query_row("SELECT COUNT(*) FROM all_time_hosts", [], |r| r.get(0))
-            .expect("all_time_hosts count");
+            .query_row("SELECT COUNT(*) FROM all_time_ips", [], |r| r.get(0))
+            .expect("all_time_ips count");
         assert_eq!(host_count, 2);
 
         let yearly_count: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM yearly_ip_log WHERE year='2026'",
+                "SELECT COUNT(*) FROM yearly_unique_ips WHERE year='2026'",
                 [],
                 |r| r.get(0),
             )
-            .expect("yearly_ip_log count");
+            .expect("yearly_unique_ips count");
         assert_eq!(yearly_count, 2);
 
         let url_count: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_urls_hits WHERE period='2026-05'",
+                "SELECT COUNT(*) FROM monthly_top_urls_hits WHERE period='2026-05'",
                 [],
                 |r| r.get(0),
             )
@@ -382,7 +382,7 @@ mod tests {
         let cached: i64 = db
             .conn
             .query_row(
-                "SELECT COALESCE((SELECT count FROM site_count_cache WHERE period='2026'), 0)",
+                "SELECT COALESCE((SELECT count FROM unique_visitor_counts WHERE period='2026'), 0)",
                 [],
                 |r| r.get(0),
             )
@@ -394,22 +394,22 @@ mod tests {
 
         db.finalize_year("2026").expect("finalize year");
 
-        // yearly_ip_log for 2026 should be cleared
+        // yearly_unique_ips for 2026 should be cleared
         let remaining: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM yearly_ip_log WHERE year='2026'",
+                "SELECT COUNT(*) FROM yearly_unique_ips WHERE year='2026'",
                 [],
                 |r| r.get(0),
             )
-            .expect("yearly_ip_log after finalize_year");
+            .expect("yearly_unique_ips after finalize_year");
         assert_eq!(remaining, 0);
 
-        // site_count_cache should still have the final count
+        // unique_visitor_counts should still have the final count
         let final_count: i64 = db
             .conn
             .query_row(
-                "SELECT COALESCE((SELECT count FROM site_count_cache WHERE period='2026'), 0)",
+                "SELECT COALESCE((SELECT count FROM unique_visitor_counts WHERE period='2026'), 0)",
                 [],
                 |r| r.get(0),
             )

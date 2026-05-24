@@ -61,14 +61,14 @@ struct PeriodMonth {
 struct TotalsView {
     hits: u64,
     visits: u64,
-    sites: u64,
+    visitors: u64,
     bandwidth: u64,
     hits_fmt: String,
     hits_exact_fmt: String,
     visits_fmt: String,
     visits_exact_fmt: String,
-    sites_fmt: String,
-    sites_exact_fmt: String,
+    visitors_fmt: String,
+    visitors_exact_fmt: String,
     bandwidth_fmt: String,
 }
 
@@ -78,14 +78,14 @@ struct DailyRow {
     is_weekend: bool,
     hits: u64,
     visits: u64,
-    sites: u64,
+    visitors: u64,
     bandwidth: u64,
     hits_fmt: String,
     hits_exact_fmt: String,
     visits_fmt: String,
     visits_exact_fmt: String,
-    sites_fmt: String,
-    sites_exact_fmt: String,
+    visitors_fmt: String,
+    visitors_exact_fmt: String,
     bandwidth_fmt: String,
 }
 
@@ -110,14 +110,14 @@ struct MonthRow {
     month_name: String,
     hits: u64,
     visits: u64,
-    sites: u64,
+    visitors: u64,
     bandwidth: u64,
     hits_fmt: String,
     hits_exact_fmt: String,
     visits_fmt: String,
     visits_exact_fmt: String,
-    sites_fmt: String,
-    sites_exact_fmt: String,
+    visitors_fmt: String,
+    visitors_exact_fmt: String,
     bandwidth_fmt: String,
 }
 
@@ -214,12 +214,12 @@ struct DailyAvgMax {
     avg_visits_exact_fmt: String,
     max_visits_fmt: String,
     max_visits_exact_fmt: String,
-    avg_sites: u64,
-    max_sites: u64,
-    avg_sites_fmt: String,
-    avg_sites_exact_fmt: String,
-    max_sites_fmt: String,
-    max_sites_exact_fmt: String,
+    avg_visitors: u64,
+    max_visitors: u64,
+    avg_visitors_fmt: String,
+    avg_visitors_exact_fmt: String,
+    max_visitors_fmt: String,
+    max_visitors_exact_fmt: String,
     avg_bandwidth: u64,
     max_bandwidth: u64,
     avg_bandwidth_fmt: String,
@@ -252,8 +252,8 @@ struct MonthlySummary {
     totals: TotalsView,
     top_urls_hits: Vec<TopUrlRow>,
     top_urls_bandwidth: Vec<TopUrlRow>,
-    top_sites_hits: Vec<TopHostRow>,
-    top_sites_bandwidth: Vec<TopHostRow>,
+    top_ips_hits: Vec<TopHostRow>,
+    top_ips_bandwidth: Vec<TopHostRow>,
     top_refs: Vec<TopRefRow>,
     top_agents: Vec<TopAgentRow>,
     top_countries: Vec<TopCountryRow>,
@@ -270,8 +270,8 @@ struct YearlySummary {
     monthly_rows: Vec<MonthRow>,
     top_urls_hits: Vec<TopUrlRow>,
     top_urls_bandwidth: Vec<TopUrlRow>,
-    top_sites_hits: Vec<TopHostRow>,
-    top_sites_bandwidth: Vec<TopHostRow>,
+    top_ips_hits: Vec<TopHostRow>,
+    top_ips_bandwidth: Vec<TopHostRow>,
     top_refs: Vec<TopRefRow>,
     top_agents: Vec<TopAgentRow>,
     top_countries: Vec<TopCountryRow>,
@@ -286,14 +286,14 @@ struct YearAggregateRow {
     year: i32,
     hits: u64,
     visits: u64,
-    sites: u64,
+    visitors: u64,
     bandwidth: u64,
     hits_fmt: String,
     hits_exact_fmt: String,
     visits_fmt: String,
     visits_exact_fmt: String,
-    sites_fmt: String,
-    sites_exact_fmt: String,
+    visitors_fmt: String,
+    visitors_exact_fmt: String,
     bandwidth_fmt: String,
 }
 
@@ -463,8 +463,8 @@ fn render_year_page(
     page_ctx.insert("monthly_rows", &summary.monthly_rows);
     page_ctx.insert("top_urls_hits", &summary.top_urls_hits);
     page_ctx.insert("top_urls_bandwidth", &summary.top_urls_bandwidth);
-    page_ctx.insert("top_sites_hits", &summary.top_sites_hits);
-    page_ctx.insert("top_sites_bandwidth", &summary.top_sites_bandwidth);
+    page_ctx.insert("top_ips_hits", &summary.top_ips_hits);
+    page_ctx.insert("top_ips_bandwidth", &summary.top_ips_bandwidth);
     page_ctx.insert("top_refs", &summary.top_refs);
     page_ctx.insert("top_agents", &summary.top_agents);
     page_ctx.insert("top_countries", &summary.top_countries);
@@ -515,8 +515,8 @@ fn render_month_page(
     page_ctx.insert("totals", &summary.totals);
     page_ctx.insert("top_urls_hits", &summary.top_urls_hits);
     page_ctx.insert("top_urls_bandwidth", &summary.top_urls_bandwidth);
-    page_ctx.insert("top_sites_hits", &summary.top_sites_hits);
-    page_ctx.insert("top_sites_bandwidth", &summary.top_sites_bandwidth);
+    page_ctx.insert("top_ips_hits", &summary.top_ips_hits);
+    page_ctx.insert("top_ips_bandwidth", &summary.top_ips_bandwidth);
     page_ctx.insert("top_refs", &summary.top_refs);
     page_ctx.insert("top_agents", &summary.top_agents);
     page_ctx.insert("top_countries", &summary.top_countries);
@@ -585,18 +585,18 @@ fn copy_assets(output_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn format_totals(hits: u64, visits: u64, sites: u64, bandwidth: u64, compact_counts: bool) -> TotalsView {
+fn format_totals(hits: u64, visits: u64, visitors: u64, bandwidth: u64, compact_counts: bool) -> TotalsView {
     TotalsView {
         hits,
         visits,
-        sites,
+        visitors,
         bandwidth,
         hits_fmt: count_fmt(hits, compact_counts),
         hits_exact_fmt: number_fmt(hits),
         visits_fmt: count_fmt(visits, compact_counts),
         visits_exact_fmt: number_fmt(visits),
-        sites_fmt: count_fmt(sites, compact_counts),
-        sites_exact_fmt: number_fmt(sites),
+        visitors_fmt: count_fmt(visitors, compact_counts),
+        visitors_exact_fmt: number_fmt(visitors),
         bandwidth_fmt: format_bytes(bandwidth),
     }
 }

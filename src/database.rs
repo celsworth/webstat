@@ -85,21 +85,21 @@ CREATE TABLE IF NOT EXISTS hourly_stats (
     status_5xx INTEGER DEFAULT 0,
     PRIMARY KEY (date, hour)
 );
-CREATE TABLE IF NOT EXISTS monthly_urls_hits (
+CREATE TABLE IF NOT EXISTS monthly_top_urls_hits (
     period    TEXT NOT NULL,
     url       TEXT NOT NULL,
     hits      INTEGER NOT NULL DEFAULT 0,
     bandwidth INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, url)
 );
-CREATE TABLE IF NOT EXISTS monthly_urls_bandwidth (
+CREATE TABLE IF NOT EXISTS monthly_top_urls_bandwidth (
     period    TEXT NOT NULL,
     url       TEXT NOT NULL,
     hits      INTEGER NOT NULL DEFAULT 0,
     bandwidth INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, url)
 );
-CREATE TABLE IF NOT EXISTS monthly_hosts_hits (
+CREATE TABLE IF NOT EXISTS monthly_top_ips_hits (
     period       TEXT    NOT NULL,
     host_kind    INTEGER NOT NULL,
     host_hi      INTEGER NOT NULL,
@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS monthly_hosts_hits (
     country_code TEXT    NOT NULL DEFAULT '--',
     PRIMARY KEY (period, host_kind, host_hi, host_lo, host_text)
 );
-CREATE TABLE IF NOT EXISTS monthly_hosts_bandwidth (
+CREATE TABLE IF NOT EXISTS monthly_top_ips_bandwidth (
     period       TEXT    NOT NULL,
     host_kind    INTEGER NOT NULL,
     host_hi      INTEGER NOT NULL,
@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS monthly_hosts_bandwidth (
     country_code TEXT    NOT NULL DEFAULT '--',
     PRIMARY KEY (period, host_kind, host_hi, host_lo, host_text)
 );
-CREATE TABLE IF NOT EXISTS monthly_refs (
+CREATE TABLE IF NOT EXISTS monthly_referrers (
     period   TEXT NOT NULL,
     referrer TEXT NOT NULL,
     hits     INTEGER NOT NULL DEFAULT 0,
@@ -151,32 +151,32 @@ CREATE TABLE IF NOT EXISTS method_counts (
     hits   INTEGER DEFAULT 0,
     PRIMARY KEY (period, method)
 );
-CREATE TABLE IF NOT EXISTS proto_counts (
+CREATE TABLE IF NOT EXISTS protocol_counts (
     period TEXT,
     proto  TEXT,
     hits   INTEGER DEFAULT 0,
     PRIMARY KEY (period, proto)
 );
-CREATE TABLE IF NOT EXISTS daily_ip_log (
+CREATE TABLE IF NOT EXISTS daily_unique_ips (
     date     TEXT    NOT NULL,
     ip_kind  INTEGER NOT NULL,
     ip_hi    INTEGER NOT NULL,
     ip_lo    INTEGER NOT NULL,
     PRIMARY KEY (date, ip_kind, ip_hi, ip_lo)
 );
-CREATE INDEX IF NOT EXISTS daily_ip_log_date ON daily_ip_log (date);
-CREATE TABLE IF NOT EXISTS yearly_ip_log (
+CREATE INDEX IF NOT EXISTS daily_unique_ips_date ON daily_unique_ips (date);
+CREATE TABLE IF NOT EXISTS yearly_unique_ips (
     year    TEXT    NOT NULL,
     ip_kind INTEGER NOT NULL,
     ip_hi   INTEGER NOT NULL,
     ip_lo   INTEGER NOT NULL,
     PRIMARY KEY (year, ip_kind, ip_hi, ip_lo)
 );
-CREATE TABLE IF NOT EXISTS site_count_cache (
+CREATE TABLE IF NOT EXISTS unique_visitor_counts (
     period TEXT PRIMARY KEY,
     count  INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS daily_site_counts (
+CREATE TABLE IF NOT EXISTS daily_visitor_counts (
     date  TEXT PRIMARY KEY,
     count INTEGER NOT NULL DEFAULT 0
 );
@@ -184,11 +184,11 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS country_code_names (
+CREATE TABLE IF NOT EXISTS countries (
     country_code TEXT PRIMARY KEY,
     country_name TEXT NOT NULL DEFAULT 'Unknown'
 );
-CREATE TABLE IF NOT EXISTS all_time_hosts (
+CREATE TABLE IF NOT EXISTS all_time_ips (
     host_kind INTEGER NOT NULL,
     host_hi   INTEGER NOT NULL,
     host_lo   INTEGER NOT NULL,

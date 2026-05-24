@@ -39,7 +39,7 @@ pub(super) fn daily_visits_chart(daily: &[DailyRow]) -> Result<String> {
         .map(|d| d.date.split('-').next_back().unwrap_or("").to_string())
         .collect();
     let visits: Vec<u64> = daily.iter().map(|d| d.visits).collect();
-    let sites: Vec<u64> = daily.iter().map(|d| d.sites).collect();
+    let visitors: Vec<u64> = daily.iter().map(|d| d.visitors).collect();
 
     serde_json::to_string(&json!({
       "type": "bar",
@@ -47,7 +47,7 @@ pub(super) fn daily_visits_chart(daily: &[DailyRow]) -> Result<String> {
         "labels": labels,
         "datasets": [
           { "label": "Visits", "data": visits, "backgroundColor": PALETTE[5], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Sites", "data": sites, "backgroundColor": PALETTE[3], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
+          { "label": "Sites", "data": visitors, "backgroundColor": PALETTE[3], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
         ]
       },
       "options": simple_bar_options("Visits & Sites")
@@ -108,7 +108,7 @@ pub(super) fn monthly_visits_chart(monthly: &[MonthRow]) -> Result<String> {
         .map(|m| m.month_name.chars().take(3).collect::<String>())
         .collect();
     let visits: Vec<u64> = monthly.iter().map(|m| m.visits).collect();
-    let sites: Vec<u64> = monthly.iter().map(|m| m.sites).collect();
+    let visitors: Vec<u64> = monthly.iter().map(|m| m.visitors).collect();
 
     serde_json::to_string(&json!({
       "type": "bar",
@@ -116,7 +116,7 @@ pub(super) fn monthly_visits_chart(monthly: &[MonthRow]) -> Result<String> {
         "labels": labels,
         "datasets": [
           { "label": "Visits", "data": visits, "backgroundColor": PALETTE[5], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Sites", "data": sites, "backgroundColor": PALETTE[3], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
+          { "label": "Sites", "data": visitors, "backgroundColor": PALETTE[3], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
         ]
       },
       "options": simple_bar_options("Visits & Sites")
@@ -149,7 +149,7 @@ pub(super) fn yearly_overview_chart(yearly: &[YearAggregateRow]) -> Result<Strin
 pub(super) fn yearly_visits_chart(yearly: &[YearAggregateRow]) -> Result<String> {
     let labels: Vec<String> = yearly.iter().map(|y| y.year.to_string()).collect();
     let visits: Vec<u64> = yearly.iter().map(|y| y.visits).collect();
-    let sites: Vec<u64> = yearly.iter().map(|y| y.sites).collect();
+    let visitors: Vec<u64> = yearly.iter().map(|y| y.visitors).collect();
 
     serde_json::to_string(&json!({
       "type": "bar",
@@ -157,7 +157,7 @@ pub(super) fn yearly_visits_chart(yearly: &[YearAggregateRow]) -> Result<String>
         "labels": labels,
         "datasets": [
           { "label": "Visits", "data": visits, "backgroundColor": PALETTE[5], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Sites", "data": sites, "backgroundColor": PALETTE[3], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
+          { "label": "Sites", "data": visitors, "backgroundColor": PALETTE[3], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
         ]
       },
       "options": simple_bar_options("Visits & Sites")

@@ -79,8 +79,8 @@ pub(super) fn monthly_summary(
 
     let top_urls_hits = top_urls_hits(conn, &period, top_n, compact_counts)?;
     let top_urls_bandwidth = top_urls_bandwidth(conn, &period, top_n, compact_counts)?;
-    let top_sites_hits = top_sites_hits(conn, &period, top_n, compact_counts, anonymise_ips)?;
-    let top_sites_bandwidth = top_sites_bandwidth(conn, &period, top_n, compact_counts, anonymise_ips)?;
+    let top_ips_hits = top_ips_hits(conn, &period, top_n, compact_counts, anonymise_ips)?;
+    let top_ips_bandwidth = top_ips_bandwidth(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_refs = top_refs(conn, &period, top_n, compact_counts)?;
 
     let top_agents_raw = top_agents_raw(conn, &period, top_n)?;
@@ -131,8 +131,8 @@ pub(super) fn monthly_summary(
         totals,
         top_urls_hits,
         top_urls_bandwidth,
-        top_sites_hits,
-        top_sites_bandwidth,
+        top_ips_hits,
+        top_ips_bandwidth,
         top_refs,
         top_agents,
         top_countries,
@@ -157,8 +157,8 @@ pub(super) fn yearly_summary(
 
     let top_urls_hits = top_urls_hits(conn, &period, top_n, compact_counts)?;
     let top_urls_bandwidth = top_urls_bandwidth(conn, &period, top_n, compact_counts)?;
-    let top_sites_hits = top_sites_hits(conn, &period, top_n, compact_counts, anonymise_ips)?;
-    let top_sites_bandwidth = top_sites_bandwidth(conn, &period, top_n, compact_counts, anonymise_ips)?;
+    let top_ips_hits = top_ips_hits(conn, &period, top_n, compact_counts, anonymise_ips)?;
+    let top_ips_bandwidth = top_ips_bandwidth(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_refs = top_refs(conn, &period, top_n, compact_counts)?;
     let top_agents_raw = top_agents_raw(conn, &period, top_n)?;
     let top_countries_raw = top_countries_raw(conn, &period, top_n)?;
@@ -202,8 +202,8 @@ pub(super) fn yearly_summary(
         monthly_rows,
         top_urls_hits,
         top_urls_bandwidth,
-        top_sites_hits,
-        top_sites_bandwidth,
+        top_ips_hits,
+        top_ips_bandwidth,
         top_refs,
         top_agents,
         top_countries,
@@ -277,18 +277,18 @@ fn daily_stats(
 
     // Batch-fetch daily IP counts: live rows for the current month, cached rows for pruned months.
     let mut ip_stmt = conn.prepare(
-        "SELECT date, COUNT(*) FROM daily_ip_log WHERE date LIKE ?1 GROUP BY date
+        "SELECT date, COUNT(*) FROM daily_unique_ips WHERE date LIKE ?1 GROUP BY date
          UNION ALL
-         SELECT date, count FROM daily_site_counts WHERE date LIKE ?1
-           AND date NOT IN (SELECT DISTINCT date FROM daily_ip_log WHERE date LIKE ?1)",
+         SELECT date, count FROM daily_visitor_counts WHERE date LIKE ?1
+           AND date NOT IN (SELECT DISTINCT date FROM daily_unique_ips WHERE date LIKE ?1)",
     )?;
     let ip_rows = ip_stmt.query_map(params![like], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
     })?;
-    let mut daily_sites: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut daily_visitors: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
     for row in ip_rows {
         let (date, count) = row?;
-        daily_sites.insert(date, count);
+        daily_visitors.insert(date, count);
     }
 
     let mut stmt = conn.prepare(
@@ -314,20 +314,20 @@ fn daily_stats(
     let mut out = Vec::new();
     for row in rows.by_ref() {
         let (date, hits, visits, bandwidth) = row?;
-        let sites = daily_sites.get(&date).copied().unwrap_or(0);
+        let visitors = daily_visitors.get(&date).copied().unwrap_or(0);
         out.push(DailyRow {
             is_weekend: is_weekend_date(&date),
             date,
             hits,
             visits,
-            sites,
+            visitors,
             bandwidth,
             hits_fmt: count_fmt(hits, compact_counts),
             hits_exact_fmt: super::number_fmt(hits),
             visits_fmt: count_fmt(visits, compact_counts),
             visits_exact_fmt: super::number_fmt(visits),
-            sites_fmt: count_fmt(sites, compact_counts),
-            sites_exact_fmt: super::number_fmt(sites),
+            visitors_fmt: count_fmt(visitors, compact_counts),
+            visitors_exact_fmt: super::number_fmt(visitors),
             bandwidth_fmt: format_bytes(bandwidth),
         });
     }
@@ -418,9 +418,9 @@ fn monthly_totals(
         ))
     })?;
 
-    let sites = site_count_for_scope(conn, &prefix)?;
+    let visitors = visitor_count_for_scope(conn, &prefix)?;
 
-    Ok(format_totals(row.0, row.1, sites, row.2, compact_counts))
+    Ok(format_totals(row.0, row.1, visitors, row.2, compact_counts))
 }
 
 fn yearly_totals(conn: &Connection, year: i32, compact_counts: bool) -> Result<TotalsView> {
@@ -440,9 +440,9 @@ fn yearly_totals(conn: &Connection, year: i32, compact_counts: bool) -> Result<T
         ))
     })?;
 
-    let sites = site_count_for_scope(conn, &year.to_string())?;
+    let visitors = visitor_count_for_scope(conn, &year.to_string())?;
 
-    Ok(format_totals(row.0, row.1, sites, row.2, compact_counts))
+    Ok(format_totals(row.0, row.1, visitors, row.2, compact_counts))
 }
 
 fn monthly_rows(conn: &Connection, year: i32, compact_counts: bool) -> Result<Vec<MonthRow>> {
@@ -469,7 +469,7 @@ fn monthly_rows(conn: &Connection, year: i32, compact_counts: bool) -> Result<Ve
     let mut out = Vec::new();
     for row in rows {
         let (ym, hits, visits, bandwidth) = row?;
-        let sites = site_count_for_scope(conn, &ym)?;
+        let visitors = visitor_count_for_scope(conn, &ym)?;
         let month = ym
             .split('-')
             .nth(1)
@@ -482,14 +482,14 @@ fn monthly_rows(conn: &Connection, year: i32, compact_counts: bool) -> Result<Ve
             month_name: month_name(month).to_string(),
             hits,
             visits,
-            sites,
+            visitors,
             bandwidth,
             hits_fmt: count_fmt(hits, compact_counts),
             hits_exact_fmt: super::number_fmt(hits),
             visits_fmt: count_fmt(visits, compact_counts),
             visits_exact_fmt: super::number_fmt(visits),
-            sites_fmt: count_fmt(sites, compact_counts),
-            sites_exact_fmt: super::number_fmt(sites),
+            visitors_fmt: count_fmt(visitors, compact_counts),
+            visitors_exact_fmt: super::number_fmt(visitors),
             bandwidth_fmt: format_bytes(bandwidth),
         });
     }
@@ -520,7 +520,7 @@ fn yearly_rows(conn: &Connection, compact_counts: bool) -> Result<Vec<YearAggreg
     let mut out = Vec::new();
     for row in rows {
         let (yr, hits, visits, bandwidth) = row?;
-        let sites = site_count_for_scope(conn, &yr)?;
+        let visitors = visitor_count_for_scope(conn, &yr)?;
         let year = yr.parse::<i32>().unwrap_or(0);
         if year <= 0 {
             continue;
@@ -530,14 +530,14 @@ fn yearly_rows(conn: &Connection, compact_counts: bool) -> Result<Vec<YearAggreg
             year,
             hits,
             visits,
-            sites,
+            visitors,
             bandwidth,
             hits_fmt: count_fmt(hits, compact_counts),
             hits_exact_fmt: super::number_fmt(hits),
             visits_fmt: count_fmt(visits, compact_counts),
             visits_exact_fmt: super::number_fmt(visits),
-            sites_fmt: count_fmt(sites, compact_counts),
-            sites_exact_fmt: super::number_fmt(sites),
+            visitors_fmt: count_fmt(visitors, compact_counts),
+            visitors_exact_fmt: super::number_fmt(visitors),
             bandwidth_fmt: format_bytes(bandwidth),
         });
     }
@@ -561,18 +561,18 @@ fn overall_totals(conn: &Connection, compact_counts: bool) -> Result<TotalsView>
         ))
     })?;
 
-    let sites = all_time_site_count(conn)?;
+    let visitors = all_time_visitor_count(conn)?;
 
-    Ok(format_totals(row.0, row.1, sites, row.2, compact_counts))
+    Ok(format_totals(row.0, row.1, visitors, row.2, compact_counts))
 }
 
-fn site_count_for_scope(conn: &Connection, scope: &str) -> Result<u64> {
+fn visitor_count_for_scope(conn: &Connection, scope: &str) -> Result<u64> {
     match scope.len() {
         10 => {
             let count: i64 = conn.query_row(
                 "SELECT COALESCE(
-                    (SELECT COUNT(*) FROM daily_ip_log WHERE date = ?1),
-                    (SELECT count FROM daily_site_counts WHERE date = ?1),
+                    (SELECT COUNT(*) FROM daily_unique_ips WHERE date = ?1),
+                    (SELECT count FROM daily_visitor_counts WHERE date = ?1),
                     0
                  )",
                 params![scope],
@@ -581,12 +581,12 @@ fn site_count_for_scope(conn: &Connection, scope: &str) -> Result<u64> {
             Ok(count as u64)
         }
         7 => {
-            // Use precomputed cache; for the in-progress month fall back to daily_ip_log.
+            // Use precomputed cache; for the in-progress month fall back to daily_unique_ips.
             let like = format!("{}-%", scope);
             let count: i64 = conn.query_row(
                 "SELECT COALESCE(
-                    (SELECT count FROM site_count_cache WHERE period = ?1),
-                    (SELECT COUNT(*) FROM (SELECT DISTINCT ip_kind,ip_hi,ip_lo FROM daily_ip_log WHERE date LIKE ?2)),
+                    (SELECT count FROM unique_visitor_counts WHERE period = ?1),
+                    (SELECT COUNT(*) FROM (SELECT DISTINCT ip_kind,ip_hi,ip_lo FROM daily_unique_ips WHERE date LIKE ?2)),
                     0
                  )",
                 params![scope, like],
@@ -595,15 +595,15 @@ fn site_count_for_scope(conn: &Connection, scope: &str) -> Result<u64> {
             Ok(count as u64)
         }
         4 => {
-            // Use precomputed cache; for the in-progress year combine yearly_ip_log with daily_ip_log.
+            // Use precomputed cache; for the in-progress year combine yearly_unique_ips with daily_unique_ips.
             let like = format!("{}-%", scope);
             let count: i64 = conn.query_row(
                 "SELECT COALESCE(
-                    (SELECT count FROM site_count_cache WHERE period = ?1),
+                    (SELECT count FROM unique_visitor_counts WHERE period = ?1),
                     (SELECT COUNT(*) FROM (
-                        SELECT ip_kind,ip_hi,ip_lo FROM yearly_ip_log WHERE year = ?1
+                        SELECT ip_kind,ip_hi,ip_lo FROM yearly_unique_ips WHERE year = ?1
                         UNION
-                        SELECT ip_kind,ip_hi,ip_lo FROM daily_ip_log WHERE date LIKE ?2
+                        SELECT ip_kind,ip_hi,ip_lo FROM daily_unique_ips WHERE date LIKE ?2
                     )),
                     0
                  )",
@@ -616,8 +616,8 @@ fn site_count_for_scope(conn: &Connection, scope: &str) -> Result<u64> {
     }
 }
 
-fn all_time_site_count(conn: &Connection) -> Result<u64> {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM all_time_hosts", [], |row| row.get(0))?;
+fn all_time_visitor_count(conn: &Connection) -> Result<u64> {
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM all_time_ips", [], |row| row.get(0))?;
     Ok(count as u64)
 }
 
@@ -629,7 +629,7 @@ fn top_urls_hits(
 ) -> Result<Vec<TopUrlRow>> {
     top_urls_from_table(
         conn,
-        "monthly_urls_hits",
+        "monthly_top_urls_hits",
         period,
         top_n,
         compact_counts,
@@ -645,7 +645,7 @@ fn top_urls_bandwidth(
 ) -> Result<Vec<TopUrlRow>> {
     top_urls_from_table(
         conn,
-        "monthly_urls_bandwidth",
+        "monthly_top_urls_bandwidth",
         period,
         top_n,
         compact_counts,
@@ -710,16 +710,16 @@ fn top_urls_from_table(
     Ok(out)
 }
 
-fn top_sites_hits(
+fn top_ips_hits(
     conn: &Connection,
     period: &str,
     top_n: usize,
     compact_counts: bool,
     anonymise_ips: bool,
 ) -> Result<Vec<TopHostRow>> {
-    top_sites_from_table(
+    top_ips_from_table(
         conn,
-        "monthly_hosts_hits",
+        "monthly_top_ips_hits",
         period,
         top_n,
         compact_counts,
@@ -728,16 +728,16 @@ fn top_sites_hits(
     )
 }
 
-fn top_sites_bandwidth(
+fn top_ips_bandwidth(
     conn: &Connection,
     period: &str,
     top_n: usize,
     compact_counts: bool,
     anonymise_ips: bool,
 ) -> Result<Vec<TopHostRow>> {
-    top_sites_from_table(
+    top_ips_from_table(
         conn,
-        "monthly_hosts_bandwidth",
+        "monthly_top_ips_bandwidth",
         period,
         top_n,
         compact_counts,
@@ -746,7 +746,7 @@ fn top_sites_bandwidth(
     )
 }
 
-fn top_sites_from_table(
+fn top_ips_from_table(
     conn: &Connection,
     table: &str,
     period: &str,
@@ -763,7 +763,7 @@ fn top_sites_from_table(
                         COALESCE(t.country_code, '--'),
                         COALESCE(cn.country_name, 'Unknown')
                  FROM {table} t
-                 LEFT JOIN country_code_names cn ON cn.country_code = t.country_code
+                 LEFT JOIN countries cn ON cn.country_code = t.country_code
                  WHERE t.period = ?1
                  ORDER BY {order_metric} DESC, t.hits DESC
                  LIMIT ?2"
@@ -778,7 +778,7 @@ fn top_sites_from_table(
                         COALESCE(MAX(t.country_code), '--'),
                         COALESCE(MAX(cn.country_name), 'Unknown')
                  FROM {table} t
-                 LEFT JOIN country_code_names cn ON cn.country_code = t.country_code
+                 LEFT JOIN countries cn ON cn.country_code = t.country_code
                  WHERE t.period LIKE ?1
                  GROUP BY t.host_kind, t.host_hi, t.host_lo, t.host_text
                  ORDER BY {order_metric} DESC, hits DESC
@@ -864,7 +864,7 @@ fn top_refs(
     let (sql, period_param) = if period.len() == 7 {
         (
             "SELECT referrer, hits
-             FROM monthly_refs
+             FROM monthly_referrers
              WHERE period = ?1
              ORDER BY hits DESC
              LIMIT ?2"
@@ -874,7 +874,7 @@ fn top_refs(
     } else {
         (
             "SELECT referrer, SUM(hits) AS hits
-             FROM monthly_refs
+             FROM monthly_referrers
              WHERE period LIKE ?1
              GROUP BY referrer
              ORDER BY hits DESC
@@ -972,7 +972,7 @@ fn top_countries_raw(
                     COALESCE(n.country_name, 'Unknown') AS country_name,
                     c.hits
              FROM top_countries c
-             LEFT JOIN country_code_names n ON n.country_code = c.country_code
+             LEFT JOIN countries n ON n.country_code = c.country_code
              WHERE c.period = ?1
              ORDER BY c.hits DESC
              LIMIT ?2"
@@ -985,7 +985,7 @@ fn top_countries_raw(
                     COALESCE(n.country_name, 'Unknown') AS country_name,
                     SUM(c.hits) AS hits
              FROM top_countries c
-             LEFT JOIN country_code_names n ON n.country_code = c.country_code
+             LEFT JOIN countries n ON n.country_code = c.country_code
              WHERE c.period LIKE ?1
              GROUP BY c.country_code
              ORDER BY hits DESC
@@ -1022,7 +1022,7 @@ fn top_countries_all_raw(conn: &Connection, limit: usize) -> Result<Vec<(String,
                 COALESCE(n.country_name, 'Unknown') AS country_name,
                 h.hits
          FROM country_hits h
-         LEFT JOIN country_code_names n ON n.country_code = h.country_code
+         LEFT JOIN countries n ON n.country_code = h.country_code
          ORDER BY h.hits DESC
          LIMIT ?1",
     )?;
@@ -1120,12 +1120,12 @@ fn status_codes_all(conn: &Connection, compact_counts: bool) -> Result<Vec<Statu
 fn proto_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result<Vec<ProtoRow>> {
     let (sql, period_param) = if period.len() == 7 {
         (
-            "SELECT proto, hits FROM proto_counts WHERE period = ?1 ORDER BY hits DESC".to_string(),
+            "SELECT proto, hits FROM protocol_counts WHERE period = ?1 ORDER BY hits DESC".to_string(),
             period.to_string(),
         )
     } else {
         (
-            "SELECT proto, SUM(hits) AS hits FROM proto_counts WHERE period LIKE ?1 GROUP BY proto ORDER BY hits DESC".to_string(),
+            "SELECT proto, SUM(hits) AS hits FROM protocol_counts WHERE period LIKE ?1 GROUP BY proto ORDER BY hits DESC".to_string(),
             format!("{}-%", period),
         )
     };
@@ -1207,8 +1207,8 @@ fn daily_avg_max_from_rows(daily: &[DailyRow], compact_counts: bool) -> DailyAvg
     let max_hits = daily.iter().map(|r| r.hits).max().unwrap_or(0);
     let avg_visits = daily.iter().map(|r| r.visits).sum::<u64>() / days;
     let max_visits = daily.iter().map(|r| r.visits).max().unwrap_or(0);
-    let avg_sites = daily.iter().map(|r| r.sites).sum::<u64>() / days;
-    let max_sites = daily.iter().map(|r| r.sites).max().unwrap_or(0);
+    let avg_visitors = daily.iter().map(|r| r.visitors).sum::<u64>() / days;
+    let max_visitors = daily.iter().map(|r| r.visitors).max().unwrap_or(0);
     let avg_bandwidth = daily.iter().map(|r| r.bandwidth).sum::<u64>() / days;
     let max_bandwidth = daily.iter().map(|r| r.bandwidth).max().unwrap_or(0);
 
@@ -1225,12 +1225,12 @@ fn daily_avg_max_from_rows(daily: &[DailyRow], compact_counts: bool) -> DailyAvg
         avg_visits_exact_fmt: super::number_fmt(avg_visits),
         max_visits_fmt: count_fmt(max_visits, compact_counts),
         max_visits_exact_fmt: super::number_fmt(max_visits),
-        avg_sites,
-        max_sites,
-        avg_sites_fmt: count_fmt(avg_sites, compact_counts),
-        avg_sites_exact_fmt: super::number_fmt(avg_sites),
-        max_sites_fmt: count_fmt(max_sites, compact_counts),
-        max_sites_exact_fmt: super::number_fmt(max_sites),
+        avg_visitors,
+        max_visitors,
+        avg_visitors_fmt: count_fmt(avg_visitors, compact_counts),
+        avg_visitors_exact_fmt: super::number_fmt(avg_visitors),
+        max_visitors_fmt: count_fmt(max_visitors, compact_counts),
+        max_visitors_exact_fmt: super::number_fmt(max_visitors),
         avg_bandwidth,
         max_bandwidth,
         avg_bandwidth_fmt: format_bytes(avg_bandwidth),
