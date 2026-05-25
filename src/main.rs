@@ -84,10 +84,6 @@ struct Args {
     #[arg(long, global = true)]
     anonymise_ips: Option<bool>,
 
-    /// Run SQLite VACUUM after pruning (true/false, default: false)
-    #[arg(long, global = true)]
-    vacuum_after_prune: Option<bool>,
-
     /// Exclude known bots from primary statistics (true/false, default: true)
     #[arg(long, global = true)]
     bot_filter: Option<bool>,
@@ -188,9 +184,6 @@ fn build_config(args: &Args) -> Result<config::Config> {
     if let Some(v) = args.anonymise_ips {
         cfg.anonymise_ips = v;
     }
-    if let Some(v) = args.vacuum_after_prune {
-        cfg.vacuum_after_prune = v;
-    }
     if let Some(v) = args.bot_filter {
         cfg.bot_filter = v;
     }
@@ -227,11 +220,10 @@ fn run_processing(cfg: &config::Config) -> Result<()> {
     let db = Database::open(&cfg.database)?;
     let geo = Geo::new(cfg.geoip_db.as_deref());
     if geo.db_unavailable {
-        eprintln!(
-            "warning: GeoIP database could not be opened: {:?} — country lookups will be unavailable",
+        bail!(
+            "GeoIP database could not be opened: {}",
             cfg.geoip_db.as_deref().unwrap_or("")
         );
-        std::thread::sleep(std::time::Duration::from_secs(2));
     }
 
     let rule_set = if cfg.rules.is_empty() {
@@ -245,13 +237,11 @@ fn run_processing(cfg: &config::Config) -> Result<()> {
         geo,
         ProcessorConfig {
             top_n: cfg.top_n,
-            vacuum_after_prune: cfg.vacuum_after_prune,
             bot_filter: cfg.bot_filter,
             enable_top_urls: cfg.enable_top_urls,
             enable_top_sites: cfg.enable_top_sites,
             enable_top_refs: cfg.enable_top_refs,
             enable_top_agents: cfg.enable_top_agents,
-            enable_all_time_unique_sites: cfg.enable_all_time_unique_sites,
             rule_set,
         },
     );

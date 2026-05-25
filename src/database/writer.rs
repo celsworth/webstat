@@ -428,7 +428,6 @@ impl Database {
         &mut self,
         period: &str,
         top_n: usize,
-        enable_all_time_unique_sites: bool,
     ) -> Result<()> {
         let tx = self.conn.transaction()?;
 
@@ -514,7 +513,7 @@ impl Database {
         )?;
 
         // ── all_time_ips ──────────────────────────────────────────────────────
-        if enable_all_time_unique_sites {
+        {
             let at_rows: Vec<(u8, u64, Vec<u8>)> = {
                 let mut stmt =
                     tx.prepare("SELECT ip_kind, ip_hi, bitmap FROM all_time_ips")?;

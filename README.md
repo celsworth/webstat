@@ -73,20 +73,11 @@ cp webstat.yml.example webstat.yml
 | `checkpoint_minutes` | `0` | Flush partial progress to SQLite periodically. Useful for large backlogs. `0` disables. |
 | `anonymise_ips` | `false` | Zero out the last IPv4 octet / last 80 IPv6 bits in reports |
 | `top_n` | `20` | Rows kept per top-N table (URLs, hosts, referrers, agents, countries) when a month is finalised |
-| `vacuum_after_prune` | `false` | Run `VACUUM` after pruning top-N rows. Reclaims space but is expensive. |
 | `bot_filter` | `true` | Drop known bots/crawlers before aggregation (woothee + substring list) |
 | `enable_top_urls` | `true` | |
 | `enable_top_sites` | `true` | |
 | `enable_top_refs` | `true` | |
 | `enable_top_agents` | `true` | |
-| `enable_all_time_unique_sites` | `true` | Store data for the All-time Unique Sites stat |
-
-#### enable_all_time_unique_sites
-
-This option controls whether Webstat tracks the set of unique hosts (IP addresses) that have ever visited the site across all time. This can consume significant storage space, as the number of IPs grows.
-
-If disabled, Webstat will not track this data, and the Unique Sites stat box will be hidden from the overview report. Note that this does not affect the Unique Sites stat for individual months, which is computed from the aggregated data for that month and does not require tracking all-time unique hosts.
-
 
 ### Style
 

@@ -334,7 +334,7 @@ mod tests {
         })
         .expect("flush");
 
-        db.finalize_month("2026-05", 20, true).expect("finalize");
+        db.finalize_month("2026-05", 20).expect("finalize");
 
         // all_time_ips and yearly_unique_ips each have one blob row (ip_kind=1, ip_hi=0)
         // with both IPs in the bitmap.
@@ -391,10 +391,10 @@ mod tests {
 
         // Jan: ip1 + ip2; Feb: ip2 + ip3 (ip2 shared across months)
         flush_ips(&mut db, "2026-01", "2026-01-15", vec![ip1, ip2]);
-        db.finalize_month("2026-01", 20, true).expect("finalize jan");
+        db.finalize_month("2026-01", 20).expect("finalize jan");
 
         flush_ips(&mut db, "2026-02", "2026-02-10", vec![ip2, ip3]);
-        db.finalize_month("2026-02", 20, true).expect("finalize feb");
+        db.finalize_month("2026-02", 20).expect("finalize feb");
 
         // yearly cache after Feb should reflect 3 distinct IPs, not 2
         let cached: i64 = db

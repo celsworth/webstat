@@ -56,13 +56,11 @@ mod tests {
             geo,
             ProcessorConfig {
                 top_n: cfg.top_n,
-                vacuum_after_prune: cfg.vacuum_after_prune,
                 bot_filter: cfg.bot_filter,
                 enable_top_urls: cfg.enable_top_urls,
                 enable_top_sites: cfg.enable_top_sites,
                 enable_top_refs: cfg.enable_top_refs,
                 enable_top_agents: cfg.enable_top_agents,
-                enable_all_time_unique_sites: cfg.enable_all_time_unique_sites,
                 rule_set: if cfg.rules.is_empty() {
                     None
                 } else {

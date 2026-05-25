@@ -88,7 +88,7 @@ Unique IP counting is exact, not approximate, and uses roaring bitmaps for compa
 
 ## Top-N tables
 
-Top-N tables (`monthly_top_urls_hits`, `monthly_top_urls_bandwidth`, `monthly_top_ips_hits`, `monthly_top_ips_bandwidth`, `monthly_referrers`, `monthly_agents`) accumulate exact counts during ingestion. `finalize_month` prunes each table to the top `top_n` rows per period via `DELETE … WHERE … NOT IN (SELECT … ORDER BY … LIMIT top_n)`. Each table can be individually disabled via config flags (`enable_top_urls`, `enable_top_sites`, `enable_top_refs`, `enable_top_agents`). All-time unique IP tracking (`all_time_ips` table) can be disabled via `enable_all_time_unique_sites` to save space.
+Top-N tables (`monthly_top_urls_hits`, `monthly_top_urls_bandwidth`, `monthly_top_ips_hits`, `monthly_top_ips_bandwidth`, `monthly_referrers`, `monthly_agents`) accumulate exact counts during ingestion. `finalize_month` prunes each table to the top `top_n` rows per period via `DELETE … WHERE … NOT IN (SELECT … ORDER BY … LIMIT top_n)`. Each table can be individually disabled via config flags (`enable_top_urls`, `enable_top_sites`, `enable_top_refs`, `enable_top_agents`). All-time unique IP tracking (`all_time_ips` table) is always enabled.
 
 ## Resume / dedup system
 

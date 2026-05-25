@@ -86,13 +86,11 @@ mod tests {
     fn base_processor_config() -> ProcessorConfig {
         ProcessorConfig {
             top_n: 20,
-            vacuum_after_prune: false,
             bot_filter: false,
             enable_top_urls: true,
             enable_top_sites: true,
             enable_top_refs: true,
             enable_top_agents: true,
-            enable_all_time_unique_sites: true,
             rule_set: None,
         }
     }

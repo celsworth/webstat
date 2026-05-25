@@ -15,10 +15,10 @@ use crate::database::{Database, ParseStateUpdate, VisitStateKey, VisitStateUpdat
 use crate::fingerprint::compute_fingerprints;
 use crate::geo::Geo;
 use crate::logging;
+use crate::parser::days_from_civil;
 use crate::progress::print_dir_progress;
 use crate::rules::SharedRuleSet;
 use crate::run_accumulators::RunAccumulators;
-use crate::parser::days_from_civil;
 
 mod aggregation;
 mod flush;
@@ -73,13 +73,11 @@ pub struct Processor {
     db: Database,
     geo: Geo,
     top_n: usize,
-    vacuum_after_prune: bool,
     bot_filter: bool,
     enable_top_urls: bool,
     enable_top_sites: bool,
     enable_top_refs: bool,
     enable_top_agents: bool,
-    enable_all_time_unique_sites: bool,
     rule_set: Option<SharedRuleSet>,
     checkpoint_every: Option<Duration>,
     time_cache: AHashMap<u32, (Arc<str>, Arc<str>)>,
@@ -92,13 +90,11 @@ pub struct Processor {
 #[derive(Clone)]
 pub struct ProcessorConfig {
     pub top_n: usize,
-    pub vacuum_after_prune: bool,
     pub bot_filter: bool,
     pub enable_top_urls: bool,
     pub enable_top_sites: bool,
     pub enable_top_refs: bool,
     pub enable_top_agents: bool,
-    pub enable_all_time_unique_sites: bool,
     pub rule_set: Option<SharedRuleSet>,
 }
 
@@ -108,13 +104,11 @@ impl Processor {
             db,
             geo,
             top_n: config.top_n,
-            vacuum_after_prune: config.vacuum_after_prune,
             bot_filter: config.bot_filter,
             enable_top_urls: config.enable_top_urls,
             enable_top_sites: config.enable_top_sites,
             enable_top_refs: config.enable_top_refs,
             enable_top_agents: config.enable_top_agents,
-            enable_all_time_unique_sites: config.enable_all_time_unique_sites,
             rule_set: config.rule_set,
             checkpoint_every: None,
             time_cache: AHashMap::with_capacity(8_192),
@@ -353,9 +347,16 @@ impl Processor {
             }
         }
 
-        if self.vacuum_after_prune {
-            self.db.vacuum()?;
-        }
+        logging::log_debug_at(2, &format!("Vacuuming database"));
+        let vacuum_start = Instant::now();
+        self.db.vacuum()?;
+        logging::log_debug_at(
+            1,
+            &format!(
+                "Database vacuum complete ({:.1}s)",
+                vacuum_start.elapsed().as_secs_f64()
+            ),
+        );
 
         Ok(total)
     }

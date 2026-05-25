@@ -250,7 +250,7 @@ impl Database {
         let conn =
             Connection::open(path).with_context(|| format!("Failed to open database: {path}"))?;
         conn.busy_timeout(Duration::from_secs(60))?;
-        conn.execute_batch("PRAGMA page_size = 65536; PRAGMA locking_mode = EXCLUSIVE; PRAGMA temp_store = MEMORY; PRAGMA mmap_size = 1073741824; PRAGMA cache_size = -262144; PRAGMA wal_autocheckpoint = 4000; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
+        conn.execute_batch("PRAGMA page_size = 65536; PRAGMA temp_store = MEMORY; PRAGMA mmap_size = 1073741824; PRAGMA cache_size = -262144; PRAGMA wal_autocheckpoint = 4000; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
         let mut db = Self { conn };
         db.apply_schema()?;
         Ok(db)
