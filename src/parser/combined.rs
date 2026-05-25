@@ -187,6 +187,12 @@ pub fn parse_line(line: impl Into<String>) -> Option<LogEntry> {
     }
 
     let user_agent = ua_start..i;
+    i += 1; // skip closing "
+
+    // ─────────────────────────────────────────────
+    // optional extended fields:  rt=143 ...
+    let tail = b.get(i..).unwrap_or(&[]);
+    let response_time_ms = find_kv_ms(tail, b"rt=");
 
     // ─────────────────────────────────────────────
     // split request (method / path / proto)
@@ -222,8 +228,51 @@ pub fn parse_line(line: impl Into<String>) -> Option<LogEntry> {
     let proto = request.start + j..request.end;
 
     Some(LogEntry::new(
-        line, ip, time, method, path, proto, referer, user_agent, month_num, status, bytes,
+        line,
+        ip,
+        time,
+        method,
+        path,
+        proto,
+        referer,
+        user_agent,
+        month_num,
+        status,
+        bytes,
+        response_time_ms,
     ))
+}
+
+#[inline]
+fn find_kv_ms(b: &[u8], key: &[u8]) -> Option<u32> {
+    let mut i = 0;
+    while i + key.len() <= b.len() {
+        if b[i..].starts_with(key) {
+            let start = i + key.len();
+            let end = b[start..]
+                .iter()
+                .position(|&c| !c.is_ascii_digit() && c != b'.')
+                .map(|p| start + p)
+                .unwrap_or(b.len());
+
+            let slice = &b[start..end];
+            if slice.is_empty() {
+                return None;
+            }
+
+            return if slice.contains(&b'.') {
+                // Nginx: float seconds → ms
+                let s = std::str::from_utf8(slice).ok()?;
+                let secs: f32 = s.parse().ok()?;
+                Some((secs * 1_000.0).round() as u32)
+            } else {
+                // Apache: microseconds → ms
+                parse_u64(slice).map(|v| (v / 1_000) as u32)
+            };
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Parse a CLF timestamp (`DD/Mon/YYYY:HH:MM:SS ±HHMM`) into a Unix
