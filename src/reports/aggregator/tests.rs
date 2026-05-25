@@ -22,17 +22,18 @@ mod tests {
                  PRIMARY KEY (date, hour)
              );
              CREATE TABLE daily_unique_ips (
-                 date    TEXT NOT NULL,
+                 date    TEXT    NOT NULL,
                  ip_kind INTEGER NOT NULL,
-                 ip_hi   INTEGER NOT NULL DEFAULT 0,
-                 ip_lo   INTEGER NOT NULL DEFAULT 0,
-                 PRIMARY KEY (date, ip_kind, ip_hi, ip_lo)
+                 ip_hi   INTEGER NOT NULL,
+                 count   INTEGER NOT NULL DEFAULT 0,
+                 bitmap  BLOB    NOT NULL,
+                 PRIMARY KEY (date, ip_kind, ip_hi)
              );
              CREATE TABLE all_time_ips (
-                 host_kind INTEGER NOT NULL,
-                 host_hi   INTEGER NOT NULL,
-                 host_lo   INTEGER NOT NULL,
-                 PRIMARY KEY (host_kind, host_hi, host_lo)
+                 ip_kind INTEGER NOT NULL,
+                 ip_hi   INTEGER NOT NULL,
+                 bitmap  BLOB    NOT NULL,
+                 PRIMARY KEY (ip_kind, ip_hi)
              );
              CREATE TABLE countries (
                  country_code TEXT PRIMARY KEY,
@@ -49,9 +50,9 @@ mod tests {
              CREATE TABLE yearly_unique_ips (
                  year    TEXT    NOT NULL,
                  ip_kind INTEGER NOT NULL,
-                 ip_hi   INTEGER NOT NULL DEFAULT 0,
-                 ip_lo   INTEGER NOT NULL DEFAULT 0,
-                 PRIMARY KEY (year, ip_kind, ip_hi, ip_lo)
+                 ip_hi   INTEGER NOT NULL,
+                 bitmap  BLOB    NOT NULL,
+                 PRIMARY KEY (year, ip_kind, ip_hi)
              );",
         )
         .expect("create test schema");
@@ -68,30 +69,68 @@ mod tests {
         .expect("insert hourly row");
     }
 
-    fn insert_daily_ip(conn: &Connection, date: &str, ip_lo: i64) {
+    /// Insert a single IPv4 address into daily_unique_ips, merging with any existing bitmap.
+    fn insert_daily_ip(conn: &Connection, date: &str, ip_lo: u32) {
+        use roaring::RoaringBitmap;
+        use rusqlite::OptionalExtension;
+        let existing: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT bitmap FROM daily_unique_ips WHERE date=?1 AND ip_kind=1 AND ip_hi=0",
+                params![date],
+                |r| r.get(0),
+            )
+            .optional()
+            .expect("query existing");
+        let mut bm = match existing {
+            Some(blob) => RoaringBitmap::deserialize_from(&blob[..]).expect("deserialize"),
+            None => RoaringBitmap::new(),
+        };
+        bm.insert(ip_lo);
+        let count = bm.len() as i64;
+        let mut buf = Vec::new();
+        bm.serialize_into(&mut buf).expect("serialize");
         conn.execute(
-            "INSERT OR IGNORE INTO daily_unique_ips (date, ip_kind, ip_hi, ip_lo) VALUES (?1, 1, 0, ?2)",
-            params![date, ip_lo],
+            "INSERT OR REPLACE INTO daily_unique_ips (date, ip_kind, ip_hi, count, bitmap) \
+             VALUES (?1, 1, 0, ?2, ?3)",
+            params![date, count, buf],
         )
         .expect("insert daily ip");
     }
 
-    fn insert_yearly_ip(conn: &Connection, year: &str, ip_lo: i64) {
+    /// Insert a single IPv4 address into yearly_unique_ips, merging with any existing bitmap.
+    fn insert_yearly_ip(conn: &Connection, year: &str, ip_lo: u32) {
+        use roaring::RoaringBitmap;
+        use rusqlite::OptionalExtension;
+        let existing: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT bitmap FROM yearly_unique_ips WHERE year=?1 AND ip_kind=1 AND ip_hi=0",
+                params![year],
+                |r| r.get(0),
+            )
+            .optional()
+            .expect("query existing");
+        let mut bm = match existing {
+            Some(blob) => RoaringBitmap::deserialize_from(&blob[..]).expect("deserialize"),
+            None => RoaringBitmap::new(),
+        };
+        bm.insert(ip_lo);
+        let mut buf = Vec::new();
+        bm.serialize_into(&mut buf).expect("serialize");
         conn.execute(
-            "INSERT OR IGNORE INTO yearly_unique_ips (year, ip_kind, ip_hi, ip_lo) VALUES (?1, 1, 0, ?2)",
-            params![year, ip_lo],
+            "INSERT OR REPLACE INTO yearly_unique_ips (year, ip_kind, ip_hi, bitmap) \
+             VALUES (?1, 1, 0, ?2)",
+            params![year, buf],
         )
         .expect("insert yearly ip");
     }
 
     fn finalize_unique_visitor_counts(conn: &Connection, period: &str) {
+        // OR daily bitmaps for the period and store the cardinality.
         let like = format!("{}-%", period);
+        let count = or_count_daily_bitmaps(conn, &like).expect("or_count_daily_bitmaps");
         conn.execute(
-            "INSERT OR REPLACE INTO unique_visitor_counts (period, count)
-             SELECT ?1, COUNT(*) FROM (
-               SELECT DISTINCT ip_kind, ip_hi, ip_lo FROM daily_unique_ips WHERE date LIKE ?2
-             )",
-            params![period, like],
+            "INSERT OR REPLACE INTO unique_visitor_counts (period, count) VALUES (?1, ?2)",
+            params![period, count as i64],
         )
         .expect("finalize site count cache");
     }
@@ -179,16 +218,18 @@ mod tests {
     fn overall_totals_uses_all_time_ips() {
         let conn = setup_conn();
         insert_hourly(&conn, "2026-05-01", 0, 100, 10);
+
+        // Insert a bitmap with 2 IPv4 addresses into all_time_ips.
+        let mut bm = roaring::RoaringBitmap::new();
+        bm.insert(1);
+        bm.insert(2);
+        let mut buf = Vec::new();
+        bm.serialize_into(&mut buf).expect("serialize");
         conn.execute(
-            "INSERT INTO all_time_ips (host_kind, host_hi, host_lo) VALUES (1, 0, 1)",
-            [],
+            "INSERT INTO all_time_ips (ip_kind, ip_hi, bitmap) VALUES (1, 0, ?1)",
+            params![buf],
         )
-        .expect("insert all_time host a");
-        conn.execute(
-            "INSERT INTO all_time_ips (host_kind, host_hi, host_lo) VALUES (1, 0, 2)",
-            [],
-        )
-        .expect("insert all_time host b");
+        .expect("insert all_time");
 
         let totals = overall_totals(&conn, false).expect("overall totals");
         assert_eq!(totals.visitors, 2);

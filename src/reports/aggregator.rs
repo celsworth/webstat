@@ -1,11 +1,13 @@
 // Report aggregation: SQL queries that summarise the database into per-period statistics for templates.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use anyhow::Result;
+use roaring::{RoaringBitmap, RoaringTreemap};
+
+use anyhow::{Context, Result};
 use chrono::{Datelike, NaiveDate, Weekday};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{
     count_fmt, flag_emoji, format_bytes, format_totals, month_name, percent_str, status_label,
@@ -277,9 +279,10 @@ fn daily_stats(
     let prefix = format!("{year:04}-{month:02}");
     let like = format!("{prefix}-%");
 
-    // Batch-fetch daily IP counts: live rows for the current month, cached rows for pruned months.
+    // Batch-fetch daily IP counts: live bitmap rows for the current month (SUM of per-group
+    // cardinalities stored in the count column), cached rows for pruned months.
     let mut ip_stmt = conn.prepare(
-        "SELECT date, COUNT(*) FROM daily_unique_ips WHERE date LIKE ?1 GROUP BY date
+        "SELECT date, SUM(count) FROM daily_unique_ips WHERE date LIKE ?1 GROUP BY date
          UNION ALL
          SELECT date, count FROM daily_visitor_counts WHERE date LIKE ?1
            AND date NOT IN (SELECT DISTINCT date FROM daily_unique_ips WHERE date LIKE ?1)",
@@ -571,9 +574,10 @@ fn overall_totals(conn: &Connection, compact_counts: bool) -> Result<TotalsView>
 fn visitor_count_for_scope(conn: &Connection, scope: &str) -> Result<u64> {
     match scope.len() {
         10 => {
+            // Daily: SUM of bitmap cardinalities in the count column, falling back to archive.
             let count: i64 = conn.query_row(
                 "SELECT COALESCE(
-                    (SELECT COUNT(*) FROM daily_unique_ips WHERE date = ?1),
+                    (SELECT SUM(count) FROM daily_unique_ips WHERE date = ?1),
                     (SELECT count FROM daily_visitor_counts WHERE date = ?1),
                     0
                  )",
@@ -583,44 +587,180 @@ fn visitor_count_for_scope(conn: &Connection, scope: &str) -> Result<u64> {
             Ok(count as u64)
         }
         7 => {
-            // Use precomputed cache; for the in-progress month fall back to daily_unique_ips.
-            let like = format!("{}-%", scope);
-            let count: i64 = conn.query_row(
-                "SELECT COALESCE(
-                    (SELECT count FROM unique_visitor_counts WHERE period = ?1),
-                    (SELECT COUNT(*) FROM (SELECT DISTINCT ip_kind,ip_hi,ip_lo FROM daily_unique_ips WHERE date LIKE ?2)),
-                    0
-                 )",
-                params![scope, like],
+            // Monthly: use precomputed cache; for the in-progress month OR daily bitmaps in Rust.
+            let cached: Option<i64> = conn.query_row(
+                "SELECT count FROM unique_visitor_counts WHERE period = ?1",
+                params![scope],
                 |row| row.get(0),
-            )?;
-            Ok(count as u64)
+            )
+            .optional()?;
+            if let Some(n) = cached {
+                return Ok(n as u64);
+            }
+            let like = format!("{}-%", scope);
+            or_count_daily_bitmaps(conn, &like)
         }
         4 => {
-            // Use precomputed cache; for the in-progress year combine yearly_unique_ips with daily_unique_ips.
-            let like = format!("{}-%", scope);
-            let count: i64 = conn.query_row(
-                "SELECT COALESCE(
-                    (SELECT count FROM unique_visitor_counts WHERE period = ?1),
-                    (SELECT COUNT(*) FROM (
-                        SELECT ip_kind,ip_hi,ip_lo FROM yearly_unique_ips WHERE year = ?1
-                        UNION
-                        SELECT ip_kind,ip_hi,ip_lo FROM daily_unique_ips WHERE date LIKE ?2
-                    )),
-                    0
-                 )",
-                params![scope, like],
+            // Yearly: use precomputed cache; for the in-progress year combine yearly and daily bitmaps.
+            let cached: Option<i64> = conn.query_row(
+                "SELECT count FROM unique_visitor_counts WHERE period = ?1",
+                params![scope],
                 |row| row.get(0),
-            )?;
-            Ok(count as u64)
+            )
+            .optional()?;
+            if let Some(n) = cached {
+                return Ok(n as u64);
+            }
+            let like = format!("{}-%", scope);
+            or_count_yearly_and_daily_bitmaps(conn, scope, &like)
         }
         _ => Ok(0),
     }
 }
 
+/// OR all daily_unique_ips bitmaps matching `like` and return the distinct IP count.
+fn or_count_daily_bitmaps(conn: &Connection, like: &str) -> Result<u64> {
+    let rows: Vec<(u8, u64, Vec<u8>)> = {
+        let mut stmt = conn.prepare(
+            "SELECT ip_kind, ip_hi, bitmap FROM daily_unique_ips WHERE date LIKE ?1",
+        )?;
+        let mapped = stmt.query_map(params![like], |row| {
+            Ok((
+                row.get::<_, i64>(0)? as u8,
+                row.get::<_, i64>(1)? as u64,
+                row.get::<_, Vec<u8>>(2)?,
+            ))
+        })?;
+        let mut v = Vec::new();
+        for row in mapped {
+            v.push(row?);
+        }
+        v
+    };
+
+    let mut v4 = RoaringBitmap::new();
+    let mut v6: HashMap<u64, RoaringTreemap> = HashMap::new();
+    for (kind, hi, blob) in rows {
+        match kind {
+            1 => {
+                v4 |= RoaringBitmap::deserialize_from(&blob[..])
+                    .context("deserialize daily v4")?;
+            }
+            2 => {
+                *v6.entry(hi).or_default() |=
+                    RoaringTreemap::deserialize_from(&blob[..])
+                        .context("deserialize daily v6")?;
+            }
+            _ => {}
+        }
+    }
+    Ok(v4.len() + v6.values().map(|t| t.len()).sum::<u64>())
+}
+
+/// OR yearly_unique_ips (completed months) with daily_unique_ips (in-progress month)
+/// for the given year and return the distinct IP count.
+fn or_count_yearly_and_daily_bitmaps(
+    conn: &Connection,
+    year: &str,
+    daily_like: &str,
+) -> Result<u64> {
+    let mut v4 = RoaringBitmap::new();
+    let mut v6: HashMap<u64, RoaringTreemap> = HashMap::new();
+
+    // Yearly bitmaps (already OR'd across finalized months)
+    let yearly_rows: Vec<(u8, u64, Vec<u8>)> = {
+        let mut stmt = conn.prepare(
+            "SELECT ip_kind, ip_hi, bitmap FROM yearly_unique_ips WHERE year = ?1",
+        )?;
+        let mapped = stmt.query_map(params![year], |row| {
+            Ok((
+                row.get::<_, i64>(0)? as u8,
+                row.get::<_, i64>(1)? as u64,
+                row.get::<_, Vec<u8>>(2)?,
+            ))
+        })?;
+        let mut v = Vec::new();
+        for row in mapped {
+            v.push(row?);
+        }
+        v
+    };
+    for (kind, hi, blob) in yearly_rows {
+        match kind {
+            1 => {
+                v4 |= RoaringBitmap::deserialize_from(&blob[..])
+                    .context("deserialize yearly v4")?;
+            }
+            2 => {
+                *v6.entry(hi).or_default() |=
+                    RoaringTreemap::deserialize_from(&blob[..])
+                        .context("deserialize yearly v6")?;
+            }
+            _ => {}
+        }
+    }
+
+    // Daily bitmaps (in-progress current month)
+    let daily_rows: Vec<(u8, u64, Vec<u8>)> = {
+        let mut stmt = conn.prepare(
+            "SELECT ip_kind, ip_hi, bitmap FROM daily_unique_ips WHERE date LIKE ?1",
+        )?;
+        let mapped = stmt.query_map(params![daily_like], |row| {
+            Ok((
+                row.get::<_, i64>(0)? as u8,
+                row.get::<_, i64>(1)? as u64,
+                row.get::<_, Vec<u8>>(2)?,
+            ))
+        })?;
+        let mut v = Vec::new();
+        for row in mapped {
+            v.push(row?);
+        }
+        v
+    };
+    for (kind, hi, blob) in daily_rows {
+        match kind {
+            1 => {
+                v4 |= RoaringBitmap::deserialize_from(&blob[..])
+                    .context("deserialize daily v4 (yearly fallback)")?;
+            }
+            2 => {
+                *v6.entry(hi).or_default() |=
+                    RoaringTreemap::deserialize_from(&blob[..])
+                        .context("deserialize daily v6 (yearly fallback)")?;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(v4.len() + v6.values().map(|t| t.len()).sum::<u64>())
+}
+
 fn all_time_visitor_count(conn: &Connection) -> Result<u64> {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM all_time_ips", [], |row| row.get(0))?;
-    Ok(count as u64)
+    let rows: Vec<(u8, Vec<u8>)> = {
+        let mut stmt = conn.prepare("SELECT ip_kind, bitmap FROM all_time_ips")?;
+        let mapped = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)? as u8, row.get::<_, Vec<u8>>(1)?))
+        })?;
+        let mut v = Vec::new();
+        for row in mapped {
+            v.push(row?);
+        }
+        v
+    };
+    let mut total = 0u64;
+    for (kind, blob) in rows {
+        total += match kind {
+            1 => RoaringBitmap::deserialize_from(&blob[..])
+                .context("deserialize all_time v4")?
+                .len(),
+            2 => RoaringTreemap::deserialize_from(&blob[..])
+                .context("deserialize all_time v6")?
+                .len(),
+            _ => 0,
+        };
+    }
+    Ok(total)
 }
 
 fn top_urls_hits(

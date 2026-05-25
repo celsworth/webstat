@@ -35,7 +35,7 @@ cargo test
 - **`src/database/visit_state.rs`** — visit state load/save
 - **`src/database/maintenance.rs`** — vacuum, meta key-value ops
 - **`src/progress.rs`** — `print_dir_progress`: the single progress-line formatter
-- **`src/ip.rs`** — `Ip` enum: IPv4 stored as `u32`, IPv6 as `u128`; used as hash key for geo lookups and daily-unique-IP sets
+- **`src/ip.rs`** — `Ip` enum: IPv4 stored as `u32`, IPv6 as `u128`; used as hash key for geo lookups. Also contains `IpBitmaps`: per-date in-memory accumulator using `RoaringBitmap` (IPv4) and `AHashMap<u64, RoaringTreemap>` (IPv6, keyed by upper-64 prefix)
 - **`src/rules.rs`** — YAML-configured per-entry filtering rules (`ignore`, `hide`, `sample` actions); compiled from `RawRule` in config and evaluated in the parser thread
 - **`src/logging.rs`** — verbosity control: atomic log-level flag and helpers that interleave safely with the progress line
 - **`src/method_proto.rs`** — HTTP method/protocol index arrays
@@ -74,13 +74,21 @@ Compressed files have no random access — they resume by decoding from the star
 
 ## Unique IP / site counting
 
-Unique IP counting is exact, not approximate. Every unique `(date, ip_kind, ip_hi, ip_lo)` tuple is written to `daily_ip_log` via `INSERT OR IGNORE` — the primary key enforces deduplication at the SQLite level.
+Unique IP counting is exact, not approximate, and uses roaring bitmaps for compact storage.
 
-When `finalize_month` runs, it computes and stores monthly and yearly distinct-IP counts into `site_count_cache` using `SELECT DISTINCT`. Report queries read from this cache rather than recomputing from `daily_ip_log`.
+**In-memory accumulation**: `RunAccumulators.daily_ips` maps each date to an `IpBitmaps`. IPv4 addresses (u32) go into a `RoaringBitmap`; IPv6 addresses are split at 64 bits — the upper 64 select a `RoaringTreemap` entry, the lower 64 are stored in it.
+
+**SQLite layout** (`daily_unique_ips`): one row per `(date, ip_kind, ip_hi)` group. `ip_kind=1/ip_hi=0` holds the IPv4 bitmap; `ip_kind=2/ip_hi=<prefix>` holds the IPv6 lower-64 treemap. A `count` column mirrors the bitmap cardinality so SQL can aggregate per-day counts without deserialising blobs. Flush is a read-modify-write: load existing blob, OR in new data, write back.
+
+**`finalize_month`**: loads all daily blobs for the month into Rust, ORs them to produce a monthly union, ORs that into `yearly_unique_ips` (same blob-per-group schema), optionally ORs into `all_time_ips`. Writes distinct-IP counts to `unique_visitor_counts`. Populates `daily_visitor_counts` from the `count` column, then deletes `daily_unique_ips` rows for the month.
+
+**`finalize_year`**: sums cardinalities of the accumulated `yearly_unique_ips` rows (each group is disjoint, no further ORing needed), writes the yearly count, deletes yearly rows.
+
+**Reports**: daily counts use `SUM(count)` SQL. Monthly/yearly counts read from `unique_visitor_counts` cache; for in-progress periods (no cache entry), fall back to loading and ORing blobs in Rust.
 
 ## Top-N tables
 
-Top-N tables (`monthly_urls_hits`, `monthly_urls_bandwidth`, `monthly_sites_hits`, `monthly_sites_bandwidth`, `monthly_refs`, `monthly_agents`) accumulate exact counts during ingestion. `finalize_month` prunes each table to the top `top_n` rows per period via `DELETE … WHERE … NOT IN (SELECT … ORDER BY … LIMIT top_n)`. Each table can be individually disabled via config flags (`enable_top_urls`, `enable_top_sites`, `enable_top_refs`, `enable_top_agents`). All-time unique IP tracking (`all_time_ips` table) can be disabled via `enable_all_time_unique_sites` to save space.
+Top-N tables (`monthly_top_urls_hits`, `monthly_top_urls_bandwidth`, `monthly_top_ips_hits`, `monthly_top_ips_bandwidth`, `monthly_referrers`, `monthly_agents`) accumulate exact counts during ingestion. `finalize_month` prunes each table to the top `top_n` rows per period via `DELETE … WHERE … NOT IN (SELECT … ORDER BY … LIMIT top_n)`. Each table can be individually disabled via config flags (`enable_top_urls`, `enable_top_sites`, `enable_top_refs`, `enable_top_agents`). All-time unique IP tracking (`all_time_ips` table) can be disabled via `enable_all_time_unique_sites` to save space.
 
 ## Resume / dedup system
 

@@ -645,7 +645,7 @@ mod tests {
         let conn = Connection::open(&db_path).expect("open db");
         let visitors: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM daily_unique_ips WHERE date = '2026-05-08'",
+                "SELECT COALESCE(SUM(count), 0) FROM daily_unique_ips WHERE date = '2026-05-08'",
                 [],
                 |row| row.get(0),
             )
@@ -773,7 +773,7 @@ mod tests {
         // Both hidden IPs appear in daily_unique_ips (unique site counting).
         let site_count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM daily_unique_ips WHERE date = '2026-05-08'",
+                "SELECT COALESCE(SUM(count), 0) FROM daily_unique_ips WHERE date = '2026-05-08'",
                 [],
                 |row| row.get(0),
             )

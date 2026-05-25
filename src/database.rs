@@ -156,19 +156,19 @@ CREATE TABLE IF NOT EXISTS protocol_counts (
     PRIMARY KEY (period, proto)
 );
 CREATE TABLE IF NOT EXISTS daily_unique_ips (
-    date     TEXT    NOT NULL,
-    ip_kind  INTEGER NOT NULL,
-    ip_hi    INTEGER NOT NULL,
-    ip_lo    INTEGER NOT NULL,
-    PRIMARY KEY (date, ip_kind, ip_hi, ip_lo)
+    date    TEXT    NOT NULL,
+    ip_kind INTEGER NOT NULL,
+    ip_hi   INTEGER NOT NULL,
+    count   INTEGER NOT NULL DEFAULT 0,
+    bitmap  BLOB    NOT NULL,
+    PRIMARY KEY (date, ip_kind, ip_hi)
 );
-CREATE INDEX IF NOT EXISTS daily_unique_ips_date ON daily_unique_ips (date);
 CREATE TABLE IF NOT EXISTS yearly_unique_ips (
     year    TEXT    NOT NULL,
     ip_kind INTEGER NOT NULL,
     ip_hi   INTEGER NOT NULL,
-    ip_lo   INTEGER NOT NULL,
-    PRIMARY KEY (year, ip_kind, ip_hi, ip_lo)
+    bitmap  BLOB    NOT NULL,
+    PRIMARY KEY (year, ip_kind, ip_hi)
 );
 CREATE TABLE IF NOT EXISTS unique_visitor_counts (
     period TEXT PRIMARY KEY,
@@ -187,10 +187,10 @@ CREATE TABLE IF NOT EXISTS countries (
     country_name TEXT NOT NULL DEFAULT 'Unknown'
 );
 CREATE TABLE IF NOT EXISTS all_time_ips (
-    host_kind INTEGER NOT NULL,
-    host_hi   INTEGER NOT NULL,
-    host_lo   INTEGER NOT NULL,
-    PRIMARY KEY (host_kind, host_hi, host_lo)
+    ip_kind INTEGER NOT NULL,
+    ip_hi   INTEGER NOT NULL,
+    bitmap  BLOB    NOT NULL,
+    PRIMARY KEY (ip_kind, ip_hi)
 );
 CREATE TABLE IF NOT EXISTS parse_state (
     filepath    TEXT PRIMARY KEY,

@@ -7,10 +7,10 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::ip::{Ip, IpBitmaps};
     use crate::method_proto::{
         METHOD_COUNT, METHOD_GET, METHOD_POST, PROTO_1_1, PROTO_2_0, PROTO_COUNT,
     };
-    use ahash::AHashSet;
 
     fn open_test_db() -> Database {
         Database::open(":memory:").expect("open in-memory db")
@@ -208,19 +208,19 @@ mod tests {
     fn daily_unique_ips_deduplicates_across_flushes() {
         let mut db = open_test_db();
 
-        let ip1 = crate::ip::Ip::V4(0x01020304);
-        let ip2 = crate::ip::Ip::V4(0x05060708);
+        let ip1 = Ip::V4(0x01020304);
+        let ip2 = Ip::V4(0x05060708);
 
-        let mut ips1: AHashSet<crate::ip::Ip> = AHashSet::new();
-        ips1.insert(ip1);
-        ips1.insert(ip2);
+        let mut bm1 = IpBitmaps::default();
+        bm1.insert(ip1);
+        bm1.insert(ip2);
         let mut daily1 = ahash::AHashMap::new();
-        daily1.insert(Arc::from("2026-05-01"), ips1);
+        daily1.insert(Arc::from("2026-05-01"), bm1);
 
-        let mut ips2: AHashSet<crate::ip::Ip> = AHashSet::new();
-        ips2.insert(ip1); // duplicate
+        let mut bm2 = IpBitmaps::default();
+        bm2.insert(ip1); // duplicate
         let mut daily2 = ahash::AHashMap::new();
-        daily2.insert(Arc::from("2026-05-01"), ips2);
+        daily2.insert(Arc::from("2026-05-01"), bm2);
 
         let empty_urls: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
         let empty_hosts: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
@@ -252,24 +252,25 @@ mod tests {
             .expect("flush");
         }
 
+        // The count column holds the bitmap cardinality for the (date, ip_kind=1, ip_hi=0) row.
         let count: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM daily_unique_ips WHERE date='2026-05-01'",
+                "SELECT SUM(count) FROM daily_unique_ips WHERE date='2026-05-01'",
                 [],
                 |r| r.get(0),
             )
             .expect("count");
-        assert_eq!(count, 2, "duplicate IP must not be double-inserted");
+        assert_eq!(count, 2, "duplicate IP must not inflate the count");
     }
 
-    fn flush_ips(db: &mut Database, period: &str, date: &str, ips: Vec<crate::ip::Ip>) {
-        let mut ip_set: AHashSet<crate::ip::Ip> = AHashSet::new();
+    fn flush_ips(db: &mut Database, period: &str, date: &str, ips: Vec<Ip>) {
+        let mut bm = IpBitmaps::default();
         for ip in ips {
-            ip_set.insert(ip);
+            bm.insert(ip);
         }
         let mut daily = ahash::AHashMap::new();
-        daily.insert(Arc::from(date), ip_set);
+        daily.insert(Arc::from(date), bm);
         db.flush(crate::database::writer::FlushData {
             period,
             hourly: &ahash::AHashMap::new(),
@@ -295,20 +296,19 @@ mod tests {
     fn finalize_month_populates_all_time_ips_and_yearly_unique_ips() {
         let mut db = open_test_db();
 
-        let ip1 = crate::ip::Ip::V4(0x01020304);
-        let ip2 = crate::ip::Ip::V4(0x05060708);
+        let ip1 = Ip::V4(0x01020304);
+        let ip2 = Ip::V4(0x05060708);
 
-        let mut ips: AHashSet<crate::ip::Ip> = AHashSet::new();
-        ips.insert(ip1);
-        ips.insert(ip2);
+        let mut bm = IpBitmaps::default();
+        bm.insert(ip1);
+        bm.insert(ip2);
         let mut daily = ahash::AHashMap::new();
-        daily.insert(Arc::from("2026-05-01"), ips);
+        daily.insert(Arc::from("2026-05-01"), bm);
 
         let empty_hosts: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
         let empty_geo: ahash::AHashMap<String, (std::sync::Arc<str>, std::sync::Arc<str>)> =
             ahash::AHashMap::new();
 
-        // Flush with some URLs too so pruning runs
         let mut urls = ahash::AHashMap::new();
         for i in 0..30u64 {
             urls.insert(format!("/page-{}.html", i), (100 - i, (100 - i) * 1024));
@@ -336,21 +336,39 @@ mod tests {
 
         db.finalize_month("2026-05", 20, true).expect("finalize");
 
-        let host_count: i64 = db
-            .conn
-            .query_row("SELECT COUNT(*) FROM all_time_ips", [], |r| r.get(0))
-            .expect("all_time_ips count");
-        assert_eq!(host_count, 2);
-
-        let yearly_count: i64 = db
+        // all_time_ips and yearly_unique_ips each have one blob row (ip_kind=1, ip_hi=0)
+        // with both IPs in the bitmap.
+        let monthly_count: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM yearly_unique_ips WHERE year='2026'",
+                "SELECT count FROM unique_visitor_counts WHERE period='2026-05'",
                 [],
                 |r| r.get(0),
             )
-            .expect("yearly_unique_ips count");
-        assert_eq!(yearly_count, 2);
+            .expect("monthly count");
+        assert_eq!(monthly_count, 2);
+
+        let blob: Vec<u8> = db
+            .conn
+            .query_row(
+                "SELECT bitmap FROM all_time_ips WHERE ip_kind=1 AND ip_hi=0",
+                [],
+                |r| r.get(0),
+            )
+            .expect("all_time bitmap");
+        let bm = roaring::RoaringBitmap::deserialize_from(&blob[..]).expect("deserialize");
+        assert_eq!(bm.len(), 2, "all_time_ips should contain 2 IPv4 addresses");
+
+        let blob: Vec<u8> = db
+            .conn
+            .query_row(
+                "SELECT bitmap FROM yearly_unique_ips WHERE year='2026' AND ip_kind=1 AND ip_hi=0",
+                [],
+                |r| r.get(0),
+            )
+            .expect("yearly bitmap");
+        let bm = roaring::RoaringBitmap::deserialize_from(&blob[..]).expect("deserialize");
+        assert_eq!(bm.len(), 2, "yearly_unique_ips should contain 2 IPv4 addresses");
 
         let url_count: i64 = db
             .conn
@@ -367,9 +385,9 @@ mod tests {
     fn finalize_year_counts_distinct_across_months_and_cleans_up() {
         let mut db = open_test_db();
 
-        let ip1 = crate::ip::Ip::V4(0x01020304);
-        let ip2 = crate::ip::Ip::V4(0x05060708);
-        let ip3 = crate::ip::Ip::V4(0x09101112);
+        let ip1 = Ip::V4(0x01020304);
+        let ip2 = Ip::V4(0x05060708);
+        let ip3 = Ip::V4(0x09101112);
 
         // Jan: ip1 + ip2; Feb: ip2 + ip3 (ip2 shared across months)
         flush_ips(&mut db, "2026-01", "2026-01-15", vec![ip1, ip2]);

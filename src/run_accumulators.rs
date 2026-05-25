@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use ahash::{AHashMap, AHashSet};
+use ahash::AHashMap;
 
-use crate::ip::Ip;
+use crate::ip::IpBitmaps;
 
 use crate::accumulators::HourlyMap;
 use crate::method_proto::{METHOD_COUNT, PROTO_COUNT};
@@ -17,7 +17,7 @@ pub(crate) struct RunAccumulators {
     pub(crate) hosts: AHashMap<String, (u64, u64)>,
     pub(crate) refs: AHashMap<String, u64>,
     pub(crate) agents: AHashMap<String, u64>,
-    pub(crate) daily_ips: AHashMap<Arc<str>, AHashSet<Ip>>,
+    pub(crate) daily_ips: AHashMap<Arc<str>, IpBitmaps>,
     pub(crate) countries: AHashMap<String, u64>,
     pub(crate) status_codes: AHashMap<u16, u64>,
     pub(crate) method_counts: [u64; METHOD_COUNT],
@@ -155,7 +155,7 @@ mod tests {
         acc.daily_ips
             .entry(Arc::from("2026-05-01"))
             .or_default()
-            .insert(crate::ip::Ip::V4(0x01020304));
+            .insert(crate::ip::Ip::V4(0x01020304_u32));
         // daily_ips does not affect is_empty (it's just a write buffer)
         assert!(acc.is_empty());
     }

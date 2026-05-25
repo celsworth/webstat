@@ -2,6 +2,9 @@
 
 use std::net::Ipv6Addr;
 
+use ahash::AHashMap;
+use roaring::{RoaringBitmap, RoaringTreemap};
+
 /// A parsed IP address stored as its integer value.
 ///
 /// Used as hash key for geo lookups and daily-unique-IP sets.
@@ -51,6 +54,40 @@ impl Ip {
             Ip::V4(n) => std::net::IpAddr::V4(std::net::Ipv4Addr::from(n)),
             Ip::V6(n) => std::net::IpAddr::V6(std::net::Ipv6Addr::from(n)),
         }
+    }
+}
+
+// ── IpBitmaps ─────────────────────────────────────────────────────────────────
+
+/// Per-date in-memory accumulator for unique IPs using roaring bitmaps.
+///
+/// IPv4 addresses (u32) go directly into `v4`. IPv6 addresses are split at the
+/// 64-bit boundary: the upper 64 bits select a `RoaringTreemap` entry in `v6`,
+/// and the lower 64 bits are stored there.  Each `(ip_kind, ip_hi)` group is
+/// independent, so counting is just the sum of cardinalities — no cross-group
+/// overlap is possible.
+#[derive(Default)]
+pub struct IpBitmaps {
+    pub v4: RoaringBitmap,
+    pub v6: AHashMap<u64, RoaringTreemap>,
+}
+
+impl IpBitmaps {
+    pub fn insert(&mut self, ip: Ip) {
+        match ip {
+            Ip::V4(n) => {
+                self.v4.insert(n);
+            }
+            Ip::V6(n) => {
+                let hi = (n >> 64) as u64;
+                let lo = n as u64;
+                self.v6.entry(hi).or_default().insert(lo);
+            }
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.v4.is_empty() && self.v6.values().all(|t| t.is_empty())
     }
 }
 
