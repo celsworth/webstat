@@ -15,20 +15,23 @@ pub fn unknown() -> (Arc<str>, Arc<str>) {
 pub struct Geo {
     reader: Option<maxminddb::Reader<Vec<u8>>>,
     pub(crate) mem_cache: AHashMap<Ip, (Arc<str>, Arc<str>)>,
+    /// True when a path was configured but the DB could not be opened.
+    pub db_unavailable: bool,
 }
 
 impl Geo {
-    /// Create a new `Geo` instance.  If `mmdb_path` is `None`, empty, or the
-    /// file does not exist, all lookups return `("--", "Unknown")`.
+    /// Create a new `Geo` instance.  If `mmdb_path` is `None` or empty, all
+    /// lookups return `("--", "Unknown")`.  If a path is given but the file
+    /// cannot be opened, `db_unavailable` is set to `true`.
     pub fn new(mmdb_path: Option<&str>) -> Self {
-        let reader = mmdb_path
-            .filter(|p| !p.is_empty())
-            .filter(|p| std::path::Path::new(p).exists())
-            .and_then(|p| maxminddb::Reader::open_readfile(p).ok());
+        let configured = mmdb_path.filter(|p| !p.is_empty());
+        let reader = configured.and_then(|p| maxminddb::Reader::open_readfile(p).ok());
+        let db_unavailable = configured.is_some() && reader.is_none();
 
         Self {
             reader,
             mem_cache: AHashMap::with_capacity(65_536),
+            db_unavailable,
         }
     }
 

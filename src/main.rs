@@ -226,6 +226,13 @@ fn build_config(args: &Args) -> Result<config::Config> {
 fn run_processing(cfg: &config::Config) -> Result<()> {
     let db = Database::open(&cfg.database)?;
     let geo = Geo::new(cfg.geoip_db.as_deref());
+    if geo.db_unavailable {
+        eprintln!(
+            "warning: GeoIP database could not be opened: {:?} — country lookups will be unavailable",
+            cfg.geoip_db.as_deref().unwrap_or("")
+        );
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
 
     let rule_set = if cfg.rules.is_empty() {
         None
