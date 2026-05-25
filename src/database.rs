@@ -250,7 +250,7 @@ impl Database {
         let conn =
             Connection::open(path).with_context(|| format!("Failed to open database: {path}"))?;
         conn.busy_timeout(Duration::from_secs(60))?;
-        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
+        conn.execute_batch("PRAGMA page_size = 65536; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
         let mut db = Self { conn };
         db.apply_schema()?;
         Ok(db)
@@ -290,7 +290,6 @@ pub(crate) struct HostKey {
     pub(crate) hi: u64,
     pub(crate) lo: u64,
 }
-
 
 #[cfg(test)]
 mod tests;
