@@ -576,6 +576,70 @@ mod tests {
         assert_eq!(entry.path(), "*");
     }
 
+    // ── parse_float_ms ────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_float_ms_basic() {
+        use super::combined::parse_float_ms;
+        assert_eq!(parse_float_ms(b"1.234"), Some(1234));
+        assert_eq!(parse_float_ms(b"0.001"), Some(1));
+        assert_eq!(parse_float_ms(b"0.999"), Some(999));
+        assert_eq!(parse_float_ms(b"12.789"), Some(12789));
+        assert_eq!(parse_float_ms(b"100.000"), Some(100000));
+    }
+
+    #[test]
+    fn parse_float_ms_fewer_than_3_frac_digits() {
+        use super::combined::parse_float_ms;
+        assert_eq!(parse_float_ms(b"1.5"), Some(1500));
+        assert_eq!(parse_float_ms(b"1.50"), Some(1500));
+        assert_eq!(parse_float_ms(b"0.0"), Some(0));
+    }
+
+    #[test]
+    fn parse_float_ms_rounds_at_4th_decimal() {
+        use super::combined::parse_float_ms;
+        // 0.1234 → top3=123, 4th digit=4 (<5) → 123 ms
+        assert_eq!(parse_float_ms(b"0.1234"), Some(123));
+        // 0.1235 → top3=123, 4th digit=5 (≥5) → 124 ms
+        assert_eq!(parse_float_ms(b"0.1235"), Some(124));
+    }
+
+    #[test]
+    fn parse_float_ms_no_dot_returns_none() {
+        use super::combined::parse_float_ms;
+        assert_eq!(parse_float_ms(b"1234"), None);
+    }
+
+    #[test]
+    fn parse_float_ms_non_digit_returns_none() {
+        use super::combined::parse_float_ms;
+        assert_eq!(parse_float_ms(b"1.2x4"), None);
+    }
+
+    // ── response_time_ms from rt= field ──────────────────────────────────────
+
+    #[test]
+    fn parses_rt_float_seconds_to_ms() {
+        let line = r#"1.2.3.4 - - [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-" rt=1.234"#;
+        let entry = parse_line(line).expect("should parse");
+        assert_eq!(entry.response_time_ms, Some(1234));
+    }
+
+    #[test]
+    fn parses_rt_sub_millisecond() {
+        let line = r#"1.2.3.4 - - [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-" rt=0.001"#;
+        let entry = parse_line(line).expect("should parse");
+        assert_eq!(entry.response_time_ms, Some(1));
+    }
+
+    #[test]
+    fn no_rt_field_gives_none() {
+        let line = r#"1.2.3.4 - - [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-""#;
+        let entry = parse_line(line).expect("should parse");
+        assert_eq!(entry.response_time_ms, None);
+    }
+
     // ── Proto field ───────────────────────────────────────────────────────────
 
     #[test]
