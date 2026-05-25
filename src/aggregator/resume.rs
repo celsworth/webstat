@@ -21,6 +21,7 @@ pub(super) fn read_first_line_ts(filepath: &str) -> Option<i64> {
         CompressionType::Plain => Box::new(limited),
         CompressionType::Gz => Box::new(flate2::read::MultiGzDecoder::new(limited)),
         CompressionType::Bz2 => Box::new(bzip2::read::MultiBzDecoder::new(limited)),
+        CompressionType::Br => Box::new(brotli::Decompressor::new(limited, 8192)),
     };
 
     let mut buf_reader = BufReader::new(reader);

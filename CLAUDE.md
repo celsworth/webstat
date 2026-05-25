@@ -65,9 +65,10 @@ Supported formats detected by file extension:
 |-----------|---------|
 | `.gz`     | `flate2::read::MultiGzDecoder` |
 | `.bz2`    | `bzip2::read::MultiBzDecoder` |
+| `.br`     | `brotli::Decompressor` |
 | (none)    | plain read with seek |
 
-`CompressionType` (`Plain`, `Gz`, `Bz2`) lives in `compression.rs`. Use `CompressionType::from_path(filepath)` to detect, `compression.is_compressed()` to branch.
+`CompressionType` (`Plain`, `Gz`, `Bz2`, `Br`) lives in `compression.rs`. Use `CompressionType::from_path(filepath)` to detect, `compression.is_compressed()` to branch.
 
 Compressed files have no random access — they resume by decoding from the start and skipping already-processed bytes (`skip_decoded_prefix_bytes`). Plain files resume via byte offset seek.
 

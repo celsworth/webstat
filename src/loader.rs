@@ -117,6 +117,7 @@ fn read_compressed(
     let decoder: Box<dyn Read> = match plan.compression {
         CompressionType::Gz => Box::new(flate2::read::MultiGzDecoder::new(file)),
         CompressionType::Bz2 => Box::new(bzip2::read::MultiBzDecoder::new(file)),
+        CompressionType::Br => Box::new(brotli::Decompressor::new(file, 1 << 20)),
         CompressionType::Plain => unreachable!(),
     };
     let mut reader = BufReader::with_capacity(1 << 20, decoder);

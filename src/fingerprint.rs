@@ -25,6 +25,7 @@ pub fn compute_fingerprints(filepath: &str) -> Result<Option<FileFingerprint>> {
     match CompressionType::from_path(filepath) {
         CompressionType::Gz => return compute_gz_fingerprints(filepath),
         CompressionType::Bz2 => return compute_bz2_fingerprints(filepath),
+        CompressionType::Br => return compute_br_fingerprints(filepath),
         CompressionType::Plain => {}
     }
 
@@ -79,6 +80,7 @@ pub fn compute_decompressed_head_fingerprint(
     match compression {
         CompressionType::Gz => compute_gz_uncompressed_head_fingerprint(filepath),
         CompressionType::Bz2 => compute_bz2_uncompressed_head_fingerprint(filepath),
+        CompressionType::Br => compute_br_uncompressed_head_fingerprint(filepath),
         CompressionType::Plain => {
             unreachable!("compute_decompressed_head_fingerprint called for plain file")
         }
@@ -131,6 +133,65 @@ fn compute_bz2_uncompressed_head_fingerprint(filepath: &str) -> Result<Option<u6
     } else {
         Ok(Some(hash_sample(&head)))
     }
+}
+
+fn compute_br_uncompressed_head_fingerprint(filepath: &str) -> Result<Option<u64>> {
+    let file = File::open(filepath)?;
+    let mut decoder = brotli::Decompressor::new(file, 8192);
+
+    let mut head = Vec::with_capacity(FINGERPRINT_SAMPLE);
+    let mut buf = [0u8; 8 * 1024];
+
+    while head.len() < FINGERPRINT_SAMPLE {
+        let n = decoder.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+
+        let take = (FINGERPRINT_SAMPLE - head.len()).min(n);
+        head.extend_from_slice(&buf[..take]);
+    }
+
+    if head.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(hash_sample(&head)))
+    }
+}
+
+fn compute_br_fingerprints(filepath: &str) -> Result<Option<FileFingerprint>> {
+    let file = File::open(filepath)?;
+    let mut decoder = brotli::Decompressor::new(file, 1 << 20);
+
+    let mut head = Vec::with_capacity(FINGERPRINT_SAMPLE);
+    let mut total_size = 0u64;
+    let mut buf = [0u8; 16 * 1024];
+
+    loop {
+        let n = decoder.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+
+        let chunk = &buf[..n];
+        total_size += n as u64;
+
+        if head.len() < FINGERPRINT_SAMPLE {
+            let take = (FINGERPRINT_SAMPLE - head.len()).min(chunk.len());
+            head.extend_from_slice(&chunk[..take]);
+        }
+    }
+
+    if total_size == 0 {
+        return Ok(None);
+    }
+
+    let head_hash = hash_sample(&head);
+
+    Ok(Some(FileFingerprint {
+        head: head_hash,
+        logical_size: total_size,
+    }))
 }
 
 fn compute_gz_fingerprints(filepath: &str) -> Result<Option<FileFingerprint>> {

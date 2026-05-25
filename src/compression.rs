@@ -5,6 +5,7 @@ pub enum CompressionType {
     Plain,
     Gz,
     Bz2,
+    Br,
 }
 
 impl CompressionType {
@@ -13,6 +14,8 @@ impl CompressionType {
             Self::Gz
         } else if path.ends_with(".bz2") {
             Self::Bz2
+        } else if path.ends_with(".br") {
+            Self::Br
         } else {
             Self::Plain
         }
@@ -43,6 +46,15 @@ mod tests {
             CompressionType::Bz2
         );
         assert_eq!(CompressionType::from_path("file.bz2"), CompressionType::Bz2);
+    }
+
+    #[test]
+    fn from_path_detects_br() {
+        assert_eq!(
+            CompressionType::from_path("access.log.br"),
+            CompressionType::Br
+        );
+        assert_eq!(CompressionType::from_path("file.br"), CompressionType::Br);
     }
 
     #[test]
@@ -82,6 +94,7 @@ mod tests {
     fn is_compressed_gz_and_bz2_are_true() {
         assert!(CompressionType::Gz.is_compressed());
         assert!(CompressionType::Bz2.is_compressed());
+        assert!(CompressionType::Br.is_compressed());
     }
 
     #[test]
@@ -101,8 +114,10 @@ mod tests {
     fn equality_reflexive() {
         assert_eq!(CompressionType::Gz, CompressionType::Gz);
         assert_eq!(CompressionType::Bz2, CompressionType::Bz2);
+        assert_eq!(CompressionType::Br, CompressionType::Br);
         assert_eq!(CompressionType::Plain, CompressionType::Plain);
         assert_ne!(CompressionType::Gz, CompressionType::Bz2);
+        assert_ne!(CompressionType::Gz, CompressionType::Br);
         assert_ne!(CompressionType::Gz, CompressionType::Plain);
     }
 }

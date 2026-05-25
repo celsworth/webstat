@@ -11,6 +11,7 @@ path = "src/main.rs"
 ahash        = "0.8"
 anyhow       = "1"
 clap         = { version = "4", features = ["derive"] }
+brotli        = "7"
 bzip2         = "0.4"
 flate2        = "1.0"
 glob          = "0.3"
