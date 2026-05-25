@@ -104,22 +104,20 @@ CREATE TABLE IF NOT EXISTS monthly_top_ips_hits (
     host_kind    INTEGER NOT NULL,
     host_hi      INTEGER NOT NULL,
     host_lo      INTEGER NOT NULL,
-    host_text    TEXT    NOT NULL DEFAULT '',
     hits         INTEGER NOT NULL DEFAULT 0,
     bandwidth    INTEGER NOT NULL DEFAULT 0,
     country_code TEXT    NOT NULL DEFAULT '--',
-    PRIMARY KEY (period, host_kind, host_hi, host_lo, host_text)
+    PRIMARY KEY (period, host_kind, host_hi, host_lo)
 );
 CREATE TABLE IF NOT EXISTS monthly_top_ips_bandwidth (
     period       TEXT    NOT NULL,
     host_kind    INTEGER NOT NULL,
     host_hi      INTEGER NOT NULL,
     host_lo      INTEGER NOT NULL,
-    host_text    TEXT    NOT NULL DEFAULT '',
     hits         INTEGER NOT NULL DEFAULT 0,
     bandwidth    INTEGER NOT NULL DEFAULT 0,
     country_code TEXT    NOT NULL DEFAULT '--',
-    PRIMARY KEY (period, host_kind, host_hi, host_lo, host_text)
+    PRIMARY KEY (period, host_kind, host_hi, host_lo)
 );
 CREATE TABLE IF NOT EXISTS monthly_referrers (
     period   TEXT NOT NULL,
@@ -192,8 +190,7 @@ CREATE TABLE IF NOT EXISTS all_time_ips (
     host_kind INTEGER NOT NULL,
     host_hi   INTEGER NOT NULL,
     host_lo   INTEGER NOT NULL,
-    host_text TEXT    NOT NULL DEFAULT '',
-    PRIMARY KEY (host_kind, host_hi, host_lo, host_text)
+    PRIMARY KEY (host_kind, host_hi, host_lo)
 );
 CREATE TABLE IF NOT EXISTS parse_state (
     filepath    TEXT PRIMARY KEY,
@@ -292,7 +289,6 @@ pub(crate) struct HostKey {
     pub(crate) kind: u8,
     pub(crate) hi: u64,
     pub(crate) lo: u64,
-    pub(crate) text: String,
 }
 
 

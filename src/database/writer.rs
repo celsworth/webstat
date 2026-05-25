@@ -35,7 +35,6 @@ fn encode_host_key(host: &str) -> HostKey {
             kind: 1,
             hi: 0,
             lo: u32::from(v4) as u64,
-            text: String::new(),
         },
         Ok(IpAddr::V6(v6)) => {
             let n = u128::from(v6);
@@ -43,14 +42,12 @@ fn encode_host_key(host: &str) -> HostKey {
                 kind: 2,
                 hi: (n >> 64) as u64,
                 lo: n as u64,
-                text: String::new(),
             }
         }
         Err(_) => HostKey {
             kind: 0,
             hi: 0,
             lo: 0,
-            text: host.to_string(),
         },
     }
 }
@@ -114,15 +111,15 @@ impl Database {
         // monthly_top_ips_hits and monthly_top_ips_bandwidth
         if !data.hosts.is_empty() {
             let sql_hits = "INSERT INTO monthly_top_ips_hits \
-                            (period,host_kind,host_hi,host_lo,host_text,hits,bandwidth,country_code) \
-                            VALUES (?1,?2,?3,?4,?5,?6,?7,?8) \
-                            ON CONFLICT (period,host_kind,host_hi,host_lo,host_text) DO UPDATE SET \
+                            (period,host_kind,host_hi,host_lo,hits,bandwidth,country_code) \
+                            VALUES (?1,?2,?3,?4,?5,?6,?7) \
+                            ON CONFLICT (period,host_kind,host_hi,host_lo) DO UPDATE SET \
                               hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth, \
                               country_code=COALESCE(NULLIF(excluded.country_code,'--'),country_code)";
             let sql_bw = "INSERT INTO monthly_top_ips_bandwidth \
-                          (period,host_kind,host_hi,host_lo,host_text,hits,bandwidth,country_code) \
-                          VALUES (?1,?2,?3,?4,?5,?6,?7,?8) \
-                          ON CONFLICT (period,host_kind,host_hi,host_lo,host_text) DO UPDATE SET \
+                          (period,host_kind,host_hi,host_lo,hits,bandwidth,country_code) \
+                          VALUES (?1,?2,?3,?4,?5,?6,?7) \
+                          ON CONFLICT (period,host_kind,host_hi,host_lo) DO UPDATE SET \
                             hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth, \
                             country_code=COALESCE(NULLIF(excluded.country_code,'--'),country_code)";
             let mut stmt_hits = tx.prepare_cached(sql_hits)?;
@@ -146,7 +143,6 @@ impl Database {
                     hk.kind as i64,
                     hk.hi as i64,
                     hk.lo as i64,
-                    &hk.text,
                     *hits as i64,
                     *bw as i64,
                     cc.as_ref()
@@ -156,7 +152,6 @@ impl Database {
                     hk.kind as i64,
                     hk.hi as i64,
                     hk.lo as i64,
-                    &hk.text,
                     *hits as i64,
                     *bw as i64,
                     cc.as_ref()
@@ -351,8 +346,8 @@ impl Database {
         let like_pattern = format!("{}-%", period);
         if enable_all_time_unique_sites {
             tx.execute(
-                "INSERT OR IGNORE INTO all_time_ips (host_kind,host_hi,host_lo,host_text) \
-                 SELECT ip_kind, ip_hi, ip_lo, '' FROM daily_unique_ips WHERE date LIKE ?1",
+                "INSERT OR IGNORE INTO all_time_ips (host_kind,host_hi,host_lo) \
+                 SELECT ip_kind, ip_hi, ip_lo FROM daily_unique_ips WHERE date LIKE ?1",
                 params![like_pattern],
             )?;
         }

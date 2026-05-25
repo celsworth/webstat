@@ -32,8 +32,7 @@ mod tests {
                  host_kind INTEGER NOT NULL,
                  host_hi   INTEGER NOT NULL,
                  host_lo   INTEGER NOT NULL,
-                 host_text TEXT    NOT NULL DEFAULT '',
-                 PRIMARY KEY (host_kind, host_hi, host_lo, host_text)
+                 PRIMARY KEY (host_kind, host_hi, host_lo)
              );
              CREATE TABLE countries (
                  country_code TEXT PRIMARY KEY,
@@ -181,12 +180,12 @@ mod tests {
         let conn = setup_conn();
         insert_hourly(&conn, "2026-05-01", 0, 100, 10);
         conn.execute(
-            "INSERT INTO all_time_ips (host_kind, host_hi, host_lo, host_text) VALUES (1, 0, 1, '')",
+            "INSERT INTO all_time_ips (host_kind, host_hi, host_lo) VALUES (1, 0, 1)",
             [],
         )
         .expect("insert all_time host a");
         conn.execute(
-            "INSERT INTO all_time_ips (host_kind, host_hi, host_lo, host_text) VALUES (1, 0, 2, '')",
+            "INSERT INTO all_time_ips (host_kind, host_hi, host_lo) VALUES (1, 0, 2)",
             [],
         )
         .expect("insert all_time host b");

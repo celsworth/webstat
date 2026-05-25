@@ -760,7 +760,7 @@ fn top_ips_from_table(
     let (sql, period_param) = if period.len() == 7 {
         (
             format!(
-                "SELECT t.host_kind, t.host_hi, t.host_lo, t.host_text,
+                "SELECT t.host_kind, t.host_hi, t.host_lo,
                         t.hits, t.bandwidth,
                         COALESCE(t.country_code, '--'),
                         COALESCE(cn.country_name, 'Unknown')
@@ -775,14 +775,14 @@ fn top_ips_from_table(
     } else {
         (
             format!(
-                "SELECT t.host_kind, t.host_hi, t.host_lo, t.host_text,
+                "SELECT t.host_kind, t.host_hi, t.host_lo,
                         SUM(t.hits) AS hits, SUM(t.bandwidth) AS bandwidth,
                         COALESCE(MAX(t.country_code), '--'),
                         COALESCE(MAX(cn.country_name), 'Unknown')
                  FROM {table} t
                  LEFT JOIN countries cn ON cn.country_code = t.country_code
                  WHERE t.period LIKE ?1
-                 GROUP BY t.host_kind, t.host_hi, t.host_lo, t.host_text
+                 GROUP BY t.host_kind, t.host_hi, t.host_lo
                  ORDER BY {order_metric} DESC, hits DESC
                  LIMIT ?2"
             ),
@@ -795,15 +795,14 @@ fn top_ips_from_table(
         let host_kind = row.get::<_, i64>(0)? as u8;
         let host_hi = row.get::<_, i64>(1)? as u64;
         let host_lo = row.get::<_, i64>(2)? as u64;
-        let host_text = row.get::<_, String>(3)?;
-        let country_code = row.get::<_, String>(6)?;
+        let country_code = row.get::<_, String>(5)?;
         Ok(TopHostRow {
-            host: decode_host(host_kind, host_hi, host_lo, &host_text, anonymise_ips),
-            hits: row.get::<_, i64>(4)? as u64,
-            bandwidth: row.get::<_, i64>(5)? as u64,
+            host: decode_host(host_kind, host_hi, host_lo, anonymise_ips),
+            hits: row.get::<_, i64>(3)? as u64,
+            bandwidth: row.get::<_, i64>(4)? as u64,
             country_flag: flag_emoji(&country_code),
             country_code: country_code.clone(),
-            country_name: row.get::<_, String>(7)?,
+            country_name: row.get::<_, String>(6)?,
             hits_fmt: String::new(),
             hits_exact_fmt: String::new(),
             bandwidth_fmt: String::new(),
@@ -822,7 +821,7 @@ fn top_ips_from_table(
     Ok(out)
 }
 
-fn decode_host(kind: u8, hi: u64, lo: u64, text: &str, anonymise: bool) -> String {
+fn decode_host(kind: u8, hi: u64, lo: u64, anonymise: bool) -> String {
     match kind {
         1 => {
             let addr = if anonymise {
@@ -841,7 +840,7 @@ fn decode_host(kind: u8, hi: u64, lo: u64, text: &str, anonymise: bool) -> Strin
             let n = ((hi as u128) << 64) | lo as u128;
             Ipv6Addr::from(n).to_string()
         }
-        _ => text.to_string(),
+        _ => String::new(),
     }
 }
 
