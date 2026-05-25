@@ -13,6 +13,7 @@ use super::{FileResumePlan, Processor, CHANNEL_CAPACITY};
 use crate::database::ParseStateUpdate;
 use crate::loader;
 use crate::parser::stage::{self as parser_stage, RuleStats};
+use crate::parser::LogFormat;
 use crate::run_accumulators::RunAccumulators;
 use std::collections::BTreeMap;
 
@@ -268,7 +269,15 @@ impl Processor {
         let parser_handle = std::thread::Builder::new()
             .name("parser".into())
             .spawn(move || {
-                parser_stage::run_parser(parser_rx, parser_tx, ps_parser, ua, bot_filter, rule_set)
+                parser_stage::run_parser(
+                    parser_rx,
+                    parser_tx,
+                    ps_parser,
+                    ua,
+                    bot_filter,
+                    rule_set,
+                    LogFormat::Combined,
+                )
             })?;
 
         // ── Phase 4: aggregator loop (runs on this thread) ─────────────────────

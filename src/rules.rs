@@ -594,7 +594,7 @@ mod tests {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     fn make_entry(line: &str) -> LogEntry {
-        LogEntry::parse(line.to_string()).expect("test entry must parse")
+        crate::parser::combined::parse_line(line.to_string()).expect("test entry must parse")
     }
 
     fn single(field: &str, op: &str, value: serde_yaml::Value) -> RuleSet {

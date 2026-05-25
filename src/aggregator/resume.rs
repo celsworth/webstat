@@ -33,8 +33,8 @@ pub(super) fn read_first_line_ts(filepath: &str) -> Option<i64> {
             Ok(_) => {}
         }
         let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-        if let Some(entry) = crate::parser::LogEntry::parse(trimmed.to_string()) {
-            return crate::parser::parse_unix_timestamp(entry.time_str(), entry.month_num);
+        if let Some(entry) = crate::parser::combined::parse_line(trimmed.to_string()) {
+            return crate::parser::combined::parse_unix_timestamp(entry.time_str(), entry.month_num);
         }
     }
     None

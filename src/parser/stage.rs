@@ -9,7 +9,7 @@ use crate::aggregator::messages::{
     pop_blocking, push_blocking, LoaderMsg, ParsedEntry, ParserMsg,
 };
 use crate::aggregator::{ProgressState, PARSER_BATCH_SIZE};
-use crate::parser::LogEntry;
+use crate::parser::LogFormat;
 use crate::rules::{Action, HideMask, SharedRuleSet};
 use crate::ua::UaParser;
 use rand::Rng as _;
@@ -26,6 +26,7 @@ pub(crate) fn run_parser(
     mut ua: UaParser,
     bot_filter: bool,
     rule_set: Option<SharedRuleSet>,
+    log_format: LogFormat,
 ) -> (BTreeMap<Arc<str>, RuleStats>, u64) {
     let mut entry_batch: Vec<(ParsedEntry, u64)> = Vec::with_capacity(PARSER_BATCH_SIZE);
     let mut current_offset: u64 = 0;
@@ -44,7 +45,7 @@ pub(crate) fn run_parser(
             } => {
                 current_offset = offset;
                 for (line, line_start) in batch {
-                    if let Some(entry) = LogEntry::parse(line) {
+                    if let Some(entry) = log_format.parse(line) {
                         let ua_result = ua.parse(entry.user_agent());
                         if bot_filter && ua_result.is_bot {
                             bot_filtered += 1;

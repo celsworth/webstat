@@ -1,6 +1,7 @@
 // Tests for the combined-log-format parser and LogEntry field extraction.
 
 use super::*;
+use super::combined::{parse_line, parse_unix_timestamp};
 
 #[cfg(test)]
 mod tests {
@@ -482,7 +483,7 @@ mod tests {
             r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET {} HTTP/1.1" 200 100 "-" "-""#,
             long_path
         );
-        let entry = LogEntry::parse(line).expect("should parse");
+        let entry = parse_line(line).expect("should parse");
         assert_eq!(entry.path().len(), 1001);
     }
 
@@ -493,7 +494,7 @@ mod tests {
             r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "{}""#,
             long_ua
         );
-        let entry = LogEntry::parse(line).expect("should parse");
+        let entry = parse_line(line).expect("should parse");
         assert!(entry.user_agent().len() > 100);
     }
 
