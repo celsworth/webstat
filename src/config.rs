@@ -7,6 +7,48 @@ use std::path::{Path, PathBuf};
 
 pub use crate::rules::RawRule;
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub struct StyleConfig {
+    // Theme
+    pub bg: Option<String>,
+    pub surface: Option<String>,
+    pub surface_alt: Option<String>,
+    pub border: Option<String>,
+    pub text: Option<String>,
+    pub text_muted: Option<String>,
+    pub accent: Option<String>,
+    pub accent_hover: Option<String>,
+    // Metric UI colors (stat card borders, table header text)
+    pub metric_hits: Option<String>,
+    pub metric_files: Option<String>,
+    pub metric_pages: Option<String>,
+    pub metric_visits: Option<String>,
+    pub metric_sites: Option<String>,
+    pub metric_bandwidth: Option<String>,
+    // Status table row background tints
+    pub status_2xx_bg: Option<String>,
+    pub status_3xx_bg: Option<String>,
+    pub status_4xx_bg: Option<String>,
+    pub status_5xx_bg: Option<String>,
+    pub status_other_bg: Option<String>,
+    pub weekend_bg: Option<String>,
+    // Chart bar/line colors
+    pub bar_hits: Option<String>,
+    pub bar_hits_weekend: Option<String>,
+    pub line_bandwidth: Option<String>,
+    pub bar_visits: Option<String>,
+    pub bar_visits_weekend: Option<String>,
+    pub bar_sites: Option<String>,
+    pub bar_sites_weekend: Option<String>,
+    // Status doughnut chart slice colors
+    pub status_2xx_color: Option<String>,
+    pub status_3xx_color: Option<String>,
+    pub status_4xx_color: Option<String>,
+    pub status_5xx_color: Option<String>,
+    pub status_other_color: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -40,6 +82,9 @@ pub struct Config {
     /// Optional per-entry filtering rules evaluated in the parser thread.
     #[serde(default)]
     pub rules: Vec<RawRule>,
+    /// HTML report colour overrides.
+    #[serde(default)]
+    pub style: StyleConfig,
 }
 
 impl Default for Config {
@@ -61,6 +106,7 @@ impl Default for Config {
             checkpoint_minutes: 0,
             anonymise_ips: false,
             rules: Vec::new(),
+            style: StyleConfig::default(),
         }
     }
 }

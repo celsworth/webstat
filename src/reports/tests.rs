@@ -37,6 +37,16 @@ mod tests {
         }
     }
 
+    fn base_cfg(temp: &TempDir) -> Config {
+        Config {
+            site_name: "Test Site".to_string(),
+            log_glob: temp.path().join("access.log").to_string_lossy().into_owned(),
+            database: temp.path().join("webstat.db").to_string_lossy().into_owned(),
+            output_dir: temp.path().join("output").to_string_lossy().into_owned(),
+            ..Default::default()
+        }
+    }
+
     fn process_logs(cfg: &Config) -> u64 {
         let db = Database::open(&cfg.database).expect("open db");
         let geo = Geo::new(cfg.geoip_db.as_deref());
@@ -148,17 +158,6 @@ mod tests {
             ),
             database: db_path.to_string_lossy().into_owned(),
             output_dir: output_dir.to_string_lossy().into_owned(),
-            geoip_db: None,
-            top_n: 20,
-            enable_top_urls: true,
-            enable_top_sites: true,
-            enable_top_refs: true,
-            enable_top_agents: true,
-            enable_all_time_unique_sites: true,
-            vacuum_after_prune: false,
-            bot_filter: true,
-            checkpoint_minutes: 0,
-            anonymise_ips: false,
             rules: vec![RawRule {
                 name: "Self-referrals".into(),
                 enabled: true,
@@ -169,6 +168,7 @@ mod tests {
                 }]),
                 action: RawAction::Hide(vec!["refs".into()]),
             }],
+            ..base_cfg(&temp)
         };
 
         let imported = process_logs(&cfg);
@@ -256,18 +256,7 @@ mod tests {
             log_glob: log_path.to_string_lossy().into_owned(),
             database: db_path.to_string_lossy().into_owned(),
             output_dir: output_dir.to_string_lossy().into_owned(),
-            geoip_db: None,
-            top_n: 20,
-            enable_top_urls: true,
-            enable_top_sites: true,
-            enable_top_refs: true,
-            enable_top_agents: true,
-            enable_all_time_unique_sites: true,
-            vacuum_after_prune: false,
-            bot_filter: true,
-            checkpoint_minutes: 0,
-            anonymise_ips: false,
-            rules: vec![],
+            ..base_cfg(&temp)
         };
 
         assert_eq!(process_logs(&cfg), 2);
@@ -299,5 +288,42 @@ mod tests {
             fs::read_to_string(output_dir.join("2026-05").join("index.html")).expect("read may");
         assert!(may_html.contains("Code 503 - Service Unavailable"));
         assert!(may_html.contains("/boom"));
+    }
+
+    #[test]
+    fn style_overrides_appear_in_html_output() {
+        let temp = TempDir::new().expect("tempdir");
+        let log_path = temp.path().join("access.log");
+        write_plain_file(
+            &log_path,
+            &[sample_line_at(
+                "10.0.0.1",
+                "09/May/2026:08:00:00 +0000",
+                "/index.html",
+                200,
+                42,
+                "-",
+                "Mozilla/5.0",
+            )],
+        );
+
+        let cfg = Config {
+            site_name: "Style Test".to_string(),
+            log_glob: log_path.to_string_lossy().into_owned(),
+            style: crate::config::StyleConfig {
+                accent: Some("#facade".to_string()),
+                bar_hits: Some("#abcdef".to_string()),
+                ..Default::default()
+            },
+            ..base_cfg(&temp)
+        };
+
+        process_logs(&cfg);
+        generate_html(&cfg).expect("generate html");
+
+        let index_html = fs::read_to_string(temp.path().join("output").join("index.html"))
+            .expect("read index");
+        assert!(index_html.contains("--accent: #facade"), "accent CSS var missing");
+        assert!(index_html.contains("#abcdef"), "bar_hits chart colour missing");
     }
 }

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ site_name }} - Web Statistics</title>
   <link rel="stylesheet" href="{{ assets_path }}/style.css">
+  {{ custom_style | safe }}
 </head>
 <body>
   <header class="site-header">

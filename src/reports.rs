@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 use tera::{Context as TeraContext, Tera};
 
-use crate::config::Config;
+use crate::config::{Config, StyleConfig};
 use crate::logging;
 
 mod aggregator;
@@ -432,15 +432,15 @@ fn render_index_page(
     page_ctx.insert("top_agents", &overall.top_agents);
     page_ctx.insert(
         "overview_chart",
-        &charts::yearly_overview_chart(&overall.yearly_rows)?,
+        &charts::yearly_overview_chart(&overall.yearly_rows, &cfg.style)?,
     );
     page_ctx.insert(
         "overview_visits_chart",
-        &charts::yearly_visits_chart(&overall.yearly_rows)?,
+        &charts::yearly_visits_chart(&overall.yearly_rows, &cfg.style)?,
     );
     page_ctx.insert(
         "status_chart",
-        &charts::status_chart(&overall.status_codes)?,
+        &charts::status_chart(&overall.status_codes, &cfg.style)?,
     );
     page_ctx.insert(
         "country_chart",
@@ -477,15 +477,15 @@ fn render_year_page(
 
     page_ctx.insert(
         "overview_chart",
-        &charts::monthly_overview_chart(&summary.monthly_rows)?,
+        &charts::monthly_overview_chart(&summary.monthly_rows, &cfg.style)?,
     );
     page_ctx.insert(
         "overview_visits_chart",
-        &charts::monthly_visits_chart(&summary.monthly_rows)?,
+        &charts::monthly_visits_chart(&summary.monthly_rows, &cfg.style)?,
     );
     page_ctx.insert(
         "status_chart",
-        &charts::status_chart(&summary.status_codes)?,
+        &charts::status_chart(&summary.status_codes, &cfg.style)?,
     );
     page_ctx.insert(
         "country_chart",
@@ -528,15 +528,15 @@ fn render_month_page(
     page_ctx.insert("daily_avg_max", &summary.daily_avg_max);
     page_ctx.insert("hourly_avg_max", &summary.hourly_avg_max);
 
-    page_ctx.insert("daily_chart", &charts::daily_chart(&summary.daily)?);
+    page_ctx.insert("daily_chart", &charts::daily_chart(&summary.daily, &cfg.style)?);
     page_ctx.insert(
         "daily_visits_chart",
-        &charts::daily_visits_chart(&summary.daily)?,
+        &charts::daily_visits_chart(&summary.daily, &cfg.style)?,
     );
-    page_ctx.insert("hourly_chart", &charts::hourly_chart(&summary.hourly)?);
+    page_ctx.insert("hourly_chart", &charts::hourly_chart(&summary.hourly, &cfg.style)?);
     page_ctx.insert(
         "status_chart",
-        &charts::status_chart(&summary.status_codes)?,
+        &charts::status_chart(&summary.status_codes, &cfg.style)?,
     );
     page_ctx.insert(
         "country_chart",
@@ -566,7 +566,44 @@ fn render_layout(
     layout.insert("overview_path", overview_path);
     layout.insert("generated_at", &generated_timestamp());
     layout.insert("content", &page_content);
+    layout.insert("custom_style", &css_overrides(&cfg.style));
     Ok(tera.render("layout.html.tera", &layout)?)
+}
+
+fn css_overrides(style: &StyleConfig) -> String {
+    let mut vars: Vec<String> = Vec::new();
+    macro_rules! v {
+        ($opt:expr, $name:literal) => {
+            if let Some(val) = &$opt {
+                vars.push(format!("    {}: {};", $name, val));
+            }
+        };
+    }
+    v!(style.bg, "--bg");
+    v!(style.surface, "--surface");
+    v!(style.surface_alt, "--surface-alt");
+    v!(style.border, "--border");
+    v!(style.text, "--text");
+    v!(style.text_muted, "--text-muted");
+    v!(style.accent, "--accent");
+    v!(style.accent_hover, "--accent-h");
+    v!(style.metric_hits, "--metric-hits");
+    v!(style.metric_files, "--metric-files");
+    v!(style.metric_pages, "--metric-pages");
+    v!(style.metric_visits, "--metric-visits");
+    v!(style.metric_sites, "--metric-sites");
+    v!(style.metric_bandwidth, "--metric-bandwidth");
+    v!(style.status_2xx_bg, "--status-2xx-bg");
+    v!(style.status_3xx_bg, "--status-3xx-bg");
+    v!(style.status_4xx_bg, "--status-4xx-bg");
+    v!(style.status_5xx_bg, "--status-5xx-bg");
+    v!(style.status_other_bg, "--status-other-bg");
+    v!(style.weekend_bg, "--daily-weekend-bg");
+
+    if vars.is_empty() {
+        return String::new();
+    }
+    format!("<style>\n:root {{\n{}\n}}\n</style>", vars.join("\n"))
 }
 
 fn generated_timestamp() -> String {

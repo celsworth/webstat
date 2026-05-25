@@ -88,6 +88,75 @@ This option controls whether Webstat tracks the set of unique hosts (IP addresse
 If disabled, Webstat will not track this data, and the Unique Sites stat box will be hidden from the overview report. Note that this does not affect the Unique Sites stat for individual months, which is computed from the aggregated data for that month and does not require tracking all-time unique hosts.
 
 
+### Style
+
+All report colours can be overridden under the `style:` key. Any key omitted uses the built-in default. Overrides apply to both light and dark mode.
+
+```yaml
+style:
+  bar_hits: "#52c493"
+  accent: "#2f61d4"
+```
+
+#### Theme
+
+| Key | Default | Affects |
+|---|---|---|
+| `bg` | `#eef1f5` | Page background |
+| `surface` | `#ffffff` | Card / panel backgrounds |
+| `surface_alt` | `#f4f6fa` | Table header backgrounds, hover |
+| `border` | `#d7dce5` | All borders and dividers |
+| `text` | `#1f2532` | Body text |
+| `text_muted` | `#60697a` | Labels, secondary text |
+| `accent` | `#2f61d4` | Links, heading highlight, focus ring |
+| `accent_hover` | `#244ca7` | Hovered links |
+
+#### Metric UI colours
+
+Used for stat card top borders and table header text.
+
+| Key | Default | Metric |
+|---|---|---|
+| `metric_hits` | `#52c493` | Hits |
+| `metric_files` | `#7090ff` | Files |
+| `metric_pages` | `#66ddff` | Pages |
+| `metric_visits` | `#bfa800` | Visits |
+| `metric_sites` | `#ffc055` | Sites |
+| `metric_bandwidth` | `#ff7a7a` | Bandwidth |
+
+#### Status table row backgrounds
+
+| Key | Default |
+|---|---|
+| `status_2xx_bg` | `#52c49324` |
+| `status_3xx_bg` | `#7090ff24` |
+| `status_4xx_bg` | `#ffc0552e` |
+| `status_5xx_bg` | `#ff7a7a29` |
+| `status_other_bg` | `#a0a0a01f` |
+| `weekend_bg` | `#2f61d414` |
+
+#### Chart bar / line colours
+
+| Key | Default | Used in |
+|---|---|---|
+| `bar_hits` | `#52c493` | Hits bars (daily, hourly, monthly, yearly) |
+| `bar_hits_weekend` | `#5bb4b3` | Hits bars on weekend days |
+| `bar_visits` | `#ffea66` | Visits bars |
+| `bar_visits_weekend` | `#d4cf94` | Visits bars on weekend days |
+| `bar_sites` | `#ffc055` | Sites bars |
+| `bar_sites_weekend` | `#d4b288` | Sites bars on weekend days |
+| `line_bandwidth` | `#ff7a7a` | Bandwidth line overlay |
+
+#### Status doughnut chart colours
+
+| Key | Default |
+|---|---|
+| `status_2xx_color` | `#52c493` |
+| `status_3xx_color` | `#7090ff` |
+| `status_4xx_color` | `#ffc055` |
+| `status_5xx_color` | `#ff7a7a` |
+| `status_other_color` | `#bab0ac` |
+
 ### Rules
 
 Webstat supports a comprehensive rule system for ignoring requests based on URL patterns, user agents, referrers, and more.

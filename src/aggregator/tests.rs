@@ -83,6 +83,20 @@ mod tests {
         encoder.finish().expect("finish gzip member");
     }
 
+    fn base_processor_config() -> ProcessorConfig {
+        ProcessorConfig {
+            top_n: 20,
+            vacuum_after_prune: false,
+            bot_filter: false,
+            enable_top_urls: true,
+            enable_top_sites: true,
+            enable_top_refs: true,
+            enable_top_agents: true,
+            enable_all_time_unique_sites: true,
+            rule_set: None,
+        }
+    }
+
     fn new_processor(db_path: &Path) -> Processor {
         new_processor_with_rules(db_path, None)
     }
@@ -92,40 +106,12 @@ mod tests {
         rule_set: Option<crate::rules::SharedRuleSet>,
     ) -> Processor {
         let db = Database::open(db_path.to_str().expect("db path utf-8")).expect("open db");
-        Processor::new(
-            db,
-            Geo::new(None),
-            ProcessorConfig {
-                top_n: 20,
-                vacuum_after_prune: false,
-                bot_filter: false,
-                enable_top_urls: true,
-                enable_top_sites: true,
-                enable_top_refs: true,
-                enable_top_agents: true,
-                enable_all_time_unique_sites: true,
-                rule_set,
-            },
-        )
+        Processor::new(db, Geo::new(None), ProcessorConfig { rule_set, ..base_processor_config() })
     }
 
     fn new_processor_with_agents_flag(db_path: &Path, enable_top_agents: bool) -> Processor {
         let db = Database::open(db_path.to_str().expect("db path utf-8")).expect("open db");
-        Processor::new(
-            db,
-            Geo::new(None),
-            ProcessorConfig {
-                top_n: 20,
-                vacuum_after_prune: false,
-                bot_filter: false,
-                enable_top_urls: true,
-                enable_top_sites: true,
-                enable_top_refs: true,
-                enable_top_agents,
-                enable_all_time_unique_sites: true,
-                rule_set: None,
-            },
-        )
+        Processor::new(db, Geo::new(None), ProcessorConfig { enable_top_agents, ..base_processor_config() })
     }
 
     // ── Plain File Resume & Deduplication ─────────────────────────────────────

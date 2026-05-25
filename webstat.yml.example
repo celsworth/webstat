@@ -42,6 +42,52 @@ enable_top_agents: true
 # When disabled, the Unique Sites box is hidden on the overview report.
 enable_all_time_unique_hosts: true
 
+# HTML report colour overrides.
+# Any key omitted uses the built-in default. Overrides apply to both light and dark mode.
+
+style:
+  # Theme
+  bg: "#eef1f5"
+  surface: "#ffffff"
+  surface_alt: "#f4f6fa"
+  border: "#d7dce5"
+  text: "#1f2532"
+  text_muted: "#60697a"
+  accent: "#2f61d4"
+  accent_hover: "#244ca7"
+
+  # Metric UI colours (stat card borders, table header text)
+  metric_hits: "#52c493"
+  metric_files: "#7090ff"
+  metric_pages: "#66ddff"
+  metric_visits: "#bfa800"
+  metric_sites: "#ffc055"
+  metric_bandwidth: "#ff7a7a"
+
+  # Status table row background tints
+  status_2xx_bg: "#52c49324"
+  status_3xx_bg: "#7090ff24"
+  status_4xx_bg: "#ffc0552e"
+  status_5xx_bg: "#ff7a7a29"
+  status_other_bg: "#a0a0a01f"
+  weekend_bg: "#2f61d414"
+
+  # Chart bar / line colours
+  bar_hits: "#52c493"
+  bar_hits_weekend: "#5bb4b3"
+  bar_visits: "#ffea66"
+  bar_visits_weekend: "#d4cf94"
+  bar_sites: "#ffc055"
+  bar_sites_weekend: "#d4b288"
+  line_bandwidth: "#ff7a7a"
+
+  # Status doughnut chart colours
+  status_2xx_color: "#52c493"
+  status_3xx_color: "#7090ff"
+  status_4xx_color: "#ffc055"
+  status_5xx_color: "#ff7a7a"
+  status_other_color: "#bab0ac"
+
 # Rule-based filtering
 # Rules are evaluated in the parser thread in order; the first matching rule wins.
 # See RULES.md for full field/operator reference.

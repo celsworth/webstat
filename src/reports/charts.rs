@@ -7,13 +7,22 @@ use super::{
     percent_1dp, short_status_label, DailyRow, HourlyRow, MonthRow, StatusRow, TopAgentRow,
     TopCountryRow, YearAggregateRow, PALETTE,
 };
+use crate::config::StyleConfig;
 
-pub(super) fn daily_chart(daily: &[DailyRow]) -> Result<String> {
+pub(super) fn daily_chart(daily: &[DailyRow], style: &StyleConfig) -> Result<String> {
+    let bar_hits = style.bar_hits.as_deref().unwrap_or(PALETTE[0]);
+    let bar_hits_weekend = style.bar_hits_weekend.as_deref().unwrap_or("#5bb4b3");
+    let bar_bandwidth = style.line_bandwidth.as_deref().unwrap_or(PALETTE[2]);
+
     let labels: Vec<String> = daily
         .iter()
         .map(|d| d.date.split('-').next_back().unwrap_or("").to_string())
         .collect();
     let hits: Vec<u64> = daily.iter().map(|d| d.hits).collect();
+    let hits_colors: Vec<&str> = daily
+        .iter()
+        .map(|d| if d.is_weekend { bar_hits_weekend } else { bar_hits })
+        .collect();
     let bandwidth: Vec<f64> = daily
         .iter()
         .map(|d| ((d.bandwidth as f64) / 1_048_576.0 * 100.0).round() / 100.0)
@@ -24,8 +33,8 @@ pub(super) fn daily_chart(daily: &[DailyRow]) -> Result<String> {
       "data": {
         "labels": labels,
         "datasets": [
-          { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2, "order": 1 },
-          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 2, "fill": false, "order": 0 }
+          { "label": "Hits", "data": hits, "backgroundColor": hits_colors, "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2, "order": 1 },
+          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": bar_bandwidth, "yAxisID": "y1", "type": "line", "borderColor": bar_bandwidth, "tension": 0.3, "pointRadius": 2, "fill": false, "order": 0 }
         ]
       },
       "options": dual_axis_options("Daily Activity")
@@ -33,21 +42,34 @@ pub(super) fn daily_chart(daily: &[DailyRow]) -> Result<String> {
     .context("Failed to build daily chart JSON")
 }
 
-pub(super) fn daily_visits_chart(daily: &[DailyRow]) -> Result<String> {
+pub(super) fn daily_visits_chart(daily: &[DailyRow], style: &StyleConfig) -> Result<String> {
+    let bar_visits = style.bar_visits.as_deref().unwrap_or(PALETTE[5]);
+    let bar_visits_weekend = style.bar_visits_weekend.as_deref().unwrap_or("#d4cf94");
+    let bar_sites = style.bar_sites.as_deref().unwrap_or(PALETTE[3]);
+    let bar_sites_weekend = style.bar_sites_weekend.as_deref().unwrap_or("#d4b288");
+
     let labels: Vec<String> = daily
         .iter()
         .map(|d| d.date.split('-').next_back().unwrap_or("").to_string())
         .collect();
     let visits: Vec<u64> = daily.iter().map(|d| d.visits).collect();
+    let visits_colors: Vec<&str> = daily
+        .iter()
+        .map(|d| if d.is_weekend { bar_visits_weekend } else { bar_visits })
+        .collect();
     let visitors: Vec<u64> = daily.iter().map(|d| d.visitors).collect();
+    let visitors_colors: Vec<&str> = daily
+        .iter()
+        .map(|d| if d.is_weekend { bar_sites_weekend } else { bar_sites })
+        .collect();
 
     serde_json::to_string(&json!({
       "type": "bar",
       "data": {
         "labels": labels,
         "datasets": [
-          { "label": "Visits", "data": visits, "backgroundColor": PALETTE[5], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Sites", "data": visitors, "backgroundColor": PALETTE[3], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
+          { "label": "Visits", "data": visits, "backgroundColor": visits_colors, "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
+          { "label": "Sites", "data": visitors, "backgroundColor": visitors_colors, "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
         ]
       },
       "options": simple_bar_options("Visits & Sites")
@@ -55,7 +77,10 @@ pub(super) fn daily_visits_chart(daily: &[DailyRow]) -> Result<String> {
     .context("Failed to build daily visits chart JSON")
 }
 
-pub(super) fn hourly_chart(hourly: &[HourlyRow]) -> Result<String> {
+pub(super) fn hourly_chart(hourly: &[HourlyRow], style: &StyleConfig) -> Result<String> {
+    let bar_hits = style.bar_hits.as_deref().unwrap_or(PALETTE[0]);
+    let bar_bandwidth = style.line_bandwidth.as_deref().unwrap_or(PALETTE[2]);
+
     let labels: Vec<String> = hourly.iter().map(|h| h.label.clone()).collect();
     let hits: Vec<u64> = hourly.iter().map(|h| h.hits).collect();
     let bandwidth: Vec<f64> = hourly
@@ -68,8 +93,8 @@ pub(super) fn hourly_chart(hourly: &[HourlyRow]) -> Result<String> {
       "data": {
         "labels": labels,
         "datasets": [
-          { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2, "order": 1 },
-          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 2, "fill": false, "order": 0 }
+          { "label": "Hits", "data": hits, "backgroundColor": bar_hits, "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2, "order": 1 },
+          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": bar_bandwidth, "yAxisID": "y1", "type": "line", "borderColor": bar_bandwidth, "tension": 0.3, "pointRadius": 2, "fill": false, "order": 0 }
         ]
       },
       "options": dual_axis_options("Hourly Distribution")
@@ -77,7 +102,10 @@ pub(super) fn hourly_chart(hourly: &[HourlyRow]) -> Result<String> {
     .context("Failed to build hourly chart JSON")
 }
 
-pub(super) fn monthly_overview_chart(monthly: &[MonthRow]) -> Result<String> {
+pub(super) fn monthly_overview_chart(monthly: &[MonthRow], style: &StyleConfig) -> Result<String> {
+    let bar_hits = style.bar_hits.as_deref().unwrap_or(PALETTE[0]);
+    let bar_bandwidth = style.line_bandwidth.as_deref().unwrap_or(PALETTE[2]);
+
     let labels: Vec<String> = monthly
         .iter()
         .map(|m| m.month_name.chars().take(3).collect::<String>())
@@ -93,8 +121,8 @@ pub(super) fn monthly_overview_chart(monthly: &[MonthRow]) -> Result<String> {
       "data": {
         "labels": labels,
         "datasets": [
-          { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2, "order": 1 },
-          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 3, "fill": false, "order": 0 }
+          { "label": "Hits", "data": hits, "backgroundColor": bar_hits, "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2, "order": 1 },
+          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": bar_bandwidth, "yAxisID": "y1", "type": "line", "borderColor": bar_bandwidth, "tension": 0.3, "pointRadius": 3, "fill": false, "order": 0 }
         ]
       },
       "options": dual_axis_options("Monthly Overview")
@@ -102,7 +130,10 @@ pub(super) fn monthly_overview_chart(monthly: &[MonthRow]) -> Result<String> {
     .context("Failed to build monthly overview chart JSON")
 }
 
-pub(super) fn monthly_visits_chart(monthly: &[MonthRow]) -> Result<String> {
+pub(super) fn monthly_visits_chart(monthly: &[MonthRow], style: &StyleConfig) -> Result<String> {
+    let bar_visits = style.bar_visits.as_deref().unwrap_or(PALETTE[5]);
+    let bar_sites = style.bar_sites.as_deref().unwrap_or(PALETTE[3]);
+
     let labels: Vec<String> = monthly
         .iter()
         .map(|m| m.month_name.chars().take(3).collect::<String>())
@@ -115,8 +146,8 @@ pub(super) fn monthly_visits_chart(monthly: &[MonthRow]) -> Result<String> {
       "data": {
         "labels": labels,
         "datasets": [
-          { "label": "Visits", "data": visits, "backgroundColor": PALETTE[5], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Sites", "data": visitors, "backgroundColor": PALETTE[3], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
+          { "label": "Visits", "data": visits, "backgroundColor": bar_visits, "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
+          { "label": "Sites", "data": visitors, "backgroundColor": bar_sites, "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
         ]
       },
       "options": simple_bar_options("Visits & Sites")
@@ -124,7 +155,10 @@ pub(super) fn monthly_visits_chart(monthly: &[MonthRow]) -> Result<String> {
     .context("Failed to build monthly visits chart JSON")
 }
 
-pub(super) fn yearly_overview_chart(yearly: &[YearAggregateRow]) -> Result<String> {
+pub(super) fn yearly_overview_chart(yearly: &[YearAggregateRow], style: &StyleConfig) -> Result<String> {
+    let bar_hits = style.bar_hits.as_deref().unwrap_or(PALETTE[0]);
+    let bar_bandwidth = style.line_bandwidth.as_deref().unwrap_or(PALETTE[2]);
+
     let labels: Vec<String> = yearly.iter().map(|y| y.year.to_string()).collect();
     let hits: Vec<u64> = yearly.iter().map(|y| y.hits).collect();
     let bandwidth: Vec<f64> = yearly
@@ -137,8 +171,8 @@ pub(super) fn yearly_overview_chart(yearly: &[YearAggregateRow]) -> Result<Strin
       "data": {
         "labels": labels,
         "datasets": [
-          { "label": "Hits", "data": hits, "backgroundColor": PALETTE[0], "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2, "order": 1 },
-          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": PALETTE[2], "yAxisID": "y1", "type": "line", "borderColor": PALETTE[2], "tension": 0.3, "pointRadius": 3, "fill": false, "order": 0 }
+          { "label": "Hits", "data": hits, "backgroundColor": bar_hits, "yAxisID": "y", "borderColor": "#999", "borderWidth": 1, "borderRadius": 2, "order": 1 },
+          { "label": "Bandwidth (MB)", "data": bandwidth, "backgroundColor": bar_bandwidth, "yAxisID": "y1", "type": "line", "borderColor": bar_bandwidth, "tension": 0.3, "pointRadius": 3, "fill": false, "order": 0 }
         ]
       },
       "options": dual_axis_options("Yearly Overview")
@@ -146,7 +180,10 @@ pub(super) fn yearly_overview_chart(yearly: &[YearAggregateRow]) -> Result<Strin
     .context("Failed to build yearly overview chart JSON")
 }
 
-pub(super) fn yearly_visits_chart(yearly: &[YearAggregateRow]) -> Result<String> {
+pub(super) fn yearly_visits_chart(yearly: &[YearAggregateRow], style: &StyleConfig) -> Result<String> {
+    let bar_visits = style.bar_visits.as_deref().unwrap_or(PALETTE[5]);
+    let bar_sites = style.bar_sites.as_deref().unwrap_or(PALETTE[3]);
+
     let labels: Vec<String> = yearly.iter().map(|y| y.year.to_string()).collect();
     let visits: Vec<u64> = yearly.iter().map(|y| y.visits).collect();
     let visitors: Vec<u64> = yearly.iter().map(|y| y.visitors).collect();
@@ -156,8 +193,8 @@ pub(super) fn yearly_visits_chart(yearly: &[YearAggregateRow]) -> Result<String>
       "data": {
         "labels": labels,
         "datasets": [
-          { "label": "Visits", "data": visits, "backgroundColor": PALETTE[5], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
-          { "label": "Sites", "data": visitors, "backgroundColor": PALETTE[3], "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
+          { "label": "Visits", "data": visits, "backgroundColor": bar_visits, "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 },
+          { "label": "Sites", "data": visitors, "backgroundColor": bar_sites, "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
         ]
       },
       "options": simple_bar_options("Visits & Sites")
@@ -165,7 +202,7 @@ pub(super) fn yearly_visits_chart(yearly: &[YearAggregateRow]) -> Result<String>
     .context("Failed to build yearly visits chart JSON")
 }
 
-pub(super) fn status_chart(status_codes: &[StatusRow]) -> Result<String> {
+pub(super) fn status_chart(status_codes: &[StatusRow], style: &StyleConfig) -> Result<String> {
     let total = status_codes.iter().map(|s| s.hits).sum::<u64>();
     let mut main = status_codes.to_vec();
     main.sort_by_key(|s| std::cmp::Reverse(s.hits));
@@ -182,7 +219,7 @@ pub(super) fn status_chart(status_codes: &[StatusRow]) -> Result<String> {
         let pct = percent_1dp(s.hits as f64, total as f64);
         labels.push(format!("{} ({:.1}%)", short_status_label(s.status), pct));
         data.push(s.hits);
-        colors.push(status_color(s.status, i).to_string());
+        colors.push(status_color(s.status, style, i).to_string());
     }
 
     if other_sum > 0 {
@@ -191,7 +228,13 @@ pub(super) fn status_chart(status_codes: &[StatusRow]) -> Result<String> {
             percent_1dp(other_sum as f64, total as f64)
         ));
         data.push(other_sum);
-        colors.push("#bab0ac".to_string());
+        colors.push(
+            style
+                .status_other_color
+                .as_deref()
+                .unwrap_or("#bab0ac")
+                .to_string(),
+        );
     }
 
     serde_json::to_string(&json!({
@@ -345,12 +388,15 @@ fn dual_axis_options(title: &str) -> serde_json::Value {
     })
 }
 
-fn status_color(status: u16, index: usize) -> &'static str {
+fn status_color<'a>(status: u16, style: &'a StyleConfig, index: usize) -> &'a str {
     match status {
-        200..=299 => "#52c493",
-        300..=399 => "#7090ff",
-        400..=499 => "#ffc055",
-        500..=599 => "#ff7a7a",
-        _ => PALETTE[index % PALETTE.len()],
+        200..=299 => style.status_2xx_color.as_deref().unwrap_or("#52c493"),
+        300..=399 => style.status_3xx_color.as_deref().unwrap_or("#7090ff"),
+        400..=499 => style.status_4xx_color.as_deref().unwrap_or("#ffc055"),
+        500..=599 => style.status_5xx_color.as_deref().unwrap_or("#ff7a7a"),
+        _ => style
+            .status_other_color
+            .as_deref()
+            .unwrap_or(PALETTE[index % PALETTE.len()]),
     }
 }
