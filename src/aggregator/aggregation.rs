@@ -9,6 +9,8 @@ use crate::ip::Ip;
 use crate::method_proto::{method_index, proto_index};
 use crate::rules::HideMask;
 
+type TimePeriods = Option<(Arc<str>, u8, Arc<str>, Option<i64>)>;
+
 // ── URL / path helpers ────────────────────────────────────────────────────────
 
 /// Strip the query string from a path (`/foo?bar=1` → `/foo`).
@@ -268,7 +270,7 @@ impl Processor {
         &mut self,
         time_str: &str,
         mon_num: u8,
-    ) -> Option<(Arc<str>, u8, Arc<str>, Option<i64>)> {
+    ) -> TimePeriods {
         let b = time_str.as_bytes();
         if b.len() < 26 {
             return None;

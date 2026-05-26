@@ -13,6 +13,7 @@ const ANSI_CLEAR_LINE: &str = "\r\x1b[2K";
 /// `gz_comp_done` / `gz_decoded_done` track completed gz files so we can
 /// refine the compression-ratio estimate for files not yet processed.
 /// `default_gz_ratio` is the fallback when no gz files have completed yet.
+#[allow(clippy::too_many_arguments)]
 pub fn print_dir_progress(
     files_done: usize,
     files_total: usize,

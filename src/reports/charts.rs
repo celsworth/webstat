@@ -388,7 +388,7 @@ fn dual_axis_options(title: &str) -> serde_json::Value {
     })
 }
 
-fn status_color<'a>(status: u16, style: &'a StyleConfig, index: usize) -> &'a str {
+fn status_color(status: u16, style: &StyleConfig, index: usize) -> &str {
     match status {
         200..=299 => style.status_2xx_color.as_deref().unwrap_or("#52c493"),
         300..=399 => style.status_3xx_color.as_deref().unwrap_or("#7090ff"),

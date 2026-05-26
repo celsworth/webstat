@@ -17,6 +17,16 @@ use crate::parser::LogFormat;
 use crate::run_accumulators::RunAccumulators;
 use std::collections::BTreeMap;
 
+type PipelineResult = (
+    u64,
+    RunAccumulators,
+    Vec<ParseStateUpdate>,
+    Vec<ParseStateUpdate>,
+    BTreeMap<Arc<str>, RuleStats>,
+    u64,
+    usize,
+);
+
 /// Per-file state tracked by the aggregator while a file is being processed.
 struct ActiveFile {
     path: String,
@@ -100,15 +110,7 @@ impl Processor {
         initial_month: String,
         ps: Arc<super::ProgressState>,
         dir_started: Instant,
-    ) -> Result<(
-        u64,
-        RunAccumulators,
-        Vec<ParseStateUpdate>,
-        Vec<ParseStateUpdate>,
-        BTreeMap<Arc<str>, RuleStats>,
-        u64,
-        usize,
-    )> {
+    ) -> Result<PipelineResult> {
         let count = files.len();
         let mut run_acc = RunAccumulators::new(initial_month);
         let mut pending_parse_states: Vec<ParseStateUpdate> = Vec::with_capacity(count);

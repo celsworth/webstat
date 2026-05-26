@@ -354,7 +354,7 @@ impl Processor {
             }
         }
 
-        logging::log_debug_at(2, &format!("Vacuuming database"));
+        logging::log_debug_at(2, "Vacuuming database");
         let vacuum_start = Instant::now();
         self.db.vacuum()?;
         logging::log_debug_at(
