@@ -78,6 +78,7 @@ struct TotalsView {
 struct SlowUrlRow {
     url: String,
     avg_ms_fmt: String,
+    p95_ms_fmt: Option<String>,
     rt_count_fmt: String,
 }
 

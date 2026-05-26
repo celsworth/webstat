@@ -225,6 +225,7 @@ impl Processor {
                 let e = run_acc.url_rt.entry(clean_path.to_string()).or_default();
                 e.0 += ms as u64;
                 e.1 += 1;
+                e.2.record(ms);
             }
         }
 

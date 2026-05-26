@@ -111,14 +111,17 @@ fn pretrim_for_month_end(run_acc: &mut RunAccumulators, top_n: usize) {
 }
 
 /// Keep top-N by avg response time (rt_sum / rt_count), skipping zero-count entries.
-fn pretrim_rt_map(map: &mut ahash::AHashMap<String, (u64, u64)>, top_n: usize) {
+fn pretrim_rt_map(
+    map: &mut ahash::AHashMap<String, (u64, u64, crate::response_time::CompactHistogram)>,
+    top_n: usize,
+) {
     if map.len() <= top_n {
         return;
     }
     let mut entries: Vec<(String, f64)> = map
         .iter()
-        .filter(|(_, &(_, c))| c > 0)
-        .map(|(k, &(s, c))| (k.clone(), s as f64 / c as f64))
+        .filter(|(_, (_, c, _))| *c > 0)
+        .map(|(k, &(s, c, _))| (k.clone(), s as f64 / c as f64))
         .collect();
     entries.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     let keep: ahash::AHashSet<String> =

@@ -1,5 +1,7 @@
 // ResponseTimeHistogram: 1ms-bucket histogram for response time tracking.
 // Supports merge, percentile, and avg computation. Serializes to/from raw bytes for SQLite.
+//
+// CompactHistogram: 16-bucket log-scale histogram for per-URL P95 tracking (~64 bytes/URL).
 
 use anyhow::{bail, Result};
 
@@ -93,6 +95,80 @@ impl ResponseTimeHistogram {
     }
 }
 
+// ── CompactHistogram ──────────────────────────────────────────────────────────
+
+const COMPACT_BOUNDS: [u32; 16] =
+    [0, 1, 5, 10, 25, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000];
+const COMPACT_BUCKETS: usize = 16;
+const COMPACT_SERIAL_LEN: usize = COMPACT_BUCKETS * 4;
+
+#[derive(Clone)]
+pub struct CompactHistogram {
+    buckets: [u32; COMPACT_BUCKETS],
+}
+
+impl CompactHistogram {
+    pub fn new() -> Self {
+        Self { buckets: [0u32; COMPACT_BUCKETS] }
+    }
+
+    pub fn record(&mut self, ms: u32) {
+        let idx = COMPACT_BOUNDS.partition_point(|&b| b <= ms).saturating_sub(1);
+        self.buckets[idx] += 1;
+    }
+
+    pub fn merge(&mut self, other: &CompactHistogram) {
+        for (a, b) in self.buckets.iter_mut().zip(other.buckets.iter()) {
+            *a += b;
+        }
+    }
+
+    pub fn percentile(&self, p: f64) -> u32 {
+        let total: u64 = self.buckets.iter().map(|&c| c as u64).sum();
+        if total == 0 {
+            return 0;
+        }
+        let target = ((total as f64 * p / 100.0).ceil() as u64).max(1);
+        let mut seen = 0u64;
+        for (i, &count) in self.buckets.iter().enumerate() {
+            seen += count as u64;
+            if seen >= target {
+                return COMPACT_BOUNDS[i];
+            }
+        }
+        COMPACT_BOUNDS[COMPACT_BUCKETS - 1]
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(COMPACT_SERIAL_LEN);
+        for &b in &self.buckets {
+            buf.extend_from_slice(&b.to_le_bytes());
+        }
+        buf
+    }
+
+    pub fn deserialize(blob: &[u8]) -> Result<Self> {
+        if blob.len() != COMPACT_SERIAL_LEN {
+            bail!(
+                "compact histogram blob length {} != expected {}",
+                blob.len(),
+                COMPACT_SERIAL_LEN
+            );
+        }
+        let mut buckets = [0u32; COMPACT_BUCKETS];
+        for (i, b) in buckets.iter_mut().enumerate() {
+            *b = u32::from_le_bytes(blob[i * 4..(i + 1) * 4].try_into().unwrap());
+        }
+        Ok(Self { buckets })
+    }
+}
+
+impl Default for CompactHistogram {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,5 +234,40 @@ mod tests {
     #[test]
     fn deserialize_wrong_length_errors() {
         assert!(ResponseTimeHistogram::deserialize(&[0u8; 10]).is_err());
+    }
+
+    #[test]
+    fn compact_percentile_p95() {
+        let mut h = CompactHistogram::new();
+        for _ in 0..95 {
+            h.record(80); // bucket [50, 100) → lower bound 50
+        }
+        for _ in 0..5 {
+            h.record(500);
+        }
+        assert_eq!(h.percentile(95.0), 50);
+        assert_eq!(h.percentile(99.0), 500);
+    }
+
+    #[test]
+    fn compact_round_trip() {
+        let mut h = CompactHistogram::new();
+        h.record(150);
+        h.record(1500);
+        let blob = h.serialize();
+        let h2 = CompactHistogram::deserialize(&blob).unwrap();
+        assert_eq!(h2.percentile(50.0), 100); // 150 → bucket [100, 200)
+        assert_eq!(h2.percentile(100.0), 1000); // 1500 → bucket [1000, 2000)
+    }
+
+    #[test]
+    fn compact_merge() {
+        let mut a = CompactHistogram::new();
+        a.record(10);
+        let mut b = CompactHistogram::new();
+        b.record(100);
+        a.merge(&b);
+        assert_eq!(a.percentile(50.0), 10);
+        assert_eq!(a.percentile(100.0), 100);
     }
 }

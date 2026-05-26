@@ -1523,7 +1523,7 @@ fn top_urls_avg_rt(conn: &Connection, period: &str, top_n: usize) -> Result<Vec<
         return Ok(Vec::new());
     }
     let mut stmt = conn.prepare(
-        "SELECT url, rt_sum * 1.0 / rt_count AS avg_ms, rt_count \
+        "SELECT url, rt_sum * 1.0 / rt_count AS avg_ms, rt_count, rt_hist \
          FROM monthly_top_urls_avg_rt \
          WHERE period=?1 AND rt_count>0 \
          ORDER BY avg_ms DESC \
@@ -1535,18 +1535,24 @@ fn top_urls_avg_rt(conn: &Connection, period: &str, top_n: usize) -> Result<Vec<
                 r.get::<_, String>(0)?,
                 r.get::<_, f64>(1)?,
                 r.get::<_, i64>(2)? as u64,
+                r.get::<_, Option<Vec<u8>>>(3)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    Ok(rows
-        .into_iter()
-        .map(|(url, avg_ms, rt_count)| SlowUrlRow {
-            url,
-            avg_ms_fmt: format_ms(avg_ms),
-            rt_count_fmt: super::number_fmt(rt_count),
+    rows.into_iter()
+        .map(|(url, avg_ms, rt_count, hist_blob)| {
+            let p95_ms_fmt = hist_blob
+                .and_then(|b| crate::response_time::CompactHistogram::deserialize(&b).ok())
+                .map(|h| format_ms(h.percentile(95.0) as f64));
+            Ok(SlowUrlRow {
+                url,
+                avg_ms_fmt: format_ms(avg_ms),
+                p95_ms_fmt,
+                rt_count_fmt: super::number_fmt(rt_count),
+            })
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]

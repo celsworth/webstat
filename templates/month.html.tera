@@ -326,8 +326,8 @@
 <div class="stats-panel">
   <table class="data-table stats-panel__table">
     <thead>
-      <tr><th colspan="3" class="stats-panel__heading">Slowest Endpoints (avg response time)</th></tr>
-      <tr><th>#</th><th>URL</th><th class="num-col">Avg Time</th></tr>
+      <tr><th colspan="4" class="stats-panel__heading">Slowest Endpoints (avg response time)</th></tr>
+      <tr><th>#</th><th>URL</th><th class="num-col">Avg</th><th class="num-col">P95</th></tr>
     </thead>
     <tbody>
       {% for row in top_slow_urls %}
@@ -335,6 +335,7 @@
         <td>{{ loop.index }}</td>
         <td class="url-cell">{{ row.url }}</td>
         <td class="num-col">{{ row.avg_ms_fmt }}</td>
+        <td class="num-col">{{ row.p95_ms_fmt | default(value="—") }}</td>
       </tr>
       {% endfor %}
     </tbody>

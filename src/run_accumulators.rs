@@ -9,7 +9,7 @@ use crate::ip::IpBitmaps;
 
 use crate::accumulators::HourlyMap;
 use crate::method_proto::{METHOD_COUNT, PROTO_COUNT};
-use crate::response_time::ResponseTimeHistogram;
+use crate::response_time::{CompactHistogram, ResponseTimeHistogram};
 
 pub(crate) struct RunAccumulators {
     pub(crate) current_month: String,
@@ -20,7 +20,7 @@ pub(crate) struct RunAccumulators {
     pub(crate) agents: AHashMap<String, u64>,
     pub(crate) daily_ips: AHashMap<Arc<str>, IpBitmaps>,
     pub(crate) daily_hists: AHashMap<Arc<str>, ResponseTimeHistogram>,
-    pub(crate) url_rt: AHashMap<String, (u64, u64)>,
+    pub(crate) url_rt: AHashMap<String, (u64, u64, CompactHistogram)>,
     pub(crate) countries: AHashMap<String, u64>,
     pub(crate) status_codes: AHashMap<u16, u64>,
     pub(crate) method_counts: [u64; METHOD_COUNT],

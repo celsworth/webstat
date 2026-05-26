@@ -255,6 +255,7 @@ CREATE TABLE IF NOT EXISTS monthly_top_urls_avg_rt (
     url      TEXT    NOT NULL,
     rt_sum   INTEGER NOT NULL DEFAULT 0,
     rt_count INTEGER NOT NULL DEFAULT 0,
+    rt_hist  BLOB,
     PRIMARY KEY (period, url)
 );
 "#;

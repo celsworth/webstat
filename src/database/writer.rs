@@ -11,7 +11,7 @@ use super::*;
 use crate::accumulators::HourlyMap;
 use crate::ip::IpBitmaps;
 use crate::method_proto::{METHOD_NAMES, PROTO_NAMES};
-use crate::response_time::ResponseTimeHistogram;
+use crate::response_time::{CompactHistogram, ResponseTimeHistogram};
 
 pub struct FlushData<'a> {
     pub period: &'a str,
@@ -27,7 +27,7 @@ pub struct FlushData<'a> {
     pub method_counts: &'a [u64],
     pub protocol_counts: &'a [u64],
     pub daily_hists: &'a AHashMap<Arc<str>, ResponseTimeHistogram>,
-    pub url_rt: &'a AHashMap<String, (u64, u64)>,
+    pub url_rt: &'a AHashMap<String, (u64, u64, CompactHistogram)>,
     pub parse_states: &'a [ParseStateUpdate],
     pub retired_parse_states: &'a [ParseStateUpdate],
     pub visit_states: &'a [VisitStateUpdate],
@@ -307,17 +307,34 @@ impl Database {
             )?;
         }
 
-        // monthly_top_urls_avg_rt
-        if !data.url_rt.is_empty() {
-            let sql = "INSERT INTO monthly_top_urls_avg_rt \
-                       (period,url,rt_sum,rt_count) VALUES (?1,?2,?3,?4) \
-                       ON CONFLICT (period,url) DO UPDATE SET \
-                         rt_sum=rt_sum+excluded.rt_sum, \
-                         rt_count=rt_count+excluded.rt_count";
-            let mut stmt = tx.prepare_cached(sql)?;
-            for (url, (sum, count)) in data.url_rt {
-                stmt.execute(params![data.period, url, *sum as i64, *count as i64])?;
-            }
+        // monthly_top_urls_avg_rt — read-modify-write so rt_hist blobs are merged
+        for (url, (sum, count, hist)) in data.url_rt {
+            let existing: Option<Vec<u8>> = tx
+                .query_row(
+                    "SELECT rt_hist FROM monthly_top_urls_avg_rt WHERE period=?1 AND url=?2",
+                    params![data.period, url],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let merged_hist = match existing {
+                Some(blob) if blob.len() > 0 => {
+                    let mut h = CompactHistogram::deserialize(&blob)
+                        .context("deserialize compact rt histogram")?;
+                    h.merge(hist);
+                    h
+                }
+                _ => hist.clone(),
+            };
+            let hist_blob = merged_hist.serialize();
+            tx.execute(
+                "INSERT INTO monthly_top_urls_avg_rt \
+                 (period,url,rt_sum,rt_count,rt_hist) VALUES (?1,?2,?3,?4,?5) \
+                 ON CONFLICT (period,url) DO UPDATE SET \
+                   rt_sum=rt_sum+excluded.rt_sum, \
+                   rt_count=rt_count+excluded.rt_count, \
+                   rt_hist=excluded.rt_hist",
+                params![data.period, url, *sum as i64, *count as i64, hist_blob],
+            )?;
         }
 
         // top_countries
