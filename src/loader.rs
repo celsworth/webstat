@@ -17,7 +17,7 @@ pub(crate) fn run_loader(
     ps: Arc<ProgressState>,
 ) -> Result<()> {
     for (file_idx, filepath, plan) in files {
-        push_blocking(&mut tx, LoaderMsg::FileStart { file_idx });
+        push_blocking(&mut tx, LoaderMsg::FileStart { file_idx, skip_before_ts: plan.skip_before_ts });
 
         let result = if plan.compression.is_compressed() {
             read_compressed(&filepath, &plan, &mut tx, &ps)

@@ -634,7 +634,7 @@ fn yearly_rows(conn: &Connection, compact_counts: bool) -> Result<Vec<YearAggreg
         let visitors = if let Some(&v) = visitor_cache.get(&yr) {
             v
         } else {
-            or_count_yearly_and_daily_bitmaps(conn, &yr, &format!("{yr}-%"))?
+            or_count_bitmaps_for_year(conn, &yr)?
         };
 
         out.push(YearAggregateRow {
@@ -702,7 +702,8 @@ fn yearly_visitor_count(conn: &Connection, year: &str) -> Result<u64> {
     if let Some(n) = cached {
         return Ok(n as u64);
     }
-    or_count_yearly_and_daily_bitmaps(conn, year, &format!("{}-%", year))
+    // Fallback: OR all monthly snapshots for this year + in-progress daily bitmaps.
+    or_count_bitmaps_for_year(conn, year)
 }
 
 /// OR all daily_unique_ips bitmaps matching `like` and return the distinct IP count.
@@ -728,21 +729,16 @@ fn or_count_daily_bitmaps(conn: &Connection, like: &str) -> Result<u64> {
     Ok(v4.len() + v6.values().map(|t| t.len()).sum::<u64>())
 }
 
-/// OR yearly_unique_ips (completed months) with daily_unique_ips (in-progress month)
-/// for the given year and return the distinct IP count.
-fn or_count_yearly_and_daily_bitmaps(
-    conn: &Connection,
-    year: &str,
-    daily_like: &str,
-) -> Result<u64> {
+/// OR monthly_unique_ips snapshots for `year` plus in-progress daily bitmaps.
+fn or_count_bitmaps_for_year(conn: &Connection, year: &str) -> Result<u64> {
     let mut v4 = RoaringBitmap::new();
     let mut v6: HashMap<u64, RoaringTreemap> = HashMap::new();
 
-    let yearly_rows: Vec<(u8, u64, Vec<u8>)> = {
+    let monthly_rows: Vec<(u8, u64, Vec<u8>)> = {
         let mut stmt = conn.prepare(
-            "SELECT ip_kind, ip_hi, bitmap FROM yearly_unique_ips WHERE year = ?1",
+            "SELECT ip_kind, ip_hi, bitmap FROM monthly_unique_ips WHERE period LIKE ?1",
         )?;
-        let mapped = stmt.query_map(params![year], |row| {
+        let mapped = stmt.query_map(params![format!("{year}-%")], |row| {
             Ok((
                 row.get::<_, i64>(0)? as u8,
                 row.get::<_, i64>(1)? as u64,
@@ -755,13 +751,13 @@ fn or_count_yearly_and_daily_bitmaps(
         }
         v
     };
-    or_into_bitmaps(yearly_rows, "yearly", &mut v4, &mut v6)?;
+    or_into_bitmaps(monthly_rows, "monthly", &mut v4, &mut v6)?;
 
     let daily_rows: Vec<(u8, u64, Vec<u8>)> = {
         let mut stmt = conn.prepare(
             "SELECT ip_kind, ip_hi, bitmap FROM daily_unique_ips WHERE date LIKE ?1",
         )?;
-        let mapped = stmt.query_map(params![daily_like], |row| {
+        let mapped = stmt.query_map(params![format!("{year}-%")], |row| {
             Ok((
                 row.get::<_, i64>(0)? as u8,
                 row.get::<_, i64>(1)? as u64,
@@ -774,16 +770,24 @@ fn or_count_yearly_and_daily_bitmaps(
         }
         v
     };
-    or_into_bitmaps(daily_rows, "daily (yearly fallback)", &mut v4, &mut v6)?;
+    or_into_bitmaps(daily_rows, "daily", &mut v4, &mut v6)?;
 
     Ok(v4.len() + v6.values().map(|t| t.len()).sum::<u64>())
 }
 
 fn all_time_visitor_count(conn: &Connection) -> Result<u64> {
-    let rows: Vec<(u8, Vec<u8>)> = {
-        let mut stmt = conn.prepare("SELECT ip_kind, bitmap FROM all_time_ips")?;
+    let mut v4 = RoaringBitmap::new();
+    let mut v6: HashMap<u64, RoaringTreemap> = HashMap::new();
+
+    let monthly_rows: Vec<(u8, u64, Vec<u8>)> = {
+        let mut stmt =
+            conn.prepare("SELECT ip_kind, ip_hi, bitmap FROM monthly_unique_ips")?;
         let mapped = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)? as u8, row.get::<_, Vec<u8>>(1)?))
+            Ok((
+                row.get::<_, i64>(0)? as u8,
+                row.get::<_, i64>(1)? as u64,
+                row.get::<_, Vec<u8>>(2)?,
+            ))
         })?;
         let mut v = Vec::new();
         for row in mapped {
@@ -791,19 +795,27 @@ fn all_time_visitor_count(conn: &Connection) -> Result<u64> {
         }
         v
     };
-    let mut total = 0u64;
-    for (kind, blob) in rows {
-        total += match kind {
-            1 => RoaringBitmap::deserialize_from(&blob[..])
-                .context("deserialize all_time v4")?
-                .len(),
-            2 => RoaringTreemap::deserialize_from(&blob[..])
-                .context("deserialize all_time v6")?
-                .len(),
-            _ => 0,
-        };
-    }
-    Ok(total)
+    or_into_bitmaps(monthly_rows, "monthly", &mut v4, &mut v6)?;
+
+    let daily_rows: Vec<(u8, u64, Vec<u8>)> = {
+        let mut stmt =
+            conn.prepare("SELECT ip_kind, ip_hi, bitmap FROM daily_unique_ips")?;
+        let mapped = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)? as u8,
+                row.get::<_, i64>(1)? as u64,
+                row.get::<_, Vec<u8>>(2)?,
+            ))
+        })?;
+        let mut v = Vec::new();
+        for row in mapped {
+            v.push(row?);
+        }
+        v
+    };
+    or_into_bitmaps(daily_rows, "daily", &mut v4, &mut v6)?;
+
+    Ok(v4.len() + v6.values().map(|t| t.len()).sum::<u64>())
 }
 
 fn top_urls_hits(

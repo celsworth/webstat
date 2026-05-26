@@ -9,6 +9,7 @@ use crate::aggregator::messages::{
     pop_blocking, push_blocking, LoaderMsg, ParsedEntry, ParserMsg,
 };
 use crate::aggregator::{ProgressState, PARSER_BATCH_SIZE};
+use crate::parser::combined::parse_unix_timestamp;
 use crate::parser::LogFormat;
 use crate::rules::{Action, HideMask, SharedRuleSet};
 use crate::ua::UaParser;
@@ -32,10 +33,12 @@ pub(crate) fn run_parser(
     let mut current_offset: u64 = 0;
     let mut rule_stats: BTreeMap<Arc<str>, RuleStats> = BTreeMap::new();
     let mut bot_filtered: u64 = 0;
+    let mut current_skip_before_ts: Option<i64> = None;
 
     loop {
         match pop_blocking(&mut rx) {
-            LoaderMsg::FileStart { file_idx } => {
+            LoaderMsg::FileStart { file_idx, skip_before_ts } => {
+                current_skip_before_ts = skip_before_ts;
                 push_blocking(&mut tx, ParserMsg::FileStart { file_idx });
             }
 
@@ -46,6 +49,15 @@ pub(crate) fn run_parser(
                 current_offset = offset;
                 for (line, line_start) in batch {
                     if let Some(entry) = log_format.parse(line) {
+                        if let Some(cutoff) = current_skip_before_ts {
+                            match parse_unix_timestamp(entry.time_str(), entry.month_num) {
+                                Some(ts) if ts < cutoff => {
+                                    ps.lines_done.fetch_add(1, Ordering::Relaxed);
+                                    continue;
+                                }
+                                _ => {}
+                            }
+                        }
                         let ua_result = ua.parse(entry.user_agent());
                         if bot_filter && ua_result.is_bot {
                             bot_filtered += 1;

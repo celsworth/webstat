@@ -15,6 +15,7 @@ mod parser;
 mod progress;
 mod reports;
 mod response_time;
+mod rollback;
 mod rules;
 mod run_accumulators;
 mod ua;
@@ -106,7 +107,7 @@ impl Args {
     }
 }
 
-#[derive(Subcommand, Debug, Clone, Copy)]
+#[derive(Subcommand, Debug, Clone)]
 enum Command {
     /// Process logs into the SQLite database
     Process,
@@ -114,6 +115,15 @@ enum Command {
     Generate,
     /// Process logs and then generate static HTML reports
     All,
+    /// Roll back all ingested data to the start of a given month
+    Rollback {
+        /// Month to roll back to, in YYYY-MM format (e.g. 2026-03)
+        #[arg(long)]
+        month: String,
+        /// Print what would be changed without modifying the database
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -127,6 +137,10 @@ fn main() -> Result<()> {
         Command::All => {
             run_processing(&cfg)?;
             reports::generate_html(&cfg)
+        }
+        Command::Rollback { month, dry_run } => {
+            let mut db = Database::open(&cfg.database)?;
+            rollback::rollback(&mut db, &month, dry_run)
         }
     }
 }

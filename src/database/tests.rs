@@ -464,6 +464,8 @@ mod tests {
             uncompressed_offset: 456,
             mtime_ns: 1_700_000_000,
             completed: true,
+            earliest_ts: Some(1_700_000_000),
+            latest_ts: Some(1_700_086_400),
         })
         .expect("set parse state");
 

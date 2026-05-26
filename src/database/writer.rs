@@ -349,13 +349,17 @@ impl Database {
                 "INSERT INTO parse_state_archive \
                  (filepath,inode,compressed_size,uncompressed_size,\
                   compressed_head_fingerprint,uncompressed_head_fingerprint,\
-                  compressed_offset,uncompressed_offset,mtime_ns,completed) \
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) \
+                  compressed_offset,uncompressed_offset,mtime_ns,completed,\
+                  earliest_ts,latest_ts,skip_before_ts) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13) \
                  ON CONFLICT (filepath,inode) DO UPDATE SET \
                    inode=?2, compressed_size=?3, uncompressed_size=?4, \
                    compressed_head_fingerprint=?5, uncompressed_head_fingerprint=?6, \
                    compressed_offset=?7, uncompressed_offset=?8, \
-                   mtime_ns=?9, completed=?10",
+                   mtime_ns=?9, completed=?10, \
+                   earliest_ts=COALESCE(?11,earliest_ts), \
+                   latest_ts=COALESCE(?12,latest_ts), \
+                   skip_before_ts=NULL",
             )?;
             let mut del_stmt =
                 tx.prepare_cached("DELETE FROM parse_state WHERE filepath=?1 AND inode=?2")?;
@@ -371,6 +375,9 @@ impl Database {
                     s.uncompressed_offset as i64,
                     s.mtime_ns,
                     s.completed as i64,
+                    s.earliest_ts,
+                    s.latest_ts,
+                    Option::<i64>::None,
                 ])?;
                 del_stmt.execute(params![&s.filepath, s.inode as i64])?;
             }
@@ -382,13 +389,17 @@ impl Database {
                 "INSERT INTO parse_state \
                  (filepath,inode,compressed_size,uncompressed_size,\
                   compressed_head_fingerprint,uncompressed_head_fingerprint,\
-                  compressed_offset,uncompressed_offset,mtime_ns,completed) \
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) \
+                  compressed_offset,uncompressed_offset,mtime_ns,completed,\
+                  earliest_ts,latest_ts,skip_before_ts) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13) \
                  ON CONFLICT (filepath) DO UPDATE SET \
                    inode=?2, compressed_size=?3, uncompressed_size=?4, \
                    compressed_head_fingerprint=?5, uncompressed_head_fingerprint=?6, \
                    compressed_offset=?7, uncompressed_offset=?8, \
-                   mtime_ns=?9, completed=?10",
+                   mtime_ns=?9, completed=?10, \
+                   earliest_ts=COALESCE(?11,earliest_ts), \
+                   latest_ts=COALESCE(?12,latest_ts), \
+                   skip_before_ts=NULL",
             )?;
             for s in data.parse_states {
                 stmt.execute(params![
@@ -402,6 +413,9 @@ impl Database {
                     s.uncompressed_offset as i64,
                     s.mtime_ns,
                     s.completed as i64,
+                    s.earliest_ts,
+                    s.latest_ts,
+                    Option::<i64>::None,
                 ])?;
             }
         }
@@ -482,60 +496,33 @@ impl Database {
             params![period, monthly_count as i64],
         )?;
 
-        // ── Load existing yearly bitmaps, OR with monthly, write back ─────────
-        let yearly_rows: Vec<(u8, u64, Vec<u8>)> = {
-            let mut stmt = tx.prepare(
-                "SELECT ip_kind, ip_hi, bitmap FROM yearly_unique_ips WHERE year = ?1",
-            )?;
-            let mapped = stmt.query_map(params![year], |row| {
-                Ok((
-                    row.get::<_, i64>(0)? as u8,
-                    row.get::<_, i64>(1)? as u64,
-                    row.get::<_, Vec<u8>>(2)?,
-                ))
-            })?;
-            let mut rows = Vec::new();
-            for row in mapped {
-                rows.push(row?);
-            }
-            rows
-        };
-
-        let mut yearly_v4 = monthly_v4.clone();
-        let mut yearly_v6: AHashMap<u64, RoaringTreemap> = monthly_v6.clone();
-        or_bitmap_rows(yearly_rows, &mut yearly_v4, &mut yearly_v6)?;
-
-        if !yearly_v4.is_empty() {
+        // ── Persist per-month bitmap snapshot ─────────────────────────────────
+        if !monthly_v4.is_empty() {
             tx.execute(
-                "INSERT OR REPLACE INTO yearly_unique_ips (year,ip_kind,ip_hi,bitmap) \
+                "INSERT OR REPLACE INTO monthly_unique_ips (period,ip_kind,ip_hi,bitmap) \
                  VALUES (?1,1,0,?2)",
-                params![year, serialize_v4(&yearly_v4)?],
+                params![period, serialize_v4(&monthly_v4)?],
             )?;
         }
-        for (hi, tm) in &yearly_v6 {
+        for (hi, tm) in &monthly_v6 {
             if tm.is_empty() {
                 continue;
             }
             tx.execute(
-                "INSERT OR REPLACE INTO yearly_unique_ips (year,ip_kind,ip_hi,bitmap) \
+                "INSERT OR REPLACE INTO monthly_unique_ips (period,ip_kind,ip_hi,bitmap) \
                  VALUES (?1,2,?2,?3)",
-                params![year, *hi as i64, serialize_v6(tm)?],
+                params![period, *hi as i64, serialize_v6(tm)?],
             )?;
         }
 
-        // Yearly unique count (each row is an independent group — just sum cardinalities)
-        let yearly_count = bitmap_cardinality(&yearly_v4, &yearly_v6);
-        tx.execute(
-            "INSERT OR REPLACE INTO unique_visitor_counts (period, count) VALUES (?1, ?2)",
-            params![year, yearly_count as i64],
-        )?;
-
-        // ── all_time_ips ──────────────────────────────────────────────────────
+        // ── Recompute yearly count from all monthly snapshots for this year ───
         {
-            let at_rows: Vec<(u8, u64, Vec<u8>)> = {
-                let mut stmt =
-                    tx.prepare("SELECT ip_kind, ip_hi, bitmap FROM all_time_ips")?;
-                let mapped = stmt.query_map([], |row| {
+            let year_rows: Vec<(u8, u64, Vec<u8>)> = {
+                let mut stmt = tx.prepare(
+                    "SELECT ip_kind, ip_hi, bitmap FROM monthly_unique_ips \
+                     WHERE period LIKE ?1",
+                )?;
+                let mapped = stmt.query_map(params![format!("{year}-%")], |row| {
                     Ok((
                         row.get::<_, i64>(0)? as u8,
                         row.get::<_, i64>(1)? as u64,
@@ -548,27 +535,14 @@ impl Database {
                 }
                 rows
             };
-
-            let mut at_v4 = monthly_v4.clone();
-            let mut at_v6: AHashMap<u64, RoaringTreemap> = monthly_v6.clone();
-            or_bitmap_rows(at_rows, &mut at_v4, &mut at_v6)?;
-
-            if !at_v4.is_empty() {
-                tx.execute(
-                    "INSERT OR REPLACE INTO all_time_ips (ip_kind,ip_hi,bitmap) VALUES (1,0,?1)",
-                    params![serialize_v4(&at_v4)?],
-                )?;
-            }
-            for (hi, tm) in &at_v6 {
-                if tm.is_empty() {
-                    continue;
-                }
-                tx.execute(
-                    "INSERT OR REPLACE INTO all_time_ips (ip_kind,ip_hi,bitmap) \
-                     VALUES (2,?1,?2)",
-                    params![*hi as i64, serialize_v6(tm)?],
-                )?;
-            }
+            let mut yearly_v4 = RoaringBitmap::new();
+            let mut yearly_v6: AHashMap<u64, RoaringTreemap> = AHashMap::new();
+            or_bitmap_rows(year_rows, &mut yearly_v4, &mut yearly_v6)?;
+            let yearly_count = bitmap_cardinality(&yearly_v4, &yearly_v6);
+            tx.execute(
+                "INSERT OR REPLACE INTO unique_visitor_counts (period, count) VALUES (?1, ?2)",
+                params![year, yearly_count as i64],
+            )?;
         }
 
         // ── Populate daily_visitor_counts then delete daily rows ──────────────
@@ -667,48 +641,9 @@ impl Database {
         Ok(())
     }
 
-    /// Finalize a completed year: compute the definitive yearly unique-visitor count
-    /// from the accumulated yearly bitmaps and discard those rows.
-    pub fn finalize_year(&mut self, year: &str) -> Result<()> {
-        let tx = self.conn.transaction()?;
-
-        let yearly_rows: Vec<(u8, u64, Vec<u8>)> = {
-            let mut stmt = tx.prepare(
-                "SELECT ip_kind, ip_hi, bitmap FROM yearly_unique_ips WHERE year = ?1",
-            )?;
-            let mapped = stmt.query_map(params![year], |row| {
-                Ok((
-                    row.get::<_, i64>(0)? as u8,
-                    row.get::<_, i64>(1)? as u64,
-                    row.get::<_, Vec<u8>>(2)?,
-                ))
-            })?;
-            let mut rows = Vec::new();
-            for row in mapped {
-                rows.push(row?);
-            }
-            rows
-        };
-
-        // The yearly bitmaps are already the OR of all finalized months; each
-        // (ip_kind, ip_hi) group is disjoint, so just sum cardinalities.
-        let mut count = 0u64;
-        for (kind, _hi, blob) in yearly_rows {
-            count += match kind {
-                1 => deserialize_v4(&blob)?.len(),
-                2 => deserialize_v6(&blob)?.len(),
-                _ => 0,
-            };
-        }
-
-        tx.execute(
-            "INSERT OR REPLACE INTO unique_visitor_counts (period, count) VALUES (?1, ?2)",
-            params![year, count as i64],
-        )?;
-        tx.execute("DELETE FROM yearly_unique_ips WHERE year = ?1", params![year])?;
-
-        tx.commit()
-            .context("Failed to commit finalize_year transaction")?;
+    /// Finalize a completed year. The yearly unique-visitor count is already kept
+    /// current in `unique_visitor_counts` by `finalize_month`, so this is a no-op.
+    pub fn finalize_year(&mut self, _year: &str) -> Result<()> {
         Ok(())
     }
 

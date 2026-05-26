@@ -106,6 +106,8 @@ impl Processor {
                 uncompressed_offset: state.uncompressed_offset,
                 mtime_ns,
                 completed: true,
+                earliest_ts: state.earliest_ts,
+                latest_ts: state.latest_ts,
             }),
             retired_parse_states,
         }))
@@ -139,6 +141,8 @@ impl Processor {
             uncompressed_offset: uncompressed_size,
             mtime_ns,
             completed: true,
+            earliest_ts: None,
+            latest_ts: None,
         }
     }
 
@@ -242,6 +246,8 @@ impl Processor {
                         uncompressed_offset: state.uncompressed_offset,
                         mtime_ns,
                         completed: true,
+                        earliest_ts: state.earliest_ts,
+                        latest_ts: state.latest_ts,
                     }),
                     retired_parse_states,
                 });
@@ -542,6 +548,14 @@ impl Processor {
             }
         }
 
+        // For spanning files reset by a rollback, skip_before_ts is stored explicitly
+        // on the parse_state row (set by the rollback command). Read it here so the
+        // parser can drop pre-rollback entries without double-counting.
+        let skip_before_ts = state_by_path
+            .as_ref()
+            .and_then(|s| s.skip_before_ts)
+            .or_else(|| state_by_inode.as_ref().and_then(|s| s.skip_before_ts));
+
         Ok(ResolutionOutcome {
             plan: Some(FileResumePlan {
                 current_inode,
@@ -553,6 +567,7 @@ impl Processor {
                 uncompressed_size: Some(uncompressed_size),
                 compressed_head_fingerprint,
                 uncompressed_head_fingerprint,
+                skip_before_ts,
             }),
             skipped_parse_state: None,
             retired_parse_states,
