@@ -110,16 +110,17 @@ when:
 
 ## Fields
 
-| Field        | Type    | Description                                |
-|--------------|---------|--------------------------------------------|
-| `ip`         | string  | Client IP address                          |
-| `method`     | string  | HTTP method (`GET`, `POST`, …)             |
-| `url`        | string  | Request path (no query string)             |
-| `referer`    | string  | `Referer` header value                     |
-| `user_agent` | string  | `User-Agent` header value                  |
-| `proto`      | string  | HTTP protocol (`HTTP/1.1`, `HTTP/2.0`, …)  |
-| `status`     | numeric | HTTP response status code                  |
-| `bytes`      | numeric | Response body size in bytes                |
+| Field           | Type             | Description                                |
+|-----------------|------------------|--------------------------------------------|
+| `ip`            | string           | Client IP address                          |
+| `method`        | string           | HTTP method (`GET`, `POST`, …)             |
+| `url`           | string           | Request path (no query string)             |
+| `referer`       | string           | `Referer` header value                     |
+| `user_agent`    | string           | `User-Agent` header value                  |
+| `proto`         | string           | HTTP protocol (`HTTP/1.1`, `HTTP/2.0`, …)  |
+| `status`        | numeric          | HTTP response status code                  |
+| `bytes`         | numeric          | Response body size in bytes                |
+| `response_time` | numeric/optional | Upstream response time in milliseconds (from `us=` log field). Absent on entries that do not carry a response time — conditions on this field never match those entries. |
 
 ---
 
@@ -157,7 +158,7 @@ Compares the **byte length** of the field value numerically.
 
 ### Numeric operators
 
-Available on: `status`, `bytes`
+Available on: `status`, `bytes`, `response_time`
 
 | Op        | Matches when…                               |
 |-----------|---------------------------------------------|
@@ -224,7 +225,7 @@ The pattern is a full [Rust regex](https://docs.rs/regex/latest/regex/#syntax).
 
 ### `in` / `not_in`
 
-For numeric fields (`status`, `bytes`), values in the list must be integers:
+For numeric fields (`status`, `bytes`, `response_time`), values in the list must be integers:
 
 ```yaml
 - field: status
@@ -270,6 +271,10 @@ For string fields, values are strings:
 - field: bytes
   op: between
   value: [0, 100]
+
+- field: response_time
+  op: between
+  value: [5000, 30000]   # 5 000 ms – 30 000 ms
 ```
 
 ---
@@ -350,6 +355,8 @@ Valid table names:
 
 **`matches` (regex) is the most expensive operator.** Prefer `starts_with`, `ends_with`, or `contains` when any of those will do.
 
+**`response_time` conditions silently skip entries with no response time logged.** If your log format does not include `us=`, every condition on `response_time` evaluates to no-match — the rule does not fire for those entries.
+
 ---
 
 ## Full example
@@ -409,4 +416,12 @@ rules:
           op: gt
           value: 10000000
     action: ignore
+
+  - name: "Sample slow requests"
+    when:
+      - field: response_time
+        op: gt
+        value: 5000   # > 5 000 ms
+    action:
+      sample: 0.1
 ```

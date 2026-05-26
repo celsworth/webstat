@@ -96,6 +96,7 @@ pub enum Field {
     Proto,
     Status,
     Bytes,
+    ResponseTime,
 }
 
 #[derive(Debug)]
@@ -248,7 +249,7 @@ pub struct RuleSet(Vec<Rule>);
 
 impl Field {
     fn is_numeric(self) -> bool {
-        matches!(self, Field::Status | Field::Bytes)
+        matches!(self, Field::Status | Field::Bytes | Field::ResponseTime)
     }
 }
 
@@ -262,6 +263,7 @@ fn parse_field(s: &str) -> Result<Field> {
         "proto" => Ok(Field::Proto),
         "status" => Ok(Field::Status),
         "bytes" => Ok(Field::Bytes),
+        "response_time" => Ok(Field::ResponseTime),
         other => bail!("unknown field '{other}'"),
     }
 }
@@ -517,16 +519,17 @@ impl LogEntry {
             Field::Referer => self.referer(),
             Field::UserAgent => self.user_agent(),
             Field::Proto => self.proto(),
-            Field::Status | Field::Bytes => "",
+            Field::Status | Field::Bytes | Field::ResponseTime => "",
         }
     }
 
     #[inline]
-    fn rule_num(&self, field: Field) -> u64 {
+    fn rule_num(&self, field: Field) -> Option<u64> {
         match field {
-            Field::Status => self.status as u64,
-            Field::Bytes => self.bytes,
-            _ => 0,
+            Field::Status => Some(self.status as u64),
+            Field::Bytes => Some(self.bytes),
+            Field::ResponseTime => self.upstream_response_time_ms.map(|v| v as u64),
+            _ => None,
         }
     }
 }
@@ -558,18 +561,33 @@ impl Condition {
                 let n = entry.rule_str(*field).len();
                 n >= *low && n <= *high
             }
-            Condition::NumEq { field, value } => entry.rule_num(*field) == *value,
-            Condition::NumNeq { field, value } => entry.rule_num(*field) != *value,
-            Condition::Gt { field, value } => entry.rule_num(*field) > *value,
-            Condition::Lt { field, value } => entry.rule_num(*field) < *value,
-            Condition::Gte { field, value } => entry.rule_num(*field) >= *value,
-            Condition::Lte { field, value } => entry.rule_num(*field) <= *value,
-            Condition::Between { field, low, high } => {
-                let v = entry.rule_num(*field);
-                v >= *low && v <= *high
+            Condition::NumEq { field, value } => {
+                entry.rule_num(*field).map_or(false, |v| v == *value)
             }
-            Condition::NumIn { field, values } => values.contains(&entry.rule_num(*field)),
-            Condition::NumNotIn { field, values } => !values.contains(&entry.rule_num(*field)),
+            Condition::NumNeq { field, value } => {
+                entry.rule_num(*field).map_or(false, |v| v != *value)
+            }
+            Condition::Gt { field, value } => {
+                entry.rule_num(*field).map_or(false, |v| v > *value)
+            }
+            Condition::Lt { field, value } => {
+                entry.rule_num(*field).map_or(false, |v| v < *value)
+            }
+            Condition::Gte { field, value } => {
+                entry.rule_num(*field).map_or(false, |v| v >= *value)
+            }
+            Condition::Lte { field, value } => {
+                entry.rule_num(*field).map_or(false, |v| v <= *value)
+            }
+            Condition::Between { field, low, high } => {
+                entry.rule_num(*field).map_or(false, |v| v >= *low && v <= *high)
+            }
+            Condition::NumIn { field, values } => {
+                entry.rule_num(*field).map_or(false, |v| values.contains(&v))
+            }
+            Condition::NumNotIn { field, values } => {
+                entry.rule_num(*field).map_or(false, |v| !values.contains(&v))
+            }
         }
     }
 }
@@ -638,6 +656,8 @@ mod tests {
     const B: &str = r#"5.6.7.8 - - [10/May/2024:13:00:00 +0000] "GET /old/page HTTP/1.1" 301 0 "-" "Googlebot/2.1""#;
     // status=404, bytes=512, url=/missing, ua=curl/7.81.0, ip=10.0.0.1
     const C: &str = r#"10.0.0.1 - - [10/May/2024:14:00:00 +0000] "POST /missing HTTP/2.0" 404 512 "-" "curl/7.81.0""#;
+    // status=200, bytes=100, url=/, response_time=2500ms (us=2.5)
+    const RT: &str = r#"1.2.3.4 - - [10/May/2024:15:00:00 +0000] "GET / HTTP/1.1" 200 100 "-" "-" us=2.5"#;
 
     // ── String ops ────────────────────────────────────────────────────────────
 
@@ -799,6 +819,37 @@ mod tests {
         let rs = single("status", "not_in", num_seq(&[200, 201, 204]));
         assert!(!is_ignored(&rs, &make_entry(A))); // 200 is in the set
         assert!(is_ignored(&rs, &make_entry(B))); // 301 is not
+    }
+
+    // ── response_time field ───────────────────────────────────────────────────
+
+    #[test]
+    fn response_time_gt_matches_present_field() {
+        let rs = single("response_time", "gt", num(1000));
+        assert!(is_ignored(&rs, &make_entry(RT))); // 2500ms > 1000
+        assert!(!is_ignored(&rs, &make_entry(A))); // no rt field → no match
+    }
+
+    #[test]
+    fn response_time_absent_never_matches() {
+        // A has no us= field — all numeric ops on response_time must return false
+        for op in &["eq", "neq", "gt", "lt", "gte", "lte"] {
+            let rs = single("response_time", op, num(0));
+            assert!(!is_ignored(&rs, &make_entry(A)), "op={op} should not match absent rt");
+        }
+        let rs = single("response_time", "between", num_seq(&[0, 9999999]));
+        assert!(!is_ignored(&rs, &make_entry(A)));
+        let rs = single("response_time", "in", num_seq(&[0]));
+        assert!(!is_ignored(&rs, &make_entry(A)));
+        let rs = single("response_time", "not_in", num_seq(&[0]));
+        assert!(!is_ignored(&rs, &make_entry(A)));
+    }
+
+    #[test]
+    fn response_time_between_inclusive() {
+        let rs = single("response_time", "between", num_seq(&[2000, 3000]));
+        assert!(is_ignored(&rs, &make_entry(RT))); // 2500 in [2000,3000]
+        assert!(!is_ignored(&rs, &make_entry(A))); // absent
     }
 
     // ── Length ops ────────────────────────────────────────────────────────────
