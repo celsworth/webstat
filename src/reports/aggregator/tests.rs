@@ -142,7 +142,7 @@ mod tests {
         insert_daily_ip(&conn, "2026-05-01", 2);
         insert_daily_ip(&conn, "2026-05-02", 3);
 
-        let visitors = visitor_count_for_scope(&conn, "2026-05-01").expect("daily site count");
+        let visitors = or_count_daily_bitmaps(&conn, "2026-05-01").expect("daily site count");
         assert_eq!(visitors, 2);
     }
 
@@ -155,7 +155,7 @@ mod tests {
         insert_daily_ip(&conn, "2026-05-02", 3);
         finalize_unique_visitor_counts(&conn, "2026-05");
 
-        let visitors = visitor_count_for_scope(&conn, "2026-05").expect("monthly site count");
+        let visitors = monthly_visitor_count(&conn, "2026-05").expect("monthly site count");
         assert_eq!(visitors, 3, "should deduplicate across days");
     }
 
@@ -167,7 +167,7 @@ mod tests {
         insert_daily_ip(&conn, "2026-06-01", 20);
         finalize_unique_visitor_counts(&conn, "2026");
 
-        let visitors = visitor_count_for_scope(&conn, "2026").expect("yearly site count");
+        let visitors = yearly_visitor_count(&conn, "2026").expect("yearly site count");
         assert_eq!(visitors, 2, "should deduplicate across months");
     }
 
@@ -180,7 +180,7 @@ mod tests {
         insert_daily_ip(&conn, "2026-05-02", 3);
         // no cache entry — simulates in-progress month
 
-        let visitors = visitor_count_for_scope(&conn, "2026-05").expect("monthly fallback");
+        let visitors = monthly_visitor_count(&conn, "2026-05").expect("monthly fallback");
         assert_eq!(visitors, 3, "should fall back to daily_unique_ips and deduplicate");
     }
 
@@ -194,7 +194,7 @@ mod tests {
         insert_daily_ip(&conn, "2026-05-01", 30);
         // no cache entry — simulates in-progress year
 
-        let visitors = visitor_count_for_scope(&conn, "2026").expect("yearly fallback");
+        let visitors = yearly_visitor_count(&conn, "2026").expect("yearly fallback");
         assert_eq!(visitors, 3, "should union yearly_unique_ips and daily_unique_ips");
     }
 
@@ -207,7 +207,7 @@ mod tests {
         insert_daily_ip(&conn, "2026-05-01", 10); // duplicate of yearly ip 10
         insert_daily_ip(&conn, "2026-05-01", 30);
 
-        let visitors = visitor_count_for_scope(&conn, "2026").expect("yearly dedup");
+        let visitors = yearly_visitor_count(&conn, "2026").expect("yearly dedup");
         assert_eq!(
             visitors, 3,
             "should deduplicate ip 10 across yearly_unique_ips and daily_unique_ips"

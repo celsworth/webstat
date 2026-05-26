@@ -16,6 +16,51 @@ use super::{
     TopRefRow, TopUrlRow, TotalsView, YearAggregateRow, YearlySummary,
 };
 
+// Returns ("= ?1", period) for monthly (7-char) periods, ("LIKE ?1", "YYYY-%") for yearly.
+fn period_clause(period: &str) -> (&'static str, String) {
+    if period.len() == 7 {
+        ("= ?1", period.to_string())
+    } else {
+        ("LIKE ?1", format!("{}-%", period))
+    }
+}
+
+fn build_status_rows(raw: Vec<(u16, u64)>, compact_counts: bool) -> Vec<StatusRow> {
+    let total = raw.iter().map(|(_, hits)| *hits).sum::<u64>() as f64;
+    raw.into_iter()
+        .map(|(status, hits)| StatusRow {
+            status,
+            label: status_label(status),
+            hits,
+            hits_fmt: count_fmt(hits, compact_counts),
+            hits_exact_fmt: super::number_fmt(hits),
+            pct_fmt: percent_str(hits as f64, total),
+        })
+        .collect()
+}
+
+fn or_into_bitmaps(
+    rows: Vec<(u8, u64, Vec<u8>)>,
+    label: &str,
+    v4: &mut RoaringBitmap,
+    v6: &mut HashMap<u64, RoaringTreemap>,
+) -> Result<()> {
+    for (kind, hi, blob) in rows {
+        match kind {
+            1 => {
+                *v4 |= RoaringBitmap::deserialize_from(&blob[..])
+                    .with_context(|| format!("deserialize {label} v4"))?;
+            }
+            2 => {
+                *v6.entry(hi).or_default() |= RoaringTreemap::deserialize_from(&blob[..])
+                    .with_context(|| format!("deserialize {label} v6"))?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn available_years(conn: &Connection) -> Result<Vec<i32>> {
     let mut stmt = conn.prepare(
         "SELECT DISTINCT substr(date, 1, 4) AS yr
@@ -423,7 +468,7 @@ fn monthly_totals(
         ))
     })?;
 
-    let visitors = visitor_count_for_scope(conn, &prefix)?;
+    let visitors = monthly_visitor_count(conn, &prefix)?;
 
     Ok(format_totals(row.0, row.1, visitors, row.2, compact_counts))
 }
@@ -445,12 +490,28 @@ fn yearly_totals(conn: &Connection, year: i32, compact_counts: bool) -> Result<T
         ))
     })?;
 
-    let visitors = visitor_count_for_scope(conn, &year.to_string())?;
+    let visitors = yearly_visitor_count(conn, &year.to_string())?;
 
     Ok(format_totals(row.0, row.1, visitors, row.2, compact_counts))
 }
 
 fn monthly_rows(conn: &Connection, year: i32, compact_counts: bool) -> Result<Vec<MonthRow>> {
+    // Pre-fetch all cached monthly visitor counts for the year in one query.
+    let visitor_cache: HashMap<String, u64> = {
+        let mut stmt = conn.prepare(
+            "SELECT period, count FROM unique_visitor_counts WHERE period LIKE ?1",
+        )?;
+        let rows = stmt.query_map(params![format!("{year}-%")], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+        })?;
+        let mut m = HashMap::new();
+        for row in rows {
+            let (k, v) = row?;
+            m.insert(k, v);
+        }
+        m
+    };
+
     let mut stmt = conn.prepare(
         "SELECT substr(date, 1, 7) AS ym,
                 SUM(hits) AS hits,
@@ -474,7 +535,11 @@ fn monthly_rows(conn: &Connection, year: i32, compact_counts: bool) -> Result<Ve
     let mut out = Vec::new();
     for row in rows {
         let (ym, hits, visits, bandwidth) = row?;
-        let visitors = visitor_count_for_scope(conn, &ym)?;
+        let visitors = if let Some(&v) = visitor_cache.get(&ym) {
+            v
+        } else {
+            or_count_daily_bitmaps(conn, &format!("{ym}-%"))?
+        };
         let month = ym
             .split('-')
             .nth(1)
@@ -503,6 +568,22 @@ fn monthly_rows(conn: &Connection, year: i32, compact_counts: bool) -> Result<Ve
 }
 
 fn yearly_rows(conn: &Connection, compact_counts: bool) -> Result<Vec<YearAggregateRow>> {
+    // Pre-fetch all cached yearly visitor counts in one query.
+    let visitor_cache: HashMap<String, u64> = {
+        let mut stmt = conn.prepare(
+            "SELECT period, count FROM unique_visitor_counts WHERE length(period) = 4",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+        })?;
+        let mut m = HashMap::new();
+        for row in rows {
+            let (k, v) = row?;
+            m.insert(k, v);
+        }
+        m
+    };
+
     let mut stmt = conn.prepare(
         "SELECT substr(date, 1, 4) AS yr,
                 SUM(hits) AS hits,
@@ -525,11 +606,15 @@ fn yearly_rows(conn: &Connection, compact_counts: bool) -> Result<Vec<YearAggreg
     let mut out = Vec::new();
     for row in rows {
         let (yr, hits, visits, bandwidth) = row?;
-        let visitors = visitor_count_for_scope(conn, &yr)?;
         let year = yr.parse::<i32>().unwrap_or(0);
         if year <= 0 {
             continue;
         }
+        let visitors = if let Some(&v) = visitor_cache.get(&yr) {
+            v
+        } else {
+            or_count_yearly_and_daily_bitmaps(conn, &yr, &format!("{yr}-%"))?
+        };
 
         out.push(YearAggregateRow {
             year,
@@ -571,89 +656,54 @@ fn overall_totals(conn: &Connection, compact_counts: bool) -> Result<TotalsView>
     Ok(format_totals(row.0, row.1, visitors, row.2, compact_counts))
 }
 
-fn visitor_count_for_scope(conn: &Connection, scope: &str) -> Result<u64> {
-    match scope.len() {
-        10 => {
-            // Daily: SUM of bitmap cardinalities in the count column, falling back to archive.
-            let count: i64 = conn.query_row(
-                "SELECT COALESCE(
-                    (SELECT SUM(count) FROM daily_unique_ips WHERE date = ?1),
-                    (SELECT count FROM daily_visitor_counts WHERE date = ?1),
-                    0
-                 )",
-                params![scope],
-                |row| row.get(0),
-            )?;
-            Ok(count as u64)
-        }
-        7 => {
-            // Monthly: use precomputed cache; for the in-progress month OR daily bitmaps in Rust.
-            let cached: Option<i64> = conn.query_row(
-                "SELECT count FROM unique_visitor_counts WHERE period = ?1",
-                params![scope],
-                |row| row.get(0),
-            )
-            .optional()?;
-            if let Some(n) = cached {
-                return Ok(n as u64);
-            }
-            let like = format!("{}-%", scope);
-            or_count_daily_bitmaps(conn, &like)
-        }
-        4 => {
-            // Yearly: use precomputed cache; for the in-progress year combine yearly and daily bitmaps.
-            let cached: Option<i64> = conn.query_row(
-                "SELECT count FROM unique_visitor_counts WHERE period = ?1",
-                params![scope],
-                |row| row.get(0),
-            )
-            .optional()?;
-            if let Some(n) = cached {
-                return Ok(n as u64);
-            }
-            let like = format!("{}-%", scope);
-            or_count_yearly_and_daily_bitmaps(conn, scope, &like)
-        }
-        _ => Ok(0),
+fn monthly_visitor_count(conn: &Connection, period: &str) -> Result<u64> {
+    let cached: Option<i64> = conn
+        .query_row(
+            "SELECT count FROM unique_visitor_counts WHERE period = ?1",
+            params![period],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(n) = cached {
+        return Ok(n as u64);
     }
+    or_count_daily_bitmaps(conn, &format!("{}-%", period))
+}
+
+fn yearly_visitor_count(conn: &Connection, year: &str) -> Result<u64> {
+    let cached: Option<i64> = conn
+        .query_row(
+            "SELECT count FROM unique_visitor_counts WHERE period = ?1",
+            params![year],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(n) = cached {
+        return Ok(n as u64);
+    }
+    or_count_yearly_and_daily_bitmaps(conn, year, &format!("{}-%", year))
 }
 
 /// OR all daily_unique_ips bitmaps matching `like` and return the distinct IP count.
 fn or_count_daily_bitmaps(conn: &Connection, like: &str) -> Result<u64> {
-    let rows: Vec<(u8, u64, Vec<u8>)> = {
-        let mut stmt = conn.prepare(
-            "SELECT ip_kind, ip_hi, bitmap FROM daily_unique_ips WHERE date LIKE ?1",
-        )?;
-        let mapped = stmt.query_map(params![like], |row| {
-            Ok((
-                row.get::<_, i64>(0)? as u8,
-                row.get::<_, i64>(1)? as u64,
-                row.get::<_, Vec<u8>>(2)?,
-            ))
-        })?;
-        let mut v = Vec::new();
-        for row in mapped {
-            v.push(row?);
-        }
-        v
-    };
+    let mut stmt = conn.prepare(
+        "SELECT ip_kind, ip_hi, bitmap FROM daily_unique_ips WHERE date LIKE ?1",
+    )?;
+    let mapped = stmt.query_map(params![like], |row| {
+        Ok((
+            row.get::<_, i64>(0)? as u8,
+            row.get::<_, i64>(1)? as u64,
+            row.get::<_, Vec<u8>>(2)?,
+        ))
+    })?;
+    let mut rows = Vec::new();
+    for row in mapped {
+        rows.push(row?);
+    }
 
     let mut v4 = RoaringBitmap::new();
     let mut v6: HashMap<u64, RoaringTreemap> = HashMap::new();
-    for (kind, hi, blob) in rows {
-        match kind {
-            1 => {
-                v4 |= RoaringBitmap::deserialize_from(&blob[..])
-                    .context("deserialize daily v4")?;
-            }
-            2 => {
-                *v6.entry(hi).or_default() |=
-                    RoaringTreemap::deserialize_from(&blob[..])
-                        .context("deserialize daily v6")?;
-            }
-            _ => {}
-        }
-    }
+    or_into_bitmaps(rows, "daily", &mut v4, &mut v6)?;
     Ok(v4.len() + v6.values().map(|t| t.len()).sum::<u64>())
 }
 
@@ -667,7 +717,6 @@ fn or_count_yearly_and_daily_bitmaps(
     let mut v4 = RoaringBitmap::new();
     let mut v6: HashMap<u64, RoaringTreemap> = HashMap::new();
 
-    // Yearly bitmaps (already OR'd across finalized months)
     let yearly_rows: Vec<(u8, u64, Vec<u8>)> = {
         let mut stmt = conn.prepare(
             "SELECT ip_kind, ip_hi, bitmap FROM yearly_unique_ips WHERE year = ?1",
@@ -685,22 +734,8 @@ fn or_count_yearly_and_daily_bitmaps(
         }
         v
     };
-    for (kind, hi, blob) in yearly_rows {
-        match kind {
-            1 => {
-                v4 |= RoaringBitmap::deserialize_from(&blob[..])
-                    .context("deserialize yearly v4")?;
-            }
-            2 => {
-                *v6.entry(hi).or_default() |=
-                    RoaringTreemap::deserialize_from(&blob[..])
-                        .context("deserialize yearly v6")?;
-            }
-            _ => {}
-        }
-    }
+    or_into_bitmaps(yearly_rows, "yearly", &mut v4, &mut v6)?;
 
-    // Daily bitmaps (in-progress current month)
     let daily_rows: Vec<(u8, u64, Vec<u8>)> = {
         let mut stmt = conn.prepare(
             "SELECT ip_kind, ip_hi, bitmap FROM daily_unique_ips WHERE date LIKE ?1",
@@ -718,20 +753,7 @@ fn or_count_yearly_and_daily_bitmaps(
         }
         v
     };
-    for (kind, hi, blob) in daily_rows {
-        match kind {
-            1 => {
-                v4 |= RoaringBitmap::deserialize_from(&blob[..])
-                    .context("deserialize daily v4 (yearly fallback)")?;
-            }
-            2 => {
-                *v6.entry(hi).or_default() |=
-                    RoaringTreemap::deserialize_from(&blob[..])
-                        .context("deserialize daily v6 (yearly fallback)")?;
-            }
-            _ => {}
-        }
-    }
+    or_into_bitmaps(daily_rows, "daily (yearly fallback)", &mut v4, &mut v6)?;
 
     Ok(v4.len() + v6.values().map(|t| t.len()).sum::<u64>())
 }
@@ -803,52 +825,34 @@ fn top_urls_from_table(
     compact_counts: bool,
     order_metric: &str,
 ) -> Result<Vec<TopUrlRow>> {
-    let (sql, period_param) = if period.len() == 7 {
-        (
-            format!(
-                "SELECT url, hits, bandwidth
-                 FROM {table}
-                 WHERE period = ?1
-                 ORDER BY {order_metric} DESC, hits DESC
-                 LIMIT ?2"
-            ),
-            period.to_string(),
-        )
-    } else {
-        (
-            format!(
-                "SELECT url, SUM(hits) AS hits, SUM(bandwidth) AS bandwidth
-                 FROM {table}
-                 WHERE period LIKE ?1
-                 GROUP BY url
-                 ORDER BY {order_metric} DESC, hits DESC
-                 LIMIT ?2"
-            ),
-            format!("{}-%", period),
-        )
-    };
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT url, SUM(hits) AS hits, SUM(bandwidth) AS bandwidth
+         FROM {table}
+         WHERE period {op}
+         GROUP BY url
+         ORDER BY {order_metric} DESC, hits DESC
+         LIMIT ?2"
+    );
     let mut stmt = conn.prepare(&sql)?;
 
-    let rows = stmt.query_map(params![period_param, top_n as i64], |row| {
+    let rows = stmt.query_map(params![param, top_n as i64], |row| {
+        let hits = row.get::<_, i64>(1)? as u64;
+        let bandwidth = row.get::<_, i64>(2)? as u64;
         Ok(TopUrlRow {
             url: row.get::<_, String>(0)?,
-            hits: row.get::<_, i64>(1)? as u64,
-            bandwidth: row.get::<_, i64>(2)? as u64,
-            hits_fmt: String::new(),
-            hits_exact_fmt: String::new(),
-            bandwidth_fmt: String::new(),
+            hits,
+            bandwidth,
+            hits_fmt: count_fmt(hits, compact_counts),
+            hits_exact_fmt: super::number_fmt(hits),
+            bandwidth_fmt: format_bytes(bandwidth),
         })
     })?;
 
     let mut out = Vec::new();
     for row in rows {
-        let mut row = row?;
-        row.hits_fmt = count_fmt(row.hits, compact_counts);
-        row.hits_exact_fmt = super::number_fmt(row.hits);
-        row.bandwidth_fmt = format_bytes(row.bandwidth);
-        out.push(row);
+        out.push(row?);
     }
-
     Ok(out)
 }
 
@@ -897,67 +901,45 @@ fn top_ips_from_table(
     order_metric: &str,
     anonymise_ips: bool,
 ) -> Result<Vec<TopHostRow>> {
-    let (sql, period_param) = if period.len() == 7 {
-        (
-            format!(
-                "SELECT t.host_kind, t.host_hi, t.host_lo,
-                        t.hits, t.bandwidth,
-                        COALESCE(t.country_code, '--'),
-                        COALESCE(cn.country_name, 'Unknown')
-                 FROM {table} t
-                 LEFT JOIN countries cn ON cn.country_code = t.country_code
-                 WHERE t.period = ?1
-                 ORDER BY {order_metric} DESC, t.hits DESC
-                 LIMIT ?2"
-            ),
-            period.to_string(),
-        )
-    } else {
-        (
-            format!(
-                "SELECT t.host_kind, t.host_hi, t.host_lo,
-                        SUM(t.hits) AS hits, SUM(t.bandwidth) AS bandwidth,
-                        COALESCE(MAX(t.country_code), '--'),
-                        COALESCE(MAX(cn.country_name), 'Unknown')
-                 FROM {table} t
-                 LEFT JOIN countries cn ON cn.country_code = t.country_code
-                 WHERE t.period LIKE ?1
-                 GROUP BY t.host_kind, t.host_hi, t.host_lo
-                 ORDER BY {order_metric} DESC, hits DESC
-                 LIMIT ?2"
-            ),
-            format!("{}-%", period),
-        )
-    };
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT t.host_kind, t.host_hi, t.host_lo,
+                SUM(t.hits) AS hits, SUM(t.bandwidth) AS bandwidth,
+                COALESCE(MAX(t.country_code), '--'),
+                COALESCE(MAX(cn.country_name), 'Unknown')
+         FROM {table} t
+         LEFT JOIN countries cn ON cn.country_code = t.country_code
+         WHERE t.period {op}
+         GROUP BY t.host_kind, t.host_hi, t.host_lo
+         ORDER BY {order_metric} DESC, hits DESC
+         LIMIT ?2"
+    );
     let mut stmt = conn.prepare(&sql)?;
 
-    let rows = stmt.query_map(params![period_param, top_n as i64], |row| {
+    let rows = stmt.query_map(params![param, top_n as i64], |row| {
         let host_kind = row.get::<_, i64>(0)? as u8;
         let host_hi = row.get::<_, i64>(1)? as u64;
         let host_lo = row.get::<_, i64>(2)? as u64;
+        let hits = row.get::<_, i64>(3)? as u64;
+        let bandwidth = row.get::<_, i64>(4)? as u64;
         let country_code = row.get::<_, String>(5)?;
         Ok(TopHostRow {
             host: decode_host(host_kind, host_hi, host_lo, anonymise_ips),
-            hits: row.get::<_, i64>(3)? as u64,
-            bandwidth: row.get::<_, i64>(4)? as u64,
+            hits,
+            bandwidth,
             country_flag: flag_emoji(&country_code),
             country_code: country_code.clone(),
             country_name: row.get::<_, String>(6)?,
-            hits_fmt: String::new(),
-            hits_exact_fmt: String::new(),
-            bandwidth_fmt: String::new(),
+            hits_fmt: count_fmt(hits, compact_counts),
+            hits_exact_fmt: super::number_fmt(hits),
+            bandwidth_fmt: format_bytes(bandwidth),
         })
     })?;
 
     let mut out = Vec::new();
     for row in rows {
-        let mut row = row?;
-        row.hits_fmt = count_fmt(row.hits, compact_counts);
-        row.hits_exact_fmt = super::number_fmt(row.hits);
-        row.bandwidth_fmt = format_bytes(row.bandwidth);
-        out.push(row);
+        out.push(row?);
     }
-
     Ok(out)
 }
 
@@ -1002,76 +984,47 @@ fn top_refs(
     top_n: usize,
     compact_counts: bool,
 ) -> Result<Vec<TopRefRow>> {
-    let (sql, period_param) = if period.len() == 7 {
-        (
-            "SELECT referrer, hits
-             FROM monthly_referrers
-             WHERE period = ?1
-             ORDER BY hits DESC
-             LIMIT ?2"
-                .to_string(),
-            period.to_string(),
-        )
-    } else {
-        (
-            "SELECT referrer, SUM(hits) AS hits
-             FROM monthly_referrers
-             WHERE period LIKE ?1
-             GROUP BY referrer
-             ORDER BY hits DESC
-             LIMIT ?2"
-                .to_string(),
-            format!("{}-%", period),
-        )
-    };
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT referrer, SUM(hits) AS hits
+         FROM monthly_referrers
+         WHERE period {op}
+         GROUP BY referrer
+         ORDER BY hits DESC
+         LIMIT ?2"
+    );
     let mut stmt = conn.prepare(&sql)?;
 
-    let rows = stmt.query_map(params![period_param, top_n as i64], |row| {
+    let rows = stmt.query_map(params![param, top_n as i64], |row| {
+        let hits = row.get::<_, i64>(1)? as u64;
         Ok(TopRefRow {
             referrer: row.get::<_, String>(0)?,
-            hits: row.get::<_, i64>(1)? as u64,
-            hits_fmt: String::new(),
-            hits_exact_fmt: String::new(),
+            hits,
+            hits_fmt: count_fmt(hits, compact_counts),
+            hits_exact_fmt: super::number_fmt(hits),
         })
     })?;
 
     let mut out = Vec::new();
     for row in rows {
-        let mut row = row?;
-        row.hits_fmt = count_fmt(row.hits, compact_counts);
-        row.hits_exact_fmt = super::number_fmt(row.hits);
-        out.push(row);
+        out.push(row?);
     }
-
     Ok(out)
 }
 
 fn top_agents_raw(conn: &Connection, period: &str, top_n: usize) -> Result<Vec<(String, u64)>> {
-    let (sql, period_param) = if period.len() == 7 {
-        (
-            "SELECT agent_family, hits
-             FROM monthly_agents
-             WHERE period = ?1
-             ORDER BY hits DESC
-             LIMIT ?2"
-                .to_string(),
-            period.to_string(),
-        )
-    } else {
-        (
-            "SELECT agent_family, SUM(hits) AS hits
-             FROM monthly_agents
-             WHERE period LIKE ?1
-             GROUP BY agent_family
-             ORDER BY hits DESC
-             LIMIT ?2"
-                .to_string(),
-            format!("{}-%", period),
-        )
-    };
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT agent_family, SUM(hits) AS hits
+         FROM monthly_agents
+         WHERE period {op}
+         GROUP BY agent_family
+         ORDER BY hits DESC
+         LIMIT ?2"
+    );
     let mut stmt = conn.prepare(&sql)?;
 
-    let rows = stmt.query_map(params![period_param, top_n as i64], |row| {
+    let rows = stmt.query_map(params![param, top_n as i64], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
     })?;
 
@@ -1107,37 +1060,21 @@ fn top_countries_raw(
     period: &str,
     limit: usize,
 ) -> Result<Vec<(String, String, u64)>> {
-    let (sql, period_param) = if period.len() == 7 {
-        (
-            "SELECT c.country_code,
-                    COALESCE(n.country_name, 'Unknown') AS country_name,
-                    c.hits
-             FROM top_countries c
-             LEFT JOIN countries n ON n.country_code = c.country_code
-             WHERE c.period = ?1
-             ORDER BY c.hits DESC
-             LIMIT ?2"
-                .to_string(),
-            period.to_string(),
-        )
-    } else {
-        (
-            "SELECT c.country_code,
-                    COALESCE(n.country_name, 'Unknown') AS country_name,
-                    SUM(c.hits) AS hits
-             FROM top_countries c
-             LEFT JOIN countries n ON n.country_code = c.country_code
-             WHERE c.period LIKE ?1
-             GROUP BY c.country_code
-             ORDER BY hits DESC
-             LIMIT ?2"
-                .to_string(),
-            format!("{}-%", period),
-        )
-    };
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT c.country_code,
+                COALESCE(n.country_name, 'Unknown') AS country_name,
+                SUM(c.hits) AS hits
+         FROM top_countries c
+         LEFT JOIN countries n ON n.country_code = c.country_code
+         WHERE c.period {op}
+         GROUP BY c.country_code
+         ORDER BY hits DESC
+         LIMIT ?2"
+    );
     let mut stmt = conn.prepare(&sql)?;
 
-    let rows = stmt.query_map(params![period_param, limit as i64], |row| {
+    let rows = stmt.query_map(params![param, limit as i64], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
@@ -1184,44 +1121,25 @@ fn top_countries_all_raw(conn: &Connection, limit: usize) -> Result<Vec<(String,
 }
 
 fn status_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result<Vec<StatusRow>> {
-    let (sql, period_param) = if period.len() == 7 {
-        (
-            "SELECT status, hits FROM status_codes WHERE period = ?1 ORDER BY hits DESC"
-                .to_string(),
-            period.to_string(),
-        )
-    } else {
-        (
-            "SELECT status, SUM(hits) AS hits FROM status_codes WHERE period LIKE ?1 GROUP BY status ORDER BY hits DESC".to_string(),
-            format!("{}-%", period),
-        )
-    };
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT status, SUM(hits) AS hits
+         FROM status_codes
+         WHERE period {op}
+         GROUP BY status
+         ORDER BY hits DESC"
+    );
     let mut stmt = conn.prepare(&sql)?;
 
-    let rows = stmt.query_map(params![period_param], |row| {
+    let rows = stmt.query_map(params![param], |row| {
         Ok((row.get::<_, i64>(0)? as u16, row.get::<_, i64>(1)? as u64))
     })?;
 
-    let mut raw = Vec::<(u16, u64)>::new();
+    let mut raw = Vec::new();
     for row in rows {
         raw.push(row?);
     }
-
-    let total = raw.iter().map(|(_, hits)| *hits).sum::<u64>() as f64;
-
-    let mut out = Vec::new();
-    for (status, hits) in raw {
-        out.push(StatusRow {
-            status,
-            label: status_label(status),
-            hits,
-            hits_fmt: count_fmt(hits, compact_counts),
-            hits_exact_fmt: super::number_fmt(hits),
-            pct_fmt: percent_str(hits as f64, total),
-        });
-    }
-
-    Ok(out)
+    Ok(build_status_rows(raw, compact_counts))
 }
 
 fn status_codes_all(conn: &Connection, compact_counts: bool) -> Result<Vec<StatusRow>> {
@@ -1236,43 +1154,25 @@ fn status_codes_all(conn: &Connection, compact_counts: bool) -> Result<Vec<Statu
         Ok((row.get::<_, i64>(0)? as u16, row.get::<_, i64>(1)? as u64))
     })?;
 
-    let mut raw = Vec::<(u16, u64)>::new();
+    let mut raw = Vec::new();
     for row in rows {
         raw.push(row?);
     }
-
-    let total = raw.iter().map(|(_, hits)| *hits).sum::<u64>() as f64;
-
-    let mut out = Vec::new();
-    for (status, hits) in raw {
-        out.push(StatusRow {
-            status,
-            label: status_label(status),
-            hits,
-            hits_fmt: count_fmt(hits, compact_counts),
-            hits_exact_fmt: super::number_fmt(hits),
-            pct_fmt: percent_str(hits as f64, total),
-        });
-    }
-
-    Ok(out)
+    Ok(build_status_rows(raw, compact_counts))
 }
 
 fn proto_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result<Vec<ProtoRow>> {
-    let (sql, period_param) = if period.len() == 7 {
-        (
-            "SELECT proto, hits FROM protocol_counts WHERE period = ?1 ORDER BY hits DESC".to_string(),
-            period.to_string(),
-        )
-    } else {
-        (
-            "SELECT proto, SUM(hits) AS hits FROM protocol_counts WHERE period LIKE ?1 GROUP BY proto ORDER BY hits DESC".to_string(),
-            format!("{}-%", period),
-        )
-    };
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT proto, SUM(hits) AS hits
+         FROM protocol_counts
+         WHERE period {op}
+         GROUP BY proto
+         ORDER BY hits DESC"
+    );
     let mut stmt = conn.prepare(&sql)?;
 
-    let rows = stmt.query_map(params![period_param], |row| {
+    let rows = stmt.query_map(params![param], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
     })?;
 
@@ -1282,37 +1182,31 @@ fn proto_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result<
     }
 
     let total = raw.iter().map(|(_, hits)| *hits).sum::<u64>() as f64;
-
-    let mut out = Vec::new();
-    for (proto, hits) in raw {
-        out.push(ProtoRow {
+    let out = raw
+        .into_iter()
+        .map(|(proto, hits)| ProtoRow {
             proto,
             hits,
             hits_fmt: count_fmt(hits, compact_counts),
             hits_exact_fmt: super::number_fmt(hits),
             pct_fmt: percent_str(hits as f64, total),
-        });
-    }
-
+        })
+        .collect();
     Ok(out)
 }
 
 fn method_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result<Vec<MethodRow>> {
-    let (sql, period_param) = if period.len() == 7 {
-        (
-            "SELECT method, hits FROM method_counts WHERE period = ?1 ORDER BY hits DESC"
-                .to_string(),
-            period.to_string(),
-        )
-    } else {
-        (
-            "SELECT method, SUM(hits) AS hits FROM method_counts WHERE period LIKE ?1 GROUP BY method ORDER BY hits DESC".to_string(),
-            format!("{}-%", period),
-        )
-    };
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT method, SUM(hits) AS hits
+         FROM method_counts
+         WHERE period {op}
+         GROUP BY method
+         ORDER BY hits DESC"
+    );
     let mut stmt = conn.prepare(&sql)?;
 
-    let rows = stmt.query_map(params![period_param], |row| {
+    let rows = stmt.query_map(params![param], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
     })?;
 
@@ -1322,18 +1216,16 @@ fn method_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result
     }
 
     let total = raw.iter().map(|(_, hits)| *hits).sum::<u64>() as f64;
-
-    let mut out = Vec::new();
-    for (method, hits) in raw {
-        out.push(MethodRow {
+    let out = raw
+        .into_iter()
+        .map(|(method, hits)| MethodRow {
             method,
             hits,
             hits_fmt: count_fmt(hits, compact_counts),
             hits_exact_fmt: super::number_fmt(hits),
             pct_fmt: percent_str(hits as f64, total),
-        });
-    }
-
+        })
+        .collect();
     Ok(out)
 }
 

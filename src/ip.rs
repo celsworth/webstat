@@ -24,30 +24,6 @@ impl Ip {
         parse_ipv6_u128(s).map(Ip::V6)
     }
 
-    /// `ip_kind` column value for the database schema (1=v4, 2=v6).
-    pub fn kind(self) -> u8 {
-        match self {
-            Ip::V4(_) => 1,
-            Ip::V6(_) => 2,
-        }
-    }
-
-    /// `ip_hi` column value (high 64 bits; always 0 for IPv4).
-    pub fn hi(self) -> u64 {
-        match self {
-            Ip::V4(_) => 0,
-            Ip::V6(n) => (n >> 64) as u64,
-        }
-    }
-
-    /// `ip_lo` column value (low 64 bits; full u32 for IPv4).
-    pub fn lo(self) -> u64 {
-        match self {
-            Ip::V4(n) => n as u64,
-            Ip::V6(n) => n as u64,
-        }
-    }
-
     /// Convert to `std::net::IpAddr` for APIs that require it (e.g. maxminddb).
     pub(crate) fn to_std(self) -> std::net::IpAddr {
         match self {

@@ -439,18 +439,18 @@ mod tests {
     fn set_parse_state_roundtrips_fields() {
         let db = open_test_db();
 
-        db.set_parse_state(
-            "access.log",
-            42,
-            789,
-            456,
-            Some(11),
-            Some(22),
-            123,
-            456,
-            1_700_000_000,
-            true,
-        )
+        db.set_parse_state(&ParseState {
+            filepath: "access.log".into(),
+            inode: 42,
+            compressed_size: 789,
+            uncompressed_size: 456,
+            compressed_head_fingerprint: Some(11),
+            uncompressed_head_fingerprint: Some(22),
+            compressed_offset: 123,
+            uncompressed_offset: 456,
+            mtime_ns: 1_700_000_000,
+            completed: true,
+        })
         .expect("set parse state");
 
         let state = db

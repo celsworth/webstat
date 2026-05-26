@@ -1,25 +1,27 @@
 // Parse state persistence: load and save per-file ParseState rows that drive resume decisions.
 
+use rusqlite::OptionalExtension;
+
 use super::*;
 
+macro_rules! ps_cols {
+    () => {
+        "filepath, inode, compressed_size, uncompressed_size, \
+         compressed_head_fingerprint, uncompressed_head_fingerprint, \
+         compressed_offset, uncompressed_offset, mtime_ns, completed"
+    };
+}
+
 /// Columns selected when loading a ParseState from either table.
-/// Centralised here so schema changes only need updating in one place.
-const PARSE_STATE_COLS: &str = "filepath, inode, compressed_size, uncompressed_size, \
-     compressed_head_fingerprint, uncompressed_head_fingerprint, \
-     compressed_offset, uncompressed_offset, mtime_ns, completed";
+const PARSE_STATE_COLS: &str = ps_cols!();
 
 /// The same columns projected from both parse_state and parse_state_archive,
 /// used in UNION ALL queries.
-const PARSE_STATE_UNION: &str = "\
-    SELECT filepath, inode, compressed_size, uncompressed_size, \
-           compressed_head_fingerprint, uncompressed_head_fingerprint, \
-           compressed_offset, uncompressed_offset, mtime_ns, completed \
-    FROM parse_state \
-    UNION ALL \
-    SELECT filepath, inode, compressed_size, uncompressed_size, \
-           compressed_head_fingerprint, uncompressed_head_fingerprint, \
-           compressed_offset, uncompressed_offset, mtime_ns, completed \
-    FROM parse_state_archive";
+const PARSE_STATE_UNION: &str = concat!(
+    "SELECT ", ps_cols!(), " FROM parse_state \
+     UNION ALL \
+     SELECT ", ps_cols!(), " FROM parse_state_archive"
+);
 
 impl Database {
     // ── Parse state ───────────────────────────────────────────────────────────
@@ -44,19 +46,19 @@ impl Database {
     pub fn get_parse_state(&self, filepath: &str) -> Result<Option<ParseState>> {
         let sql = format!("SELECT {PARSE_STATE_COLS} FROM parse_state WHERE filepath = ?");
         let mut st = self.conn.prepare_cached(&sql)?;
-        let mut rows = st.query(params![filepath])?;
-        match rows.next()? {
-            None => Ok(None),
-            Some(row) => Ok(Some(Self::row_to_parse_state(row)?)),
-        }
+        Ok(st
+            .query_row(params![filepath], Self::row_to_parse_state)
+            .optional()?)
     }
 
     pub fn get_parse_state_by_inode(&self, inode: u64) -> Result<Option<ParseState>> {
         let sql = format!("SELECT {PARSE_STATE_COLS} FROM parse_state WHERE inode = ? LIMIT 1");
         let mut st = self.conn.prepare_cached(&sql)?;
-        let mut rows = st.query(params![inode as i64])?;
-        if let Some(row) = rows.next()? {
-            return Ok(Some(Self::row_to_parse_state(row)?));
+        if let Some(s) = st
+            .query_row(params![inode as i64], Self::row_to_parse_state)
+            .optional()?
+        {
+            return Ok(Some(s));
         }
 
         let sql_archive = format!(
@@ -64,11 +66,9 @@ impl Database {
              WHERE inode = ? ORDER BY completed DESC, uncompressed_offset DESC LIMIT 1"
         );
         let mut st_archive = self.conn.prepare_cached(&sql_archive)?;
-        let mut rows = st_archive.query(params![inode as i64])?;
-        match rows.next()? {
-            None => Ok(None),
-            Some(row) => Ok(Some(Self::row_to_parse_state(row)?)),
-        }
+        Ok(st_archive
+            .query_row(params![inode as i64], Self::row_to_parse_state)
+            .optional()?)
     }
 
     pub fn find_completed_by_uncompressed_identity(
@@ -84,8 +84,13 @@ impl Database {
              LIMIT 1"
         );
         let mut st = self.conn.prepare_cached(&sql)?;
-        let mut rows = st.query(params![head_fingerprint as i64, uncompressed_size as i64])?;
-        Ok(rows.next()?.is_some())
+        Ok(st
+            .query_row(
+                params![head_fingerprint as i64, uncompressed_size as i64],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
     }
 
     /// Find a completed entry by compressed head fingerprint + compressed size.
@@ -103,12 +108,13 @@ impl Database {
              LIMIT 1"
         );
         let mut st = self.conn.prepare_cached(&sql)?;
-        let mut rows = st.query(params![head_fingerprint as i64, compressed_size as i64])?;
-        if let Some(row) = rows.next()? {
-            Ok(Some(row.get::<_, i64>(0)? as u64))
-        } else {
-            Ok(None)
-        }
+        Ok(st
+            .query_row(
+                params![head_fingerprint as i64, compressed_size as i64],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .map(|v| v as u64))
     }
 
     /// Find a completed plain-file entry by uncompressed head fingerprint.
@@ -126,12 +132,12 @@ impl Database {
              LIMIT 1"
         );
         let mut st = self.conn.prepare_cached(&sql)?;
-        let mut rows = st.query(params![head_fingerprint as i64])?;
-        if let Some(row) = rows.next()? {
-            Ok(Some(row.get::<_, i64>(0)? as u64))
-        } else {
-            Ok(None)
-        }
+        Ok(st
+            .query_row(params![head_fingerprint as i64], |row| {
+                row.get::<_, i64>(0)
+            })
+            .optional()?
+            .map(|v| v as u64))
     }
 
     pub fn find_parse_state_by_uncompressed_head_fingerprint(
@@ -145,11 +151,9 @@ impl Database {
              LIMIT 1"
         );
         let mut st = self.conn.prepare_cached(&sql)?;
-        let mut rows = st.query(params![head_fingerprint as i64])?;
-        match rows.next()? {
-            None => Ok(None),
-            Some(row) => Ok(Some(Self::row_to_parse_state(row)?)),
-        }
+        Ok(st
+            .query_row(params![head_fingerprint as i64], Self::row_to_parse_state)
+            .optional()?)
     }
 
     pub fn find_parse_state_by_compressed_head_fingerprint(
@@ -163,27 +167,13 @@ impl Database {
              LIMIT 1"
         );
         let mut st = self.conn.prepare_cached(&sql)?;
-        let mut rows = st.query(params![head_fingerprint as i64])?;
-        match rows.next()? {
-            None => Ok(None),
-            Some(row) => Ok(Some(Self::row_to_parse_state(row)?)),
-        }
+        Ok(st
+            .query_row(params![head_fingerprint as i64], Self::row_to_parse_state)
+            .optional()?)
     }
 
     #[cfg(test)]
-    pub fn set_parse_state(
-        &self,
-        filepath: &str,
-        inode: u64,
-        compressed_size: u64,
-        uncompressed_size: u64,
-        compressed_head_fingerprint: Option<u64>,
-        uncompressed_head_fingerprint: Option<u64>,
-        compressed_offset: u64,
-        uncompressed_offset: u64,
-        mtime_ns: i64,
-        completed: bool,
-    ) -> Result<()> {
+    pub fn set_parse_state(&self, state: &ParseState) -> Result<()> {
         self.conn.execute(
             "INSERT INTO parse_state \
              (filepath, inode, compressed_size, uncompressed_size, \
@@ -201,16 +191,16 @@ impl Database {
                mtime_ns = ?9, \
                completed = ?10",
             params![
-                filepath,
-                inode as i64,
-                compressed_size as i64,
-                uncompressed_size as i64,
-                compressed_head_fingerprint.map(|f| f as i64),
-                uncompressed_head_fingerprint.map(|f| f as i64),
-                compressed_offset as i64,
-                uncompressed_offset as i64,
-                mtime_ns,
-                completed as i64,
+                state.filepath,
+                state.inode as i64,
+                state.compressed_size as i64,
+                state.uncompressed_size as i64,
+                state.compressed_head_fingerprint.map(|f| f as i64),
+                state.uncompressed_head_fingerprint.map(|f| f as i64),
+                state.compressed_offset as i64,
+                state.uncompressed_offset as i64,
+                state.mtime_ns,
+                state.completed as i64,
             ],
         )?;
         Ok(())

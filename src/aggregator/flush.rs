@@ -42,8 +42,6 @@ impl Processor {
         let period = run_acc.current_month.as_str();
 
         let flush_start = Instant::now();
-        crate::logging::log_debug_at(2, "Flushing run aggregates and parse state to database...");
-
         self.db.flush(FlushData {
             period,
             hourly: &run_acc.hourly,
@@ -149,7 +147,10 @@ mod tests {
     use super::*;
 
     fn make_hits_bw(pairs: &[(&str, u64, u64)]) -> ahash::AHashMap<String, (u64, u64)> {
-        pairs.iter().map(|&(k, h, b)| (k.to_string(), (h, b))).collect()
+        pairs
+            .iter()
+            .map(|&(k, h, b)| (k.to_string(), (h, b)))
+            .collect()
     }
 
     fn make_counts(pairs: &[(&str, u64)]) -> ahash::AHashMap<String, u64> {
@@ -184,8 +185,7 @@ mod tests {
     fn hits_bw_high_bw_entry_kept_despite_low_hits() {
         // c has low hits but top bw → saved; d is bottom on both → dropped
         // hits top-2: a(100), b(90); bw top-2: c(200), b(20); union: a,b,c
-        let mut map =
-            make_hits_bw(&[("a", 100, 10), ("b", 90, 20), ("c", 5, 200), ("d", 3, 1)]);
+        let mut map = make_hits_bw(&[("a", 100, 10), ("b", 90, 20), ("c", 5, 200), ("d", 3, 1)]);
         pretrim_hits_bw_map(&mut map, 2);
         assert_eq!(sorted_keys(&map), ["a", "b", "c"]);
     }
@@ -194,8 +194,7 @@ mod tests {
     fn hits_bw_high_hits_entry_kept_despite_low_bw() {
         // c has low bw but top hits → saved; d is bottom on both → dropped
         // hits top-2: c(200), b(20); bw top-2: a(100), b(90); union: a,b,c
-        let mut map =
-            make_hits_bw(&[("a", 10, 100), ("b", 20, 90), ("c", 200, 5), ("d", 1, 3)]);
+        let mut map = make_hits_bw(&[("a", 10, 100), ("b", 20, 90), ("c", 200, 5), ("d", 1, 3)]);
         pretrim_hits_bw_map(&mut map, 2);
         assert_eq!(sorted_keys(&map), ["a", "b", "c"]);
     }
