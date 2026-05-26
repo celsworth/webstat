@@ -107,6 +107,7 @@ impl Processor {
         Vec<ParseStateUpdate>,
         BTreeMap<Arc<str>, RuleStats>,
         u64,
+        usize,
     )> {
         let count = files.len();
         let mut run_acc = RunAccumulators::new(initial_month);
@@ -249,8 +250,11 @@ impl Processor {
                 retired_parse_states,
                 BTreeMap::new(),
                 0,
+                0,
             ));
         }
+
+        let work_file_count = work_files.len();
 
         // ── Phase 2: create channels ───────────────────────────────────────────
         let (loader_tx, parser_rx) = rtrb::RingBuffer::<LoaderMsg>::new(CHANNEL_CAPACITY);
@@ -403,6 +407,7 @@ impl Processor {
             retired_parse_states,
             rule_stats,
             bot_filtered,
+            work_file_count,
         ))
     }
 }

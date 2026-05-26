@@ -316,8 +316,15 @@ impl Processor {
         }
         eprintln!();
 
-        let (total, run_acc, pending_parse_states, retired_parse_states, rule_stats, bot_filtered) =
-            result?;
+        let (
+            total,
+            run_acc,
+            pending_parse_states,
+            retired_parse_states,
+            rule_stats,
+            bot_filtered,
+            files_with_new_lines,
+        ) = result?;
 
         self.flush_run(&run_acc, &pending_parse_states, &retired_parse_states)?;
 
@@ -330,7 +337,7 @@ impl Processor {
         };
 
         logging::log(&format!(
-            "Processed {total_for_log} total new lines from {count} file(s) ({:.1}s, {} l/s)",
+            "Processed {total_for_log} total new lines from {files_with_new_lines} file(s) ({:.1}s, {} l/s)",
             total_elapsed, lps
         ));
 
