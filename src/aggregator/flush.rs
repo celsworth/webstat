@@ -51,6 +51,8 @@ impl Processor {
             refs: &run_acc.refs,
             agents: &run_acc.agents,
             daily_ips: &run_acc.daily_ips,
+            daily_hists: &run_acc.daily_hists,
+            url_rt: &run_acc.url_rt,
             countries: &run_acc.countries,
             status_codes: &run_acc.status_codes,
             method_counts: &run_acc.method_counts,
@@ -105,6 +107,23 @@ fn pretrim_for_month_end(run_acc: &mut RunAccumulators, top_n: usize) {
     pretrim_hits_bw_map(&mut run_acc.hosts, top_n);
     pretrim_count_map(&mut run_acc.refs, top_n);
     pretrim_count_map(&mut run_acc.agents, top_n);
+    pretrim_rt_map(&mut run_acc.url_rt, top_n);
+}
+
+/// Keep top-N by avg response time (rt_sum / rt_count), skipping zero-count entries.
+fn pretrim_rt_map(map: &mut ahash::AHashMap<String, (u64, u64)>, top_n: usize) {
+    if map.len() <= top_n {
+        return;
+    }
+    let mut entries: Vec<(String, f64)> = map
+        .iter()
+        .filter(|(_, &(_, c))| c > 0)
+        .map(|(k, &(s, c))| (k.clone(), s as f64 / c as f64))
+        .collect();
+    entries.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let keep: ahash::AHashSet<String> =
+        entries.into_iter().take(top_n).map(|(k, _)| k).collect();
+    map.retain(|k, _| keep.contains(k.as_str()));
 }
 
 /// Keep the union of top_n by hits and top_n by bandwidth.

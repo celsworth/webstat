@@ -1,7 +1,7 @@
 // Tests for the combined-log-format parser and LogEntry field extraction.
 
-use super::*;
 use super::combined::{parse_line, parse_unix_timestamp};
+use super::*;
 
 #[cfg(test)]
 mod tests {
@@ -617,27 +617,29 @@ mod tests {
         assert_eq!(parse_float_ms(b"1.2x4"), None);
     }
 
-    // ── response_time_ms from rt= field ──────────────────────────────────────
+    // ── upstream_response_time_ms from us= field ──────────────────────────────────────
 
     #[test]
     fn parses_rt_float_seconds_to_ms() {
-        let line = r#"1.2.3.4 - - [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-" rt=1.234"#;
+        let line =
+            r#"1.2.3.4 - - [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-" us=1.234"#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.response_time_ms, Some(1234));
+        assert_eq!(entry.upstream_response_time_ms, Some(1234));
     }
 
     #[test]
     fn parses_rt_sub_millisecond() {
-        let line = r#"1.2.3.4 - - [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-" rt=0.001"#;
+        let line =
+            r#"1.2.3.4 - - [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-" us=0.001"#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.response_time_ms, Some(1));
+        assert_eq!(entry.upstream_response_time_ms, Some(1));
     }
 
     #[test]
     fn no_rt_field_gives_none() {
         let line = r#"1.2.3.4 - - [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-""#;
         let entry = parse_line(line).expect("should parse");
-        assert_eq!(entry.response_time_ms, None);
+        assert_eq!(entry.upstream_response_time_ms, None);
     }
 
     // ── Proto field ───────────────────────────────────────────────────────────

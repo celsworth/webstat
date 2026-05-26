@@ -11,6 +11,7 @@ use super::*;
 use crate::accumulators::HourlyMap;
 use crate::ip::IpBitmaps;
 use crate::method_proto::{METHOD_NAMES, PROTO_NAMES};
+use crate::response_time::ResponseTimeHistogram;
 
 pub struct FlushData<'a> {
     pub period: &'a str,
@@ -25,6 +26,8 @@ pub struct FlushData<'a> {
     pub status_codes: &'a AHashMap<u16, u64>,
     pub method_counts: &'a [u64],
     pub protocol_counts: &'a [u64],
+    pub daily_hists: &'a AHashMap<Arc<str>, ResponseTimeHistogram>,
+    pub url_rt: &'a AHashMap<String, (u64, u64)>,
     pub parse_states: &'a [ParseStateUpdate],
     pub retired_parse_states: &'a [ParseStateUpdate],
     pub visit_states: &'a [VisitStateUpdate],
@@ -278,6 +281,42 @@ impl Database {
                      (date,ip_kind,ip_hi,count,bitmap) VALUES (?1,2,?2,?3,?4)",
                     params![date.as_ref(), hi_i, count, buf],
                 )?;
+            }
+        }
+
+        // daily_response_time_histograms — read-modify-write per date
+        for (date, hist) in data.daily_hists {
+            let existing: Option<Vec<u8>> = tx
+                .query_row(
+                    "SELECT data FROM daily_response_time_histograms WHERE date=?1",
+                    params![date.as_ref()],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let mut merged = match existing {
+                Some(blob) => ResponseTimeHistogram::deserialize(&blob)
+                    .context("deserialize response time histogram")?,
+                None => ResponseTimeHistogram::new(),
+            };
+            merged.merge(hist);
+            let blob = merged.serialize();
+            tx.execute(
+                "INSERT OR REPLACE INTO daily_response_time_histograms (date, data) \
+                 VALUES (?1, ?2)",
+                params![date.as_ref(), blob],
+            )?;
+        }
+
+        // monthly_top_urls_avg_rt
+        if !data.url_rt.is_empty() {
+            let sql = "INSERT INTO monthly_top_urls_avg_rt \
+                       (period,url,rt_sum,rt_count) VALUES (?1,?2,?3,?4) \
+                       ON CONFLICT (period,url) DO UPDATE SET \
+                         rt_sum=rt_sum+excluded.rt_sum, \
+                         rt_count=rt_count+excluded.rt_count";
+            let mut stmt = tx.prepare_cached(sql)?;
+            for (url, (sum, count)) in data.url_rt {
+                stmt.execute(params![data.period, url, *sum as i64, *count as i64])?;
             }
         }
 
@@ -564,6 +603,55 @@ impl Database {
             params![like_pattern],
         )?;
 
+        // ── Response time histograms: compute daily stats, build monthly, delete daily ──
+        {
+            let daily_rt_rows: Vec<(String, Vec<u8>)> = {
+                let mut stmt = tx.prepare(
+                    "SELECT date, data FROM daily_response_time_histograms \
+                     WHERE date LIKE ?1",
+                )?;
+                let mapped = stmt.query_map(params![like_pattern], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+                })?;
+                let mut rows = Vec::new();
+                for row in mapped {
+                    rows.push(row?);
+                }
+                rows
+            };
+
+            if !daily_rt_rows.is_empty() {
+                let mut monthly_hist = ResponseTimeHistogram::new();
+                for (date, blob) in &daily_rt_rows {
+                    let hist = ResponseTimeHistogram::deserialize(blob)
+                        .context("deserialize daily rt histogram in finalize_month")?;
+                    if hist.count > 0 {
+                        let avg_ms = hist.sum_ms as f64 / hist.count as f64;
+                        let p95_ms = hist.percentile(95.0);
+                        tx.execute(
+                            "INSERT OR REPLACE INTO daily_response_time_stats \
+                             (date, avg_ms, p95_ms) VALUES (?1, ?2, ?3)",
+                            params![date, avg_ms, p95_ms as i64],
+                        )?;
+                        monthly_hist.merge(&hist);
+                    }
+                }
+
+                if monthly_hist.count > 0 {
+                    tx.execute(
+                        "INSERT OR REPLACE INTO monthly_response_time_histograms \
+                         (period, data) VALUES (?1, ?2)",
+                        params![period, monthly_hist.serialize()],
+                    )?;
+                }
+
+                tx.execute(
+                    "DELETE FROM daily_response_time_histograms WHERE date LIKE ?1",
+                    params![like_pattern],
+                )?;
+            }
+        }
+
         for (table, col) in [
             ("monthly_top_urls_hits", "hits"),
             ("monthly_top_urls_bandwidth", "bandwidth"),
@@ -573,6 +661,19 @@ impl Database {
             ("monthly_agents", "hits"),
         ] {
             Self::prune_monthly_table(&tx, table, period, col, top_n)?;
+        }
+
+        if top_n > 0 {
+            tx.execute(
+                "DELETE FROM monthly_top_urls_avg_rt \
+                 WHERE period=?1 AND rt_count>0 \
+                 AND url NOT IN ( \
+                   SELECT url FROM monthly_top_urls_avg_rt \
+                   WHERE period=?1 AND rt_count>0 \
+                   ORDER BY rt_sum*1.0/rt_count DESC LIMIT ?2 \
+                 )",
+                params![period, top_n as i64],
+            )?;
         }
 
         tx.execute(

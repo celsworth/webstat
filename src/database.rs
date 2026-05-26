@@ -237,6 +237,26 @@ CREATE TABLE IF NOT EXISTS visit_state (
 );
 CREATE INDEX IF NOT EXISTS visit_state_last_seen_idx
     ON visit_state (last_seen_ts);
+CREATE TABLE IF NOT EXISTS daily_response_time_histograms (
+    date TEXT NOT NULL PRIMARY KEY,
+    data BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS daily_response_time_stats (
+    date   TEXT NOT NULL PRIMARY KEY,
+    avg_ms REAL NOT NULL,
+    p95_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS monthly_response_time_histograms (
+    period TEXT NOT NULL PRIMARY KEY,
+    data   BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS monthly_top_urls_avg_rt (
+    period   TEXT    NOT NULL,
+    url      TEXT    NOT NULL,
+    rt_sum   INTEGER NOT NULL DEFAULT 0,
+    rt_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (period, url)
+);
 "#;
 
 // ── Database ──────────────────────────────────────────────────────────────────

@@ -9,11 +9,14 @@ use anyhow::{Context, Result};
 use chrono::{Datelike, NaiveDate, Weekday};
 use rusqlite::{params, Connection, OptionalExtension};
 
+use crate::response_time::ResponseTimeHistogram;
+
 use super::{
-    count_fmt, flag_emoji, format_bytes, format_totals, month_name, percent_str, status_label,
-    DailyAvgMax, DailyRow, HourlyAvgMax, HourlyRow, MethodRow, MonthRow, MonthlySummary,
-    OverallSummary, PeriodMonth, ProtoRow, StatusRow, TopAgentRow, TopCountryRow, TopHostRow,
-    TopRefRow, TopUrlRow, TotalsView, YearAggregateRow, YearlySummary,
+    count_fmt, flag_emoji, format_bytes, format_ms, format_totals, month_name, percent_str,
+    status_label, DailyAvgMax, DailyRow, DailyRtStat, HourlyAvgMax, HourlyRow, MethodRow,
+    MonthRow, MonthlyRtStat, MonthlySummary, OverallSummary, PeriodMonth, ProtoRow, SlowUrlRow,
+    StatusRow, TopAgentRow, TopCountryRow, TopHostRow, TopRefRow, TopUrlRow, TotalsView,
+    YearAggregateRow, YearlySummary,
 };
 
 // Returns ("= ?1", period) for monthly (7-char) periods, ("LIKE ?1", "YYYY-%") for yearly.
@@ -122,7 +125,11 @@ pub(super) fn monthly_summary(
 
     let daily = daily_stats(conn, year, month, compact_counts)?;
     let hourly = hourly_distribution(conn, year, month, compact_counts)?;
-    let totals = monthly_totals(conn, year, month, compact_counts)?;
+    let mut totals = monthly_totals(conn, year, month, compact_counts)?;
+    if let Some((avg, p95)) = monthly_rt(conn, &period)? {
+        totals.avg_rt_ms = Some(format_ms(avg));
+        totals.p95_rt_ms = Some(format_ms(p95 as f64));
+    }
 
     let top_urls_hits = top_urls_hits(conn, &period, top_n, compact_counts)?;
     let top_urls_bandwidth = top_urls_bandwidth(conn, &period, top_n, compact_counts)?;
@@ -168,6 +175,9 @@ pub(super) fn monthly_summary(
     let method_codes = method_codes(conn, &period, compact_counts)?;
     let daily_avg_max = daily_avg_max_from_rows(&daily, compact_counts);
     let hourly_avg_max = hourly_avg_max(conn, year, month, compact_counts)?;
+    let top_slow_urls = top_urls_avg_rt(conn, &period, top_n)?;
+    let daily_rt_stats = daily_rt_stats_for_month(conn, year, month)?;
+    let rt_distribution_buckets = monthly_rt_histogram_buckets(conn, &period)?;
 
     Ok(MonthlySummary {
         period,
@@ -188,6 +198,9 @@ pub(super) fn monthly_summary(
         method_codes,
         daily_avg_max,
         hourly_avg_max,
+        top_slow_urls,
+        daily_rt_stats,
+        rt_distribution_buckets,
     })
 }
 
@@ -200,7 +213,11 @@ pub(super) fn yearly_summary(
 ) -> Result<YearlySummary> {
     let period = year.to_string();
     let monthly_rows = monthly_rows(conn, year, compact_counts)?;
-    let totals = yearly_totals(conn, year, compact_counts)?;
+    let mut totals = yearly_totals(conn, year, compact_counts)?;
+    if let Some((avg, p95)) = yearly_rt(conn, year)? {
+        totals.avg_rt_ms = Some(format_ms(avg));
+        totals.p95_rt_ms = Some(format_ms(p95 as f64));
+    }
 
     let top_urls_hits = top_urls_hits(conn, &period, top_n, compact_counts)?;
     let top_urls_bandwidth = top_urls_bandwidth(conn, &period, top_n, compact_counts)?;
@@ -243,6 +260,7 @@ pub(super) fn yearly_summary(
     let status_codes = status_codes(conn, &period, compact_counts)?;
     let proto_codes = proto_codes(conn, &period, compact_counts)?;
     let method_codes = method_codes(conn, &period, compact_counts)?;
+    let monthly_rt_stats = monthly_rt_stats_for_year(conn, year)?;
 
     Ok(YearlySummary {
         year,
@@ -258,6 +276,7 @@ pub(super) fn yearly_summary(
         proto_codes,
         method_codes,
         totals,
+        monthly_rt_stats,
     })
 }
 
@@ -1309,6 +1328,225 @@ fn hourly_avg_max(
     })?;
 
     Ok(row)
+}
+
+// ── Response time helpers ─────────────────────────────────────────────────────
+
+fn load_monthly_rt_histogram(conn: &Connection, period: &str) -> Result<Option<ResponseTimeHistogram>> {
+    // Try the pre-computed monthly histogram first (finalized months).
+    let blob: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT data FROM monthly_response_time_histograms WHERE period=?1",
+            params![period],
+            |r| r.get(0),
+        )
+        .optional()?;
+
+    if let Some(b) = blob {
+        return Ok(Some(
+            ResponseTimeHistogram::deserialize(&b)
+                .context("deserialize monthly rt histogram")?,
+        ));
+    }
+
+    // Fallback: merge in-progress daily blobs for the current month.
+    let like = format!("{}-%%", period);
+    let mut stmt = conn.prepare(
+        "SELECT data FROM daily_response_time_histograms WHERE date LIKE ?1",
+    )?;
+    let rows = stmt
+        .query_map(params![like], |r| r.get::<_, Vec<u8>>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    if rows.is_empty() {
+        return Ok(None);
+    }
+
+    let mut merged = ResponseTimeHistogram::new();
+    for blob in &rows {
+        merged.merge(
+            &ResponseTimeHistogram::deserialize(blob)
+                .context("deserialize daily rt histogram for fallback merge")?,
+        );
+    }
+    Ok(Some(merged))
+}
+
+fn monthly_rt(conn: &Connection, period: &str) -> Result<Option<(f64, u32)>> {
+    let hist = load_monthly_rt_histogram(conn, period)?;
+    Ok(hist.and_then(|h| h.avg().map(|avg| (avg, h.percentile(95.0)))))
+}
+
+fn yearly_rt(conn: &Connection, year: i32) -> Result<Option<(f64, u32)>> {
+    let like = format!("{year}-%%");
+    let mut stmt = conn.prepare(
+        "SELECT data FROM monthly_response_time_histograms WHERE period LIKE ?1",
+    )?;
+    let rows = stmt
+        .query_map(params![like], |r| r.get::<_, Vec<u8>>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    if rows.is_empty() {
+        return Ok(None);
+    }
+
+    let mut merged = ResponseTimeHistogram::new();
+    for blob in &rows {
+        merged.merge(
+            &ResponseTimeHistogram::deserialize(blob)
+                .context("deserialize monthly rt histogram for yearly merge")?,
+        );
+    }
+    Ok(merged.avg().map(|avg| (avg, merged.percentile(95.0))))
+}
+
+fn daily_rt_stats_for_month(conn: &Connection, year: i32, month: i32) -> Result<Vec<DailyRtStat>> {
+    let prefix = format!("{year:04}-{month:02}");
+    let like = format!("{prefix}-%%");
+
+    // Prefer pre-computed stats (finalized months).
+    let mut stmt = conn.prepare(
+        "SELECT date, avg_ms, p95_ms FROM daily_response_time_stats \
+         WHERE date LIKE ?1 ORDER BY date",
+    )?;
+    let rows = stmt
+        .query_map(params![like], |r| {
+            Ok(DailyRtStat {
+                date: r.get::<_, String>(0)?,
+                avg_ms: r.get::<_, f64>(1)?,
+                p95_ms: r.get::<_, i64>(2)? as u32,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    if !rows.is_empty() {
+        return Ok(rows);
+    }
+
+    // Fallback: compute from in-progress daily blobs.
+    let mut stmt2 = conn.prepare(
+        "SELECT date, data FROM daily_response_time_histograms \
+         WHERE date LIKE ?1 ORDER BY date",
+    )?;
+    let rows2 = stmt2
+        .query_map(params![like], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut out = Vec::with_capacity(rows2.len());
+    for (date, blob) in rows2 {
+        let hist = ResponseTimeHistogram::deserialize(&blob)
+            .context("deserialize daily rt histogram for fallback stats")?;
+        if hist.count > 0 {
+            out.push(DailyRtStat {
+                date,
+                avg_ms: hist.avg().unwrap_or(0.0),
+                p95_ms: hist.percentile(95.0),
+            });
+        }
+    }
+    Ok(out)
+}
+
+fn monthly_rt_stats_for_year(conn: &Connection, year: i32) -> Result<Vec<MonthlyRtStat>> {
+    let like = format!("{year}-%%");
+    let mut stmt = conn.prepare(
+        "SELECT period, data FROM monthly_response_time_histograms \
+         WHERE period LIKE ?1 ORDER BY period",
+    )?;
+    let rows = stmt
+        .query_map(params![like], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for (period, blob) in rows {
+        let hist = ResponseTimeHistogram::deserialize(&blob)
+            .context("deserialize monthly rt histogram for yearly stats")?;
+        if hist.count > 0 {
+            let month_num: u32 = period[5..7].parse().unwrap_or(0);
+            out.push(MonthlyRtStat {
+                label: month_name(month_num).to_string(),
+                avg_ms: hist.avg().unwrap_or(0.0),
+                p95_ms: hist.percentile(95.0),
+            });
+        }
+    }
+    Ok(out)
+}
+
+fn monthly_rt_histogram_buckets(conn: &Connection, period: &str) -> Result<Vec<(String, u64)>> {
+    let hist = match load_monthly_rt_histogram(conn, period)? {
+        Some(h) if h.count > 0 => h,
+        _ => return Ok(Vec::new()),
+    };
+
+    // Group 1ms buckets into 10ms display buckets: [0,10), [10,20), …, [190,200), [200,∞)
+    const BUCKET_SIZE: usize = 10;
+    const NUM_BUCKETS: usize = 20; // 0–199ms in 10ms steps
+    let mut buckets = vec![0u64; NUM_BUCKETS + 1]; // +1 for "200ms+"
+
+    for (ms, &count) in hist.buckets.iter().enumerate() {
+        if count == 0 {
+            continue;
+        }
+        let idx = if ms >= NUM_BUCKETS * BUCKET_SIZE {
+            NUM_BUCKETS
+        } else {
+            ms / BUCKET_SIZE
+        };
+        buckets[idx] += count as u64;
+    }
+    buckets[NUM_BUCKETS] += hist.overflow as u64;
+
+    let mut out: Vec<(String, u64)> = (0..NUM_BUCKETS)
+        .map(|i| {
+            let lo = i * BUCKET_SIZE;
+            let hi = lo + BUCKET_SIZE - 1;
+            (format!("{lo}–{hi}ms"), buckets[i])
+        })
+        .collect();
+    out.push((format!("{}ms+", NUM_BUCKETS * BUCKET_SIZE), buckets[NUM_BUCKETS]));
+
+    // Drop trailing zero-count buckets for cleaner chart.
+    while out.last().map_or(false, |(_, c)| *c == 0) {
+        out.pop();
+    }
+
+    Ok(out)
+}
+
+fn top_urls_avg_rt(conn: &Connection, period: &str, top_n: usize) -> Result<Vec<SlowUrlRow>> {
+    if top_n == 0 {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare(
+        "SELECT url, rt_sum * 1.0 / rt_count AS avg_ms, rt_count \
+         FROM monthly_top_urls_avg_rt \
+         WHERE period=?1 AND rt_count>0 \
+         ORDER BY avg_ms DESC \
+         LIMIT ?2",
+    )?;
+    let rows = stmt
+        .query_map(params![period, top_n as i64], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, f64>(1)?,
+                r.get::<_, i64>(2)? as u64,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(url, avg_ms, rt_count)| SlowUrlRow {
+            url,
+            avg_ms_fmt: format_ms(avg_ms),
+            rt_count_fmt: super::number_fmt(rt_count),
+        })
+        .collect())
 }
 
 #[cfg(test)]

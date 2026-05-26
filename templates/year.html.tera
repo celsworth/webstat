@@ -19,6 +19,13 @@
     <span class="stat-value">{{ totals.bandwidth_fmt }}</span>
     <span class="stat-label">Bandwidth</span>
   </div>
+  {% if totals.avg_rt_ms %}
+  <div class="stat-card stat-card--rt">
+    <span class="stat-value">{{ totals.avg_rt_ms }}</span>
+    {% if totals.p95_rt_ms %}<span class="stat-sub">p95: {{ totals.p95_rt_ms }}</span>{% endif %}
+    <span class="stat-label">Avg Response Time</span>
+  </div>
+  {% endif %}
 </section>
 
 <section class="charts-col">
@@ -30,6 +37,11 @@
       <canvas id="overviewVisitsChart"></canvas>
     </div>
   </div>
+  {% if rt_over_time_chart is defined %}
+  <div class="chart-box chart-box--bar">
+    <canvas id="rtOverTimeChart"></canvas>
+  </div>
+  {% endif %}
 </section>
 
 {% if status_codes | length > 0 or top_countries | length > 0 or top_agents | length > 0 %}
@@ -275,5 +287,9 @@
   if (agentsCanvas) {
     new Chart(agentsCanvas, {{ agents_chart | safe }});
   }
+  {% if rt_over_time_chart is defined %}
+  var rtCanvas = document.getElementById('rtOverTimeChart');
+  if (rtCanvas) { new Chart(rtCanvas, {{ rt_over_time_chart | safe }}); }
+  {% endif %}
 })();
 </script>

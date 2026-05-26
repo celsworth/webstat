@@ -236,6 +236,16 @@ main.container {
     border-top-color: var(--metric-bandwidth);
 }
 
+.stat-card--rt {
+    border-top-color: #b0a8e6;
+}
+
+.stat-sub {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.1rem;
+}
+
 /* ---------- Charts ---------- */
 
 .chart-box {

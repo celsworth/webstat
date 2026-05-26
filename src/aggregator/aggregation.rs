@@ -7,6 +7,7 @@ use super::messages::ParsedEntry;
 use super::*;
 use crate::ip::Ip;
 use crate::method_proto::{method_index, proto_index};
+use crate::response_time::ResponseTimeHistogram;
 use crate::rules::HideMask;
 
 type TimePeriods = Option<(Arc<str>, u8, Arc<str>, Option<i64>)>;
@@ -210,6 +211,21 @@ impl Processor {
                 .entry(Arc::clone(&date))
                 .or_default()
                 .insert(ip);
+        }
+
+        // ── Response time ──────────────────────────────────────────────────────
+        if let Some(ms) = entry.upstream_response_time_ms {
+            run_acc
+                .daily_hists
+                .entry(Arc::clone(&date))
+                .or_insert_with(ResponseTimeHistogram::new)
+                .record(ms);
+
+            if self.enable_top_urls && !hide.contains(HideMask::URLS) {
+                let e = run_acc.url_rt.entry(clean_path.to_string()).or_default();
+                e.0 += ms as u64;
+                e.1 += 1;
+            }
         }
 
         // ── Month-period aggregations ──────────────────────────────────────────

@@ -388,6 +388,60 @@ fn dual_axis_options(title: &str) -> serde_json::Value {
     })
 }
 
+pub(super) fn response_time_over_time_chart(
+    labels: &[&str],
+    avgs: &[f64],
+    p95s: &[u32],
+) -> Result<String> {
+    let p95s_f: Vec<f64> = p95s.iter().map(|&v| v as f64).collect();
+    serde_json::to_string(&json!({
+      "type": "line",
+      "data": {
+        "labels": labels,
+        "datasets": [
+          { "label": "Avg (ms)", "data": avgs, "borderColor": PALETTE[0], "backgroundColor": PALETTE[0],
+            "tension": 0.3, "pointRadius": 3, "fill": false, "yAxisID": "y" },
+          { "label": "p95 (ms)", "data": p95s_f, "borderColor": PALETTE[2], "backgroundColor": PALETTE[2],
+            "tension": 0.3, "pointRadius": 3, "fill": false, "borderDash": [4, 3], "yAxisID": "y" }
+        ]
+      },
+      "options": {
+        "responsive": true,
+        "maintainAspectRatio": false,
+        "plugins": {
+          "legend": { "position": "top" },
+          "title": { "display": true, "text": "Response Time" }
+        },
+        "scales": {
+          "y": { "beginAtZero": true, "title": { "display": true, "text": "ms" } }
+        }
+      }
+    }))
+    .context("Failed to build response time over time chart JSON")
+}
+
+pub(super) fn response_time_distribution_chart(
+    bucket_labels: &[&str],
+    counts: &[u64],
+) -> Result<String> {
+    serde_json::to_string(&json!({
+      "type": "bar",
+      "data": {
+        "labels": bucket_labels,
+        "datasets": [{
+          "label": "Requests",
+          "data": counts,
+          "backgroundColor": PALETTE[1],
+          "borderColor": "#999",
+          "borderWidth": 1,
+          "borderRadius": 2
+        }]
+      },
+      "options": simple_bar_options("Response Time Distribution")
+    }))
+    .context("Failed to build response time distribution chart JSON")
+}
+
 fn status_color(status: u16, style: &StyleConfig, index: usize) -> &str {
     match status {
         200..=299 => style.status_2xx_color.as_deref().unwrap_or("#52c493"),

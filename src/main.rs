@@ -14,6 +14,7 @@ mod method_proto;
 mod parser;
 mod progress;
 mod reports;
+mod response_time;
 mod rules;
 mod run_accumulators;
 mod ua;

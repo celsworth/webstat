@@ -192,7 +192,7 @@ pub fn parse_line(line: impl Into<String>) -> Option<LogEntry> {
     // ─────────────────────────────────────────────
     // optional extended fields:  rt=143 ...
     let tail = b.get(i..).unwrap_or(&[]);
-    let response_time_ms = find_kv_ms(tail, b"rt=");
+    let upstream_response_time_ms = find_kv_ms(tail, b"us=");
 
     // ─────────────────────────────────────────────
     // split request (method / path / proto)
@@ -239,7 +239,7 @@ pub fn parse_line(line: impl Into<String>) -> Option<LogEntry> {
         month_num,
         status,
         bytes,
-        response_time_ms,
+        upstream_response_time_ms,
     ))
 }
 
@@ -335,7 +335,11 @@ pub(crate) fn parse_float_ms(slice: &[u8]) -> Option<u32> {
         2 => parse_u64(frac)? as u32 * 10,
         _ => {
             let top3 = parse_u64(&frac[..3])? as u32;
-            if frac.len() > 3 && frac[3] >= b'5' { top3 + 1 } else { top3 }
+            if frac.len() > 3 && frac[3] >= b'5' {
+                top3 + 1
+            } else {
+                top3
+            }
         }
     };
     Some(whole * 1_000 + ms)

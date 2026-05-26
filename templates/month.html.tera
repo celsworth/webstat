@@ -19,6 +19,13 @@
     <span class="stat-value">{{ totals.bandwidth_fmt }}</span>
     <span class="stat-label">Bandwidth</span>
   </div>
+  {% if totals.avg_rt_ms %}
+  <div class="stat-card stat-card--rt">
+    <span class="stat-value">{{ totals.avg_rt_ms }}</span>
+    {% if totals.p95_rt_ms %}<span class="stat-sub">p95: {{ totals.p95_rt_ms }}</span>{% endif %}
+    <span class="stat-label">Avg Response Time</span>
+  </div>
+  {% endif %}
 </section>
 
 <div class="charts-split">
@@ -29,6 +36,21 @@
     <canvas id="dailyVisitsChart"></canvas>
   </div>
 </div>
+
+{% if rt_over_time_chart is defined or rt_distribution_chart is defined %}
+<div class="charts-split">
+  {% if rt_over_time_chart is defined %}
+  <div class="chart-box chart-box--bar">
+    <canvas id="rtOverTimeChart"></canvas>
+  </div>
+  {% endif %}
+  {% if rt_distribution_chart is defined %}
+  <div class="chart-box chart-box--bar">
+    <canvas id="rtDistributionChart"></canvas>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
 
 <div class="chart-box chart-box--bar">
   <canvas id="hourlyChart"></canvas>
@@ -182,6 +204,7 @@
 </div>
 </section>
 
+<!-- this is a bit of a waste of space. The Hourly Distribution chart is more useful.
 <section class="stats-group">
 <div class="stats-panel">
   <table class="data-table stats-panel__table">
@@ -207,6 +230,7 @@
   </table>
 </div>
 </section>
+-->
 
 <section class="stats-group">
   <div class="stats-panel">
@@ -298,6 +322,26 @@
 </div>
 {% endif %}
 
+{% if top_slow_urls | length > 0 %}
+<div class="stats-panel">
+  <table class="data-table stats-panel__table">
+    <thead>
+      <tr><th colspan="3" class="stats-panel__heading">Slowest Endpoints (avg response time)</th></tr>
+      <tr><th>#</th><th>URL</th><th class="num-col">Avg Time</th></tr>
+    </thead>
+    <tbody>
+      {% for row in top_slow_urls %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td class="url-cell">{{ row.url }}</td>
+        <td class="num-col">{{ row.avg_ms_fmt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 {% if top_ips_hits | length > 0 or top_ips_bandwidth | length > 0 %}
 <div class="paired-tables-grid">
 {% if top_ips_hits | length > 0 %}
@@ -385,5 +429,13 @@
   if (countriesCanvas) {
     new Chart(countriesCanvas, {{ country_chart | safe }});
   }
+  {% if rt_over_time_chart is defined %}
+  var rtCanvas = document.getElementById('rtOverTimeChart');
+  if (rtCanvas) { new Chart(rtCanvas, {{ rt_over_time_chart | safe }}); }
+  {% endif %}
+  {% if rt_distribution_chart is defined %}
+  var rtDistCanvas = document.getElementById('rtDistributionChart');
+  if (rtDistCanvas) { new Chart(rtDistCanvas, {{ rt_distribution_chart | safe }}); }
+  {% endif %}
 })();
 </script>

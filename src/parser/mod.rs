@@ -21,7 +21,7 @@ pub struct LogEntry {
     pub status: u16,
     pub bytes: u64,
 
-    pub response_time_ms: Option<u32>,
+    pub upstream_response_time_ms: Option<u32>,
 }
 
 impl LogEntry {
@@ -38,7 +38,7 @@ impl LogEntry {
         month_num: u8,
         status: u16,
         bytes: u64,
-        response_time_ms: Option<u32>,
+        upstream_response_time_ms: Option<u32>,
     ) -> Self {
         Self {
             raw,
@@ -52,7 +52,7 @@ impl LogEntry {
             month_num,
             status,
             bytes,
-            response_time_ms,
+            upstream_response_time_ms,
         }
     }
 

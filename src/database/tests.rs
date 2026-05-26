@@ -24,6 +24,8 @@ mod tests {
         let empty_refs = ahash::AHashMap::new();
         let empty_agents = ahash::AHashMap::new();
         let empty_ips = ahash::AHashMap::new();
+        let empty_hists = ahash::AHashMap::new();
+        let empty_url_rt = ahash::AHashMap::new();
         let empty_countries = ahash::AHashMap::new();
         let empty_status = ahash::AHashMap::new();
         db.flush(crate::database::writer::FlushData {
@@ -35,6 +37,8 @@ mod tests {
             refs: &empty_refs,
             agents: &empty_agents,
             daily_ips: &empty_ips,
+            daily_hists: &empty_hists,
+            url_rt: &empty_url_rt,
             countries: &empty_countries,
             status_codes: &empty_status,
             method_counts,
@@ -240,6 +244,8 @@ mod tests {
                 refs: &empty_refs,
                 agents: &empty_agents,
                 daily_ips: daily,
+                daily_hists: &ahash::AHashMap::new(),
+                url_rt: &ahash::AHashMap::new(),
                 countries: &empty_countries,
                 status_codes: &empty_status,
                 method_counts: &[0u64; METHOD_COUNT],
@@ -280,6 +286,8 @@ mod tests {
             refs: &ahash::AHashMap::new(),
             agents: &ahash::AHashMap::new(),
             daily_ips: &daily,
+            daily_hists: &ahash::AHashMap::new(),
+            url_rt: &ahash::AHashMap::new(),
             countries: &ahash::AHashMap::new(),
             status_codes: &ahash::AHashMap::new(),
             method_counts: &[0u64; METHOD_COUNT],
@@ -323,6 +331,8 @@ mod tests {
             refs: &ahash::AHashMap::new(),
             agents: &ahash::AHashMap::new(),
             daily_ips: &daily,
+            daily_hists: &ahash::AHashMap::new(),
+            url_rt: &ahash::AHashMap::new(),
             countries: &ahash::AHashMap::new(),
             status_codes: &ahash::AHashMap::new(),
             method_counts: &[0u64; METHOD_COUNT],

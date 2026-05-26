@@ -70,6 +70,29 @@ struct TotalsView {
     visitors_fmt: String,
     visitors_exact_fmt: String,
     bandwidth_fmt: String,
+    avg_rt_ms: Option<String>,
+    p95_rt_ms: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SlowUrlRow {
+    url: String,
+    avg_ms_fmt: String,
+    rt_count_fmt: String,
+}
+
+#[derive(Debug, Clone)]
+struct DailyRtStat {
+    date: String,
+    avg_ms: f64,
+    p95_ms: u32,
+}
+
+#[derive(Debug, Clone)]
+struct MonthlyRtStat {
+    label: String, // "Jan", "Feb", etc.
+    avg_ms: f64,
+    p95_ms: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -262,6 +285,9 @@ struct MonthlySummary {
     method_codes: Vec<MethodRow>,
     daily_avg_max: DailyAvgMax,
     hourly_avg_max: HourlyAvgMax,
+    top_slow_urls: Vec<SlowUrlRow>,
+    daily_rt_stats: Vec<DailyRtStat>,
+    rt_distribution_buckets: Vec<(String, u64)>,
 }
 
 #[derive(Debug, Clone)]
@@ -279,6 +305,7 @@ struct YearlySummary {
     proto_codes: Vec<ProtoRow>,
     method_codes: Vec<MethodRow>,
     totals: TotalsView,
+    monthly_rt_stats: Vec<MonthlyRtStat>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -492,6 +519,15 @@ fn render_year_page(
         &charts::countries_chart(&summary.top_countries)?,
     );
     page_ctx.insert("agents_chart", &charts::agents_chart(&summary.top_agents)?);
+    if !summary.monthly_rt_stats.is_empty() {
+        let labels: Vec<&str> = summary.monthly_rt_stats.iter().map(|r| r.label.as_str()).collect();
+        let avgs: Vec<f64> = summary.monthly_rt_stats.iter().map(|r| r.avg_ms).collect();
+        let p95s: Vec<u32> = summary.monthly_rt_stats.iter().map(|r| r.p95_ms).collect();
+        page_ctx.insert(
+            "rt_over_time_chart",
+            &charts::response_time_over_time_chart(&labels, &avgs, &p95s)?,
+        );
+    }
 
     let page = tera.render("year.html.tera", &page_ctx)?;
     let html = render_layout(tera, cfg, "../assets", "../index.html", page)?;
@@ -527,6 +563,30 @@ fn render_month_page(
     page_ctx.insert("method_codes", &summary.method_codes);
     page_ctx.insert("daily_avg_max", &summary.daily_avg_max);
     page_ctx.insert("hourly_avg_max", &summary.hourly_avg_max);
+
+    page_ctx.insert("top_slow_urls", &summary.top_slow_urls);
+
+    if !summary.daily_rt_stats.is_empty() {
+        let labels: Vec<&str> = summary.daily_rt_stats.iter().map(|r| r.date.as_str()).collect();
+        let avgs: Vec<f64> = summary.daily_rt_stats.iter().map(|r| r.avg_ms).collect();
+        let p95s: Vec<u32> = summary.daily_rt_stats.iter().map(|r| r.p95_ms).collect();
+        page_ctx.insert(
+            "rt_over_time_chart",
+            &charts::response_time_over_time_chart(&labels, &avgs, &p95s)?,
+        );
+    }
+    if !summary.rt_distribution_buckets.is_empty() {
+        let labels: Vec<&str> = summary
+            .rt_distribution_buckets
+            .iter()
+            .map(|(l, _)| l.as_str())
+            .collect();
+        let counts: Vec<u64> = summary.rt_distribution_buckets.iter().map(|(_, c)| *c).collect();
+        page_ctx.insert(
+            "rt_distribution_chart",
+            &charts::response_time_distribution_chart(&labels, &counts)?,
+        );
+    }
 
     page_ctx.insert("daily_chart", &charts::daily_chart(&summary.daily, &cfg.style)?);
     page_ctx.insert(
@@ -625,6 +685,18 @@ fn copy_assets(output_dir: &Path) -> Result<()> {
 }
 
 fn format_totals(hits: u64, visits: u64, visitors: u64, bandwidth: u64, compact_counts: bool) -> TotalsView {
+    format_totals_with_rt(hits, visits, visitors, bandwidth, compact_counts, None, None)
+}
+
+fn format_totals_with_rt(
+    hits: u64,
+    visits: u64,
+    visitors: u64,
+    bandwidth: u64,
+    compact_counts: bool,
+    avg_rt: Option<f64>,
+    p95_rt: Option<u32>,
+) -> TotalsView {
     TotalsView {
         hits,
         visits,
@@ -637,6 +709,18 @@ fn format_totals(hits: u64, visits: u64, visitors: u64, bandwidth: u64, compact_
         visitors_fmt: count_fmt(visitors, compact_counts),
         visitors_exact_fmt: number_fmt(visitors),
         bandwidth_fmt: format_bytes(bandwidth),
+        avg_rt_ms: avg_rt.map(format_ms),
+        p95_rt_ms: p95_rt.map(|ms| format_ms(ms as f64)),
+    }
+}
+
+pub(super) fn format_ms(ms: f64) -> String {
+    if ms < 1.0 {
+        format!("<1ms")
+    } else if ms < 1000.0 {
+        format!("{:.0}ms", ms)
+    } else {
+        format!("{:.2}s", ms / 1000.0)
     }
 }
 
