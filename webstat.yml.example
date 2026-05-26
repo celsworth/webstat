@@ -119,7 +119,25 @@ rules:
           op: contains
           value: alternate-site-name
     action:
-      hide: [refs]
+      hide: [top_refs]
+
+  - name: "Exclude known slow endpoints from timing"
+    enabled: false
+    when:
+      - field: url
+        op: starts_with
+        value: "/admin/export/"
+    action:
+      hide: [timing]
+
+  - name: "Exclude websockets from timing"
+    enabled: false
+    when:
+      - field: status
+        op: eq
+        value: 101
+    action:
+      hide: [timing]
 
   - name: "Ignore common scanner paths"
     enabled: false

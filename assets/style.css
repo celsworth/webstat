@@ -18,9 +18,9 @@
     --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 
-    --gap-sm: 0.5rem;  /* tight gaps: month grid, small component spacing */
-    --gap: 1rem;       /* standard gaps: chart grids, flex containers */
-    --gap-lg: 1.5rem;  /* major section spacing: main page flow */
+    --gap-sm: 0.5rem; /* tight gaps: month grid, small component spacing */
+    --gap: 1rem; /* standard gaps: chart grids, flex containers */
+    --gap-lg: 1.5rem; /* major section spacing: main page flow */
 
     --metric-hits: #52c493;
     --metric-files: #7090ff;
@@ -348,7 +348,7 @@ main.container {
 }
 
 .data-table thead th.stats-panel__heading {
-  background: #eee;
+    background: var(--surface-alt);
 }
 
 .data-table thead th.metric-hits {
@@ -591,6 +591,56 @@ code {
 
 .stats-panel__table tbody tr:hover {
     background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+/* ---------- Tab groups ---------- */
+.tab-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    gap: var(--gap);
+    background: var(--surface-alt);
+    text-transform: uppercase;
+}
+
+.tab-group-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+[data-tabs-nav] {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.tab-btn {
+    background: var(--surface);
+    border: none;
+    border-left: 1px solid var(--border);
+    padding: 0.25rem 0.75rem;
+    font-size: 0.8rem;
+    font-family: var(--font);
+    cursor: pointer;
+    color: var(--text);
+    line-height: 1.4;
+}
+
+.tab-btn:first-child {
+    border-left: none;
+}
+
+.tab-btn--active {
+    background: var(--accent);
+    color: #fff;
+}
+
+.tab-btn:hover:not(.tab-btn--active) {
+    background: var(--surface-alt);
 }
 
 /* ---------- Footer ---------- */

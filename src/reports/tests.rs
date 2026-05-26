@@ -164,7 +164,7 @@ mod tests {
                     op: "contains".into(),
                     value: serde_yaml::Value::String("mysite.test".into()),
                 }]),
-                action: RawAction::Hide(vec!["refs".into()]),
+                action: RawAction::Hide(vec!["top_refs".into()]),
             }],
             ..base_cfg(&temp)
         };

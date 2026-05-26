@@ -748,7 +748,7 @@ mod tests {
 
         let rule_set = Some(hide_ruleset_for_url_prefix(
             "/static/",
-            &["urls", "hosts", "refs", "agents", "countries"],
+            &["top_urls", "top_hosts", "top_refs", "top_agents", "top_countries"],
         ));
         let mut processor = new_processor_with_rules(&db_path, rule_set);
         let processed = processor
@@ -910,7 +910,7 @@ mod tests {
 
         let rule_set = Some(hide_ruleset_for_url_prefix(
             "/static/",
-            &["urls", "hosts", "refs", "agents", "countries"],
+            &["top_urls", "top_hosts", "top_refs", "top_agents", "top_countries"],
         ));
         let mut processor = new_processor_with_rules(&db_path, rule_set);
         processor

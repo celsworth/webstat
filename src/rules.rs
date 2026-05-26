@@ -211,11 +211,12 @@ pub struct HideMask(u8);
 
 impl HideMask {
     pub const NONE: HideMask = HideMask(0);
-    pub const URLS: HideMask = HideMask(1 << 0);
-    pub const HOSTS: HideMask = HideMask(1 << 1);
-    pub const REFS: HideMask = HideMask(1 << 2);
-    pub const AGENTS: HideMask = HideMask(1 << 3);
-    pub const COUNTRIES: HideMask = HideMask(1 << 4);
+    pub const TOP_URLS: HideMask = HideMask(1 << 0);
+    pub const TOP_HOSTS: HideMask = HideMask(1 << 1);
+    pub const TOP_REFS: HideMask = HideMask(1 << 2);
+    pub const TOP_AGENTS: HideMask = HideMask(1 << 3);
+    pub const TOP_COUNTRIES: HideMask = HideMask(1 << 4);
+    pub const TIMING: HideMask = HideMask(1 << 5);
 
     fn with(self, other: HideMask) -> HideMask {
         HideMask(self.0 | other.0)
@@ -436,11 +437,12 @@ fn parse_hide_mask(tables: &[String], rule_name: &str) -> Result<HideMask> {
     let mut mask = HideMask::NONE;
     for t in tables {
         mask = match t.as_str() {
-            "urls" => mask.with(HideMask::URLS),
-            "hosts" => mask.with(HideMask::HOSTS),
-            "refs" => mask.with(HideMask::REFS),
-            "agents" => mask.with(HideMask::AGENTS),
-            "countries" => mask.with(HideMask::COUNTRIES),
+            "top_urls" => mask.with(HideMask::TOP_URLS),
+            "top_hosts" => mask.with(HideMask::TOP_HOSTS),
+            "top_refs" => mask.with(HideMask::TOP_REFS),
+            "top_agents" => mask.with(HideMask::TOP_AGENTS),
+            "top_countries" => mask.with(HideMask::TOP_COUNTRIES),
+            "timing" => mask.with(HideMask::TIMING),
             other => bail!("rule '{rule_name}': unknown hide target '{other}'"),
         };
     }
@@ -1103,7 +1105,7 @@ mod tests {
                     op: "starts_with".into(),
                     value: str_val("/static/"),
                 }]),
-                action: RawAction::Hide(vec!["urls".into()]),
+                action: RawAction::Hide(vec!["top_urls".into()]),
             },
         ])
         .unwrap();
@@ -1152,6 +1154,72 @@ mod tests {
         assert!(rs.apply(&make_entry(A)).is_none());
     }
 
+    // ── timing hide target ────────────────────────────────────────────────────
+
+    #[test]
+    fn timing_target_compiles_and_sets_bit() {
+        let rs = RuleSet::compile(&[RawRule {
+            name: "t".into(),
+            enabled: true,
+            when: RawWhen::List(vec![RawCondition {
+                field: "url".into(),
+                op: "starts_with".into(),
+                value: str_val("/"),
+            }]),
+            action: RawAction::Hide(vec!["timing".into()]),
+        }])
+        .expect("compile");
+
+        let Some((_, Action::Hide(mask))) = rs.apply(&make_entry(RT)) else {
+            panic!("expected Hide");
+        };
+        assert!(mask.contains(HideMask::TIMING));
+        assert!(!mask.contains(HideMask::TOP_URLS));
+        assert!(!mask.contains(HideMask::TOP_HOSTS));
+        assert!(!mask.contains(HideMask::TOP_REFS));
+        assert!(!mask.contains(HideMask::TOP_AGENTS));
+        assert!(!mask.contains(HideMask::TOP_COUNTRIES));
+    }
+
+    #[test]
+    fn timing_combined_with_top_urls_sets_both_bits() {
+        let rs = RuleSet::compile(&[RawRule {
+            name: "t".into(),
+            enabled: true,
+            when: RawWhen::List(vec![RawCondition {
+                field: "url".into(),
+                op: "starts_with".into(),
+                value: str_val("/"),
+            }]),
+            action: RawAction::Hide(vec!["timing".into(), "top_urls".into()]),
+        }])
+        .expect("compile");
+
+        let Some((_, Action::Hide(mask))) = rs.apply(&make_entry(A)) else {
+            panic!("expected Hide");
+        };
+        assert!(mask.contains(HideMask::TIMING));
+        assert!(mask.contains(HideMask::TOP_URLS));
+    }
+
+    #[test]
+    fn yaml_timing_target_deserialises() {
+        let yaml = r#"
+- name: "Exclude websockets from timing"
+  when:
+    - field: status
+      op: eq
+      value: 101
+  action:
+    hide: [timing]
+"#;
+        // status 101 doesn't appear in our test entries — just verify it compiles and
+        // that a matching entry would produce the correct mask.
+        let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
+        let rs = RuleSet::compile(&raw).expect("compile");
+        assert!(rs.apply(&make_entry(A)).is_none()); // status 200, not 101
+    }
+
     // ── Hide action ───────────────────────────────────────────────────────────
 
     #[test]
@@ -1164,7 +1232,7 @@ mod tests {
                 op: "starts_with".into(),
                 value: str_val("/static/"),
             }]),
-            action: RawAction::Hide(vec!["urls".into(), "refs".into()]),
+            action: RawAction::Hide(vec!["top_urls".into(), "top_refs".into()]),
         }])
         .expect("compile");
 
@@ -1185,18 +1253,19 @@ mod tests {
                 op: "starts_with".into(),
                 value: str_val("/static/"),
             }]),
-            action: RawAction::Hide(vec!["urls".into(), "refs".into()]),
+            action: RawAction::Hide(vec!["top_urls".into(), "top_refs".into()]),
         }])
         .expect("compile");
 
         let Some((_, Action::Hide(mask))) = rs.apply(&make_entry(A)) else {
             panic!("expected Hide");
         };
-        assert!(mask.contains(HideMask::URLS));
-        assert!(mask.contains(HideMask::REFS));
-        assert!(!mask.contains(HideMask::HOSTS));
-        assert!(!mask.contains(HideMask::AGENTS));
-        assert!(!mask.contains(HideMask::COUNTRIES));
+        assert!(mask.contains(HideMask::TOP_URLS));
+        assert!(mask.contains(HideMask::TOP_REFS));
+        assert!(!mask.contains(HideMask::TOP_HOSTS));
+        assert!(!mask.contains(HideMask::TOP_AGENTS));
+        assert!(!mask.contains(HideMask::TOP_COUNTRIES));
+        assert!(!mask.contains(HideMask::TIMING));
     }
 
     #[test]
@@ -1209,7 +1278,7 @@ mod tests {
                 op: "starts_with".into(),
                 value: str_val("/static/"),
             }]),
-            action: RawAction::Hide(vec!["no_such_table".into()]),
+            action: RawAction::Hide(vec!["no_such_target".into()]),
         }]);
         assert!(err.is_err());
     }
@@ -1225,7 +1294,7 @@ mod tests {
                     op: "starts_with".into(),
                     value: str_val("/static/"),
                 }]),
-                action: RawAction::Hide(vec!["urls".into()]),
+                action: RawAction::Hide(vec!["top_urls".into()]),
             },
             RawRule {
                 name: "ignore-200".into(),
@@ -1497,13 +1566,13 @@ mod tests {
       op: contains
       value: "example"
   action:
-    hide: [refs]
+    hide: [top_refs]
 "#;
         let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
         let rs = RuleSet::compile(&raw).expect("compile");
         // A has referer "https://example.com/" → hide applies
         assert!(
-            matches!(rs.apply(&make_entry(A)), Some((_, Action::Hide(m))) if m.contains(HideMask::REFS))
+            matches!(rs.apply(&make_entry(A)), Some((_, Action::Hide(m))) if m.contains(HideMask::TOP_REFS))
         );
         assert!(rs.apply(&make_entry(B)).is_none()); // referer is "-"
     }

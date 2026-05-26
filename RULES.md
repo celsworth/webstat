@@ -23,7 +23,7 @@ rules:
         op: starts_with
         value: "/static/"
     action:
-      hide: [urls, hosts, refs, agents, countries]
+      hide: [top_urls, top_hosts, top_refs, top_agents, top_countries]
 
   - name: "Ignore bot traffic"
     when:
@@ -287,19 +287,20 @@ For string fields, values are strings:
 | `hide`   | Count hits, visits, and unique IPs, but exclude from the named top-N tables. |
 | `sample` | Keep only the given fraction of matching entries (0.0 = drop all, 1.0 = keep all). |
 
-### `hide` — selective top-N exclusion
+### `hide` — selective exclusion
 
-`hide` takes a list of table names. An entry that matches is still counted in hits, visits, and unique IPs, but does not contribute to the listed tables.
+`hide` takes a list of target names. An entry that matches is still counted in hits, visits, and unique IPs, but is excluded from the listed targets.
 
-Valid table names:
+Valid target names:
 
-| Name        | Excludes from                    |
-|-------------|----------------------------------|
-| `urls`      | Top URLs                         |
-| `hosts`     | Top hosts (client IPs)           |
-| `refs`      | Top referrers                    |
-| `agents`    | Top user agents                  |
-| `countries` | Top countries                    |
+| Name           | Excludes from                                                        |
+|----------------|----------------------------------------------------------------------|
+| `top_urls`     | Top URLs                                                             |
+| `top_hosts`    | Top hosts (client IPs)                                               |
+| `top_refs`     | Top referrers                                                        |
+| `top_agents`   | Top user agents                                                      |
+| `top_countries`| Top countries                                                        |
+| `timing`       | Response time statistics — global average/p95 and Slowest Requests. Acts as if `us=` was absent for the matched entry. |
 
 ```yaml
 - name: "Hide static assets from top tables"
@@ -308,7 +309,7 @@ Valid table names:
       op: starts_with
       value: "/static/"
   action:
-    hide: [urls, hosts, refs, agents, countries]
+    hide: [top_urls, top_hosts, top_refs, top_agents, top_countries]
 
 - name: "Hide assets from top URLs only"
   when:
@@ -316,7 +317,23 @@ Valid table names:
       op: ends_with
       value: ".js"
   action:
-    hide: [urls]
+    hide: [top_urls]
+
+- name: "Exclude known slow endpoints from timing"
+  when:
+    - field: url
+      op: starts_with
+      value: "/admin/export/"
+  action:
+    hide: [timing]
+
+- name: "Exclude websockets from timing"
+  when:
+    - field: status
+      op: eq
+      value: 101
+  action:
+    hide: [timing]
 ```
 
 ### `sample` — probabilistic keep
@@ -383,7 +400,7 @@ rules:
           op: ends_with
           value: ".ico"
     action:
-      hide: [urls, hosts, refs, agents, countries]
+      hide: [top_urls, top_hosts, top_refs, top_agents, top_countries]
 
   - name: "Drop known scrapers"
     when:

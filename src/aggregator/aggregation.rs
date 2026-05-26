@@ -214,27 +214,31 @@ impl Processor {
         }
 
         // ── Response time ──────────────────────────────────────────────────────
-        if let Some(ms) = entry.upstream_response_time_ms {
-            run_acc
-                .daily_hists
-                .entry(Arc::clone(&date))
-                .or_insert_with(ResponseTimeHistogram::new)
-                .record(ms);
-        }
-
-        // ── URL stats (hits, bandwidth, response time) ─────────────────────────
-        if self.enable_top_urls && !hide.contains(HideMask::URLS) {
-            let e = run_acc.url_stats.entry(clean_path.to_string()).or_default();
-            e.hits += 1;
-            e.bandwidth += bytes;
+        if !hide.contains(HideMask::TIMING) {
             if let Some(ms) = entry.upstream_response_time_ms {
-                e.rt_sum += ms as u64;
-                e.rt_count += 1;
-                e.rt_max = e.rt_max.max(ms);
+                run_acc
+                    .daily_hists
+                    .entry(Arc::clone(&date))
+                    .or_insert_with(ResponseTimeHistogram::new)
+                    .record(ms);
             }
         }
 
-        if self.enable_top_sites && !hide.contains(HideMask::HOSTS) {
+        // ── URL stats (hits, bandwidth, response time) ─────────────────────────
+        if self.enable_top_urls && !hide.contains(HideMask::TOP_URLS) {
+            let e = run_acc.url_stats.entry(clean_path.to_string()).or_default();
+            e.hits += 1;
+            e.bandwidth += bytes;
+            if !hide.contains(HideMask::TIMING) {
+                if let Some(ms) = entry.upstream_response_time_ms {
+                    e.rt_sum += ms as u64;
+                    e.rt_count += 1;
+                    e.rt_max = e.rt_max.max(ms);
+                }
+            }
+        }
+
+        if self.enable_top_sites && !hide.contains(HideMask::TOP_HOSTS) {
             if let Some(e) = run_acc.hosts.get_mut(ip) {
                 e.0 += 1;
                 e.1 += bytes;
@@ -243,7 +247,7 @@ impl Processor {
             }
         }
 
-        if self.enable_top_agents && !hide.contains(HideMask::AGENTS) {
+        if self.enable_top_agents && !hide.contains(HideMask::TOP_AGENTS) {
             if let Some(v) = run_acc.agents.get_mut(agent.as_ref()) {
                 *v += 1;
             } else {
@@ -251,7 +255,7 @@ impl Processor {
             }
         }
 
-        if self.enable_top_refs && !hide.contains(HideMask::REFS) && !entry.referer().is_empty() {
+        if self.enable_top_refs && !hide.contains(HideMask::TOP_REFS) && !entry.referer().is_empty() {
             if let Some(host) = self.extract_host(entry.referer()) {
                 if let Some(v) = run_acc.refs.get_mut(&*host) {
                     *v += 1;
@@ -261,7 +265,7 @@ impl Processor {
             }
         }
 
-        if !hide.contains(HideMask::COUNTRIES) {
+        if !hide.contains(HideMask::TOP_COUNTRIES) {
             if let Some(v) = run_acc.countries.get_mut(&*country_code) {
                 *v += 1;
             } else {
