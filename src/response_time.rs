@@ -93,6 +93,7 @@ impl ResponseTimeHistogram {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,4 +160,5 @@ mod tests {
     fn deserialize_wrong_length_errors() {
         assert!(ResponseTimeHistogram::deserialize(&[0u8; 10]).is_err());
     }
+
 }

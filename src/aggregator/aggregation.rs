@@ -220,21 +220,17 @@ impl Processor {
                 .entry(Arc::clone(&date))
                 .or_insert_with(ResponseTimeHistogram::new)
                 .record(ms);
-
-            if self.enable_top_urls && !hide.contains(HideMask::URLS) {
-                let e = run_acc.url_rt.entry(clean_path.to_string()).or_default();
-                e.0 += ms as u64;
-                e.1 += 1;
-            }
         }
 
-        // ── Month-period aggregations ──────────────────────────────────────────
+        // ── URL stats (hits, bandwidth, response time) ─────────────────────────
         if self.enable_top_urls && !hide.contains(HideMask::URLS) {
-            if let Some(e) = run_acc.urls.get_mut(clean_path) {
-                e.0 += 1;
-                e.1 += bytes;
-            } else {
-                run_acc.urls.insert(clean_path.to_string(), (1, bytes));
+            let e = run_acc.url_stats.entry(clean_path.to_string()).or_default();
+            e.hits += 1;
+            e.bandwidth += bytes;
+            if let Some(ms) = entry.upstream_response_time_ms {
+                e.rt_sum += ms as u64;
+                e.rt_count += 1;
+                e.rt_max = e.rt_max.max(ms);
             }
         }
 

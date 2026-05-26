@@ -14,7 +14,7 @@ use crate::response_time::ResponseTimeHistogram;
 use super::{
     count_fmt, flag_emoji, format_bytes, format_ms, format_totals, month_name, percent_str,
     status_label, DailyAvgMax, DailyRow, DailyRtStat, HourlyAvgMax, HourlyRow, MethodRow,
-    MonthRow, MonthlyRtStat, MonthlySummary, OverallSummary, PeriodMonth, ProtoRow, SlowUrlRow,
+    MonthRow, MonthlyRtStat, MonthlySummary, OverallSummary, PeriodMonth, ProtoRow,
     StatusRow, TopAgentRow, TopCountryRow, TopHostRow, TopRefRow, TopUrlRow, TotalsView,
     YearAggregateRow, YearlySummary,
 };
@@ -175,7 +175,7 @@ pub(super) fn monthly_summary(
     let method_codes = method_codes(conn, &period, compact_counts)?;
     let daily_avg_max = daily_avg_max_from_rows(&daily, compact_counts);
     let hourly_avg_max = hourly_avg_max(conn, year, month, compact_counts)?;
-    let top_slow_urls = top_urls_avg_rt(conn, &period, top_n)?;
+    let top_slow_urls = top_urls_avg_rt(conn, &period, top_n, compact_counts)?;
     let daily_rt_stats = daily_rt_stats_for_month(conn, year, month)?;
     let rt_distribution_buckets = monthly_rt_histogram_buckets(conn, &period)?;
 
@@ -261,6 +261,7 @@ pub(super) fn yearly_summary(
     let proto_codes = proto_codes(conn, &period, compact_counts)?;
     let method_codes = method_codes(conn, &period, compact_counts)?;
     let monthly_rt_stats = monthly_rt_stats_for_year(conn, year)?;
+    let top_slow_urls = top_urls_avg_rt(conn, &period, top_n, compact_counts)?;
 
     Ok(YearlySummary {
         year,
@@ -277,6 +278,7 @@ pub(super) fn yearly_summary(
         method_codes,
         totals,
         monthly_rt_stats,
+        top_slow_urls,
     })
 }
 
@@ -810,14 +812,7 @@ fn top_urls_hits(
     top_n: usize,
     compact_counts: bool,
 ) -> Result<Vec<TopUrlRow>> {
-    top_urls_from_table(
-        conn,
-        "monthly_top_urls_hits",
-        period,
-        top_n,
-        compact_counts,
-        "hits",
-    )
+    top_urls_sorted(conn, period, top_n, compact_counts, "hits")
 }
 
 fn top_urls_bandwidth(
@@ -826,53 +821,77 @@ fn top_urls_bandwidth(
     top_n: usize,
     compact_counts: bool,
 ) -> Result<Vec<TopUrlRow>> {
-    top_urls_from_table(
-        conn,
-        "monthly_top_urls_bandwidth",
-        period,
-        top_n,
-        compact_counts,
-        "bandwidth",
-    )
+    top_urls_sorted(conn, period, top_n, compact_counts, "bandwidth")
 }
 
-fn top_urls_from_table(
+fn top_urls_sorted(
     conn: &Connection,
-    table: &str,
     period: &str,
     top_n: usize,
     compact_counts: bool,
-    order_metric: &str,
+    order_col: &str,
 ) -> Result<Vec<TopUrlRow>> {
-    let (op, param) = period_clause(period);
-    let sql = format!(
-        "SELECT url, SUM(hits) AS hits, SUM(bandwidth) AS bandwidth
-         FROM {table}
-         WHERE period {op}
-         GROUP BY url
-         ORDER BY {order_metric} DESC, hits DESC
-         LIMIT ?2"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-
-    let rows = stmt.query_map(params![param, top_n as i64], |row| {
-        let hits = row.get::<_, i64>(1)? as u64;
-        let bandwidth = row.get::<_, i64>(2)? as u64;
-        Ok(TopUrlRow {
-            url: row.get::<_, String>(0)?,
-            hits,
-            bandwidth,
-            hits_fmt: count_fmt(hits, compact_counts),
-            hits_exact_fmt: super::number_fmt(hits),
-            bandwidth_fmt: format_bytes(bandwidth),
-        })
-    })?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row?);
+    if top_n == 0 {
+        return Ok(Vec::new());
     }
-    Ok(out)
+    let is_monthly = period.len() == 7;
+    let (op, param) = period_clause(period);
+
+    // For monthly: read rt_hist blob to compute P95. For yearly: GROUP BY SUM, no blob.
+    let sql = if is_monthly {
+        format!(
+            "SELECT url, hits, bandwidth, rt_sum, rt_count, rt_max \
+             FROM monthly_top_urls WHERE period {op} \
+             ORDER BY {order_col} DESC LIMIT ?2"
+        )
+    } else {
+        format!(
+            "SELECT url, SUM(hits), SUM(bandwidth), SUM(rt_sum), SUM(rt_count), MAX(rt_max) \
+             FROM monthly_top_urls WHERE period {op} \
+             GROUP BY url ORDER BY {order_col} DESC LIMIT ?2"
+        )
+    };
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(params![param, top_n as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)? as u64,
+                row.get::<_, i64>(2)? as u64,
+                row.get::<_, i64>(3)? as u64,
+                row.get::<_, i64>(4)? as u64,
+                row.get::<_, i64>(5)? as u32,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    rows.into_iter()
+        .map(|(url, hits, bandwidth, rt_sum, rt_count, rt_max)| {
+            let (avg_ms_fmt, max_ms_fmt) = rt_display(rt_sum, rt_count, rt_max);
+            Ok(TopUrlRow {
+                url,
+                hits,
+                bandwidth,
+                hits_fmt: count_fmt(hits, compact_counts),
+                hits_exact_fmt: super::number_fmt(hits),
+                bandwidth_fmt: format_bytes(bandwidth),
+                avg_ms_fmt,
+                max_ms_fmt,
+            })
+        })
+        .collect()
+}
+
+/// Compute avg and max display strings from rt fields.
+fn rt_display(rt_sum: u64, rt_count: u64, rt_max: u32) -> (Option<String>, Option<String>) {
+    if rt_count == 0 {
+        return (None, None);
+    }
+    (
+        Some(format_ms(rt_sum as f64 / rt_count as f64)),
+        Some(format_ms(rt_max as f64)),
+    )
 }
 
 fn top_ips_hits(
@@ -882,15 +901,7 @@ fn top_ips_hits(
     compact_counts: bool,
     anonymise_ips: bool,
 ) -> Result<Vec<TopHostRow>> {
-    top_ips_from_table(
-        conn,
-        "monthly_top_ips_hits",
-        period,
-        top_n,
-        compact_counts,
-        "hits",
-        anonymise_ips,
-    )
+    top_ips_sorted(conn, period, top_n, compact_counts, "hits", anonymise_ips)
 }
 
 fn top_ips_bandwidth(
@@ -900,24 +911,15 @@ fn top_ips_bandwidth(
     compact_counts: bool,
     anonymise_ips: bool,
 ) -> Result<Vec<TopHostRow>> {
-    top_ips_from_table(
-        conn,
-        "monthly_top_ips_bandwidth",
-        period,
-        top_n,
-        compact_counts,
-        "bandwidth",
-        anonymise_ips,
-    )
+    top_ips_sorted(conn, period, top_n, compact_counts, "bandwidth", anonymise_ips)
 }
 
-fn top_ips_from_table(
+fn top_ips_sorted(
     conn: &Connection,
-    table: &str,
     period: &str,
     top_n: usize,
     compact_counts: bool,
-    order_metric: &str,
+    order_col: &str,
     anonymise_ips: bool,
 ) -> Result<Vec<TopHostRow>> {
     let (op, param) = period_clause(period);
@@ -926,11 +928,11 @@ fn top_ips_from_table(
                 SUM(t.hits) AS hits, SUM(t.bandwidth) AS bandwidth,
                 COALESCE(MAX(t.country_code), '--'),
                 COALESCE(MAX(cn.country_name), 'Unknown')
-         FROM {table} t
+         FROM monthly_top_ips t
          LEFT JOIN countries cn ON cn.country_code = t.country_code
          WHERE t.period {op}
          GROUP BY t.host_kind, t.host_hi, t.host_lo
-         ORDER BY {order_metric} DESC, hits DESC
+         ORDER BY {order_col} DESC, hits DESC
          LIMIT ?2"
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -1518,35 +1520,59 @@ fn monthly_rt_histogram_buckets(conn: &Connection, period: &str) -> Result<Vec<(
     Ok(out)
 }
 
-fn top_urls_avg_rt(conn: &Connection, period: &str, top_n: usize) -> Result<Vec<SlowUrlRow>> {
+fn top_urls_avg_rt(
+    conn: &Connection,
+    period: &str,
+    top_n: usize,
+    compact_counts: bool,
+) -> Result<Vec<TopUrlRow>> {
     if top_n == 0 {
         return Ok(Vec::new());
     }
-    let mut stmt = conn.prepare(
-        "SELECT url, rt_sum * 1.0 / rt_count AS avg_ms, rt_count \
-         FROM monthly_top_urls_avg_rt \
-         WHERE period=?1 AND rt_count>0 \
-         ORDER BY avg_ms DESC \
-         LIMIT ?2",
-    )?;
+    let (op, param) = period_clause(period);
+    let sql = if period.len() == 7 {
+        format!(
+            "SELECT url, hits, bandwidth, rt_sum, rt_count, rt_max \
+             FROM monthly_top_urls WHERE period {op} AND rt_count>0 \
+             ORDER BY rt_sum*1.0/rt_count DESC LIMIT ?2"
+        )
+    } else {
+        format!(
+            "SELECT url, SUM(hits), SUM(bandwidth), SUM(rt_sum), SUM(rt_count), MAX(rt_max) \
+             FROM monthly_top_urls WHERE period {op} \
+             GROUP BY url HAVING SUM(rt_count)>0 \
+             ORDER BY SUM(rt_sum)*1.0/SUM(rt_count) DESC LIMIT ?2"
+        )
+    };
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt
-        .query_map(params![period, top_n as i64], |r| {
+        .query_map(params![param, top_n as i64], |r| {
             Ok((
                 r.get::<_, String>(0)?,
-                r.get::<_, f64>(1)?,
+                r.get::<_, i64>(1)? as u64,
                 r.get::<_, i64>(2)? as u64,
+                r.get::<_, i64>(3)? as u64,
+                r.get::<_, i64>(4)? as u64,
+                r.get::<_, i64>(5)? as u32,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    Ok(rows
-        .into_iter()
-        .map(|(url, avg_ms, rt_count)| SlowUrlRow {
-            url,
-            avg_ms_fmt: format_ms(avg_ms),
-            rt_count_fmt: super::number_fmt(rt_count),
+    rows.into_iter()
+        .map(|(url, hits, bandwidth, rt_sum, rt_count, rt_max)| {
+            let (avg_ms_fmt, max_ms_fmt) = rt_display(rt_sum, rt_count, rt_max);
+            Ok(TopUrlRow {
+                url,
+                hits,
+                bandwidth,
+                hits_fmt: count_fmt(hits, compact_counts),
+                hits_exact_fmt: super::number_fmt(hits),
+                bandwidth_fmt: format_bytes(bandwidth),
+                avg_ms_fmt,
+                max_ms_fmt,
+            })
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]

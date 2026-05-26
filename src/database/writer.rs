@@ -12,11 +12,12 @@ use crate::accumulators::HourlyMap;
 use crate::ip::IpBitmaps;
 use crate::method_proto::{METHOD_NAMES, PROTO_NAMES};
 use crate::response_time::ResponseTimeHistogram;
+use crate::run_accumulators::UrlStats;
 
 pub struct FlushData<'a> {
     pub period: &'a str,
     pub hourly: &'a HourlyMap,
-    pub urls: &'a AHashMap<String, (u64, u64)>,
+    pub url_stats: &'a AHashMap<String, UrlStats>,
     pub hosts: &'a AHashMap<String, (u64, u64)>,
     pub host_geo: &'a AHashMap<String, (Arc<str>, Arc<str>)>,
     pub refs: &'a AHashMap<String, u64>,
@@ -27,7 +28,6 @@ pub struct FlushData<'a> {
     pub method_counts: &'a [u64],
     pub protocol_counts: &'a [u64],
     pub daily_hists: &'a AHashMap<Arc<str>, ResponseTimeHistogram>,
-    pub url_rt: &'a AHashMap<String, (u64, u64)>,
     pub parse_states: &'a [ParseStateUpdate],
     pub retired_parse_states: &'a [ParseStateUpdate],
     pub visit_states: &'a [VisitStateUpdate],
@@ -139,42 +139,42 @@ impl Database {
             }
         }
 
-        // monthly_top_urls_hits and monthly_top_urls_bandwidth (same data, different tables)
-        if !data.urls.is_empty() {
-            let sql_hits = "INSERT INTO monthly_top_urls_hits (period,url,hits,bandwidth) \
-                            VALUES (?1,?2,?3,?4) \
-                            ON CONFLICT (period,url) DO UPDATE SET \
-                              hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth";
-            let sql_bw = "INSERT INTO monthly_top_urls_bandwidth (period,url,hits,bandwidth) \
-                          VALUES (?1,?2,?3,?4) \
-                          ON CONFLICT (period,url) DO UPDATE SET \
-                            hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth";
-            let mut stmt_hits = tx.prepare_cached(sql_hits)?;
-            let mut stmt_bw = tx.prepare_cached(sql_bw)?;
-            for (url, (hits, bw)) in data.urls {
-                stmt_hits.execute(params![data.period, url, *hits as i64, *bw as i64])?;
-                stmt_bw.execute(params![data.period, url, *hits as i64, *bw as i64])?;
+        // monthly_top_urls — unified hits/bandwidth/rt
+        if !data.url_stats.is_empty() {
+            let sql = "INSERT INTO monthly_top_urls \
+                       (period,url,hits,bandwidth,rt_sum,rt_count,rt_max) \
+                       VALUES (?1,?2,?3,?4,?5,?6,?7) \
+                       ON CONFLICT (period,url) DO UPDATE SET \
+                         hits=hits+excluded.hits, \
+                         bandwidth=bandwidth+excluded.bandwidth, \
+                         rt_sum=rt_sum+excluded.rt_sum, \
+                         rt_count=rt_count+excluded.rt_count, \
+                         rt_max=MAX(rt_max,excluded.rt_max)";
+            let mut stmt = tx.prepare_cached(sql)?;
+            for (url, stats) in data.url_stats {
+                stmt.execute(params![
+                    data.period,
+                    url,
+                    stats.hits as i64,
+                    stats.bandwidth as i64,
+                    stats.rt_sum as i64,
+                    stats.rt_count as i64,
+                    stats.rt_max as i64,
+                ])?;
             }
         }
 
         let unknown_geo: (Arc<str>, Arc<str>) = (Arc::from("--"), Arc::from("Unknown"));
 
-        // monthly_top_ips_hits and monthly_top_ips_bandwidth
+        // monthly_top_ips
         if !data.hosts.is_empty() {
-            let sql_hits = "INSERT INTO monthly_top_ips_hits \
-                            (period,host_kind,host_hi,host_lo,hits,bandwidth,country_code) \
-                            VALUES (?1,?2,?3,?4,?5,?6,?7) \
-                            ON CONFLICT (period,host_kind,host_hi,host_lo) DO UPDATE SET \
-                              hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth, \
-                              country_code=COALESCE(NULLIF(excluded.country_code,'--'),country_code)";
-            let sql_bw = "INSERT INTO monthly_top_ips_bandwidth \
-                          (period,host_kind,host_hi,host_lo,hits,bandwidth,country_code) \
-                          VALUES (?1,?2,?3,?4,?5,?6,?7) \
-                          ON CONFLICT (period,host_kind,host_hi,host_lo) DO UPDATE SET \
-                            hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth, \
-                            country_code=COALESCE(NULLIF(excluded.country_code,'--'),country_code)";
-            let mut stmt_hits = tx.prepare_cached(sql_hits)?;
-            let mut stmt_bw = tx.prepare_cached(sql_bw)?;
+            let sql = "INSERT INTO monthly_top_ips \
+                       (period,host_kind,host_hi,host_lo,hits,bandwidth,country_code) \
+                       VALUES (?1,?2,?3,?4,?5,?6,?7) \
+                       ON CONFLICT (period,host_kind,host_hi,host_lo) DO UPDATE SET \
+                         hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth, \
+                         country_code=COALESCE(NULLIF(excluded.country_code,'--'),country_code)";
+            let mut stmt = tx.prepare_cached(sql)?;
             let mut cn_stmt = tx.prepare_cached(
                 "INSERT INTO countries (country_code, country_name) VALUES (?1, ?2)
                  ON CONFLICT (country_code) DO UPDATE SET
@@ -189,16 +189,7 @@ impl Database {
             for (host, (hits, bw)) in data.hosts {
                 let (cc, cn) = data.host_geo.get(host).unwrap_or(&unknown_geo);
                 let hk = encode_host_key(host);
-                stmt_hits.execute(params![
-                    data.period,
-                    hk.kind as i64,
-                    hk.hi as i64,
-                    hk.lo as i64,
-                    *hits as i64,
-                    *bw as i64,
-                    cc.as_ref()
-                ])?;
-                stmt_bw.execute(params![
+                stmt.execute(params![
                     data.period,
                     hk.kind as i64,
                     hk.hi as i64,
@@ -307,18 +298,6 @@ impl Database {
             )?;
         }
 
-        // monthly_top_urls_avg_rt
-        if !data.url_rt.is_empty() {
-            let sql = "INSERT INTO monthly_top_urls_avg_rt \
-                       (period,url,rt_sum,rt_count) VALUES (?1,?2,?3,?4) \
-                       ON CONFLICT (period,url) DO UPDATE SET \
-                         rt_sum=rt_sum+excluded.rt_sum, \
-                         rt_count=rt_count+excluded.rt_count";
-            let mut stmt = tx.prepare_cached(sql)?;
-            for (url, (sum, count)) in data.url_rt {
-                stmt.execute(params![data.period, url, *sum as i64, *count as i64])?;
-            }
-        }
 
         // top_countries
         if !data.countries.is_empty() {
@@ -652,28 +631,29 @@ impl Database {
             }
         }
 
-        for (table, col) in [
-            ("monthly_top_urls_hits", "hits"),
-            ("monthly_top_urls_bandwidth", "bandwidth"),
-            ("monthly_top_ips_hits", "hits"),
-            ("monthly_top_ips_bandwidth", "bandwidth"),
-            ("monthly_referrers", "hits"),
-            ("monthly_agents", "hits"),
-        ] {
-            Self::prune_monthly_table(&tx, table, period, col, top_n)?;
+        if top_n > 0 {
+            tx.execute(
+                "DELETE FROM monthly_top_urls \
+                 WHERE period=?1 \
+                 AND url NOT IN (SELECT url FROM monthly_top_urls WHERE period=?1 ORDER BY hits DESC LIMIT ?2) \
+                 AND url NOT IN (SELECT url FROM monthly_top_urls WHERE period=?1 ORDER BY bandwidth DESC LIMIT ?2) \
+                 AND url NOT IN (SELECT url FROM monthly_top_urls WHERE period=?1 AND rt_count>0 ORDER BY rt_sum*1.0/rt_count DESC LIMIT ?2)",
+                params![period, top_n as i64],
+            )?;
         }
 
         if top_n > 0 {
             tx.execute(
-                "DELETE FROM monthly_top_urls_avg_rt \
-                 WHERE period=?1 AND rt_count>0 \
-                 AND url NOT IN ( \
-                   SELECT url FROM monthly_top_urls_avg_rt \
-                   WHERE period=?1 AND rt_count>0 \
-                   ORDER BY rt_sum*1.0/rt_count DESC LIMIT ?2 \
-                 )",
+                "DELETE FROM monthly_top_ips \
+                 WHERE period=?1 \
+                 AND (host_kind,host_hi,host_lo) NOT IN (SELECT host_kind,host_hi,host_lo FROM monthly_top_ips WHERE period=?1 ORDER BY hits DESC LIMIT ?2) \
+                 AND (host_kind,host_hi,host_lo) NOT IN (SELECT host_kind,host_hi,host_lo FROM monthly_top_ips WHERE period=?1 ORDER BY bandwidth DESC LIMIT ?2)",
                 params![period, top_n as i64],
             )?;
+        }
+
+        for (table, col) in [("monthly_referrers", "hits"), ("monthly_agents", "hits")] {
+            Self::prune_monthly_table(&tx, table, period, col, top_n)?;
         }
 
         tx.execute(

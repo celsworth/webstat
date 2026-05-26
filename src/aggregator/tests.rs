@@ -681,7 +681,7 @@ mod tests {
 
         let (month_hits, month_bw): (i64, i64) = conn
             .query_row(
-                "SELECT hits, bandwidth FROM monthly_top_urls_hits WHERE period = '2026-05' AND url = '/popular.html'",
+                "SELECT hits, bandwidth FROM monthly_top_urls WHERE period = '2026-05' AND url = '/popular.html'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -784,7 +784,7 @@ mod tests {
         // Hidden URLs must not appear in top URLs.
         let hidden_url_rows: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_top_urls_hits WHERE url LIKE '/static/%'",
+                "SELECT COUNT(*) FROM monthly_top_urls WHERE url LIKE '/static/%'",
                 [],
                 |row| row.get(0),
             )
@@ -797,7 +797,7 @@ mod tests {
         // The visible URL must appear normally.
         let visible_hits: i64 = conn
             .query_row(
-                "SELECT COALESCE(SUM(hits), 0) FROM monthly_top_urls_hits WHERE url = '/page.html'",
+                "SELECT COALESCE(SUM(hits), 0) FROM monthly_top_urls WHERE url = '/page.html'",
                 [],
                 |row| row.get(0),
             )
@@ -947,7 +947,7 @@ mod tests {
         // Exactly one host row (the visible entry); the hidden one must be absent.
         let host_rows: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_top_ips_hits WHERE period = '2026-05'",
+                "SELECT COUNT(*) FROM monthly_top_ips WHERE period = '2026-05'",
                 [],
                 |row| row.get(0),
             )

@@ -74,12 +74,6 @@ struct TotalsView {
     p95_rt_ms: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct SlowUrlRow {
-    url: String,
-    avg_ms_fmt: String,
-    rt_count_fmt: String,
-}
 
 #[derive(Debug, Clone)]
 struct DailyRtStat {
@@ -152,6 +146,8 @@ struct TopUrlRow {
     hits_fmt: String,
     hits_exact_fmt: String,
     bandwidth_fmt: String,
+    avg_ms_fmt: Option<String>,
+    max_ms_fmt: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -285,7 +281,7 @@ struct MonthlySummary {
     method_codes: Vec<MethodRow>,
     daily_avg_max: DailyAvgMax,
     hourly_avg_max: HourlyAvgMax,
-    top_slow_urls: Vec<SlowUrlRow>,
+    top_slow_urls: Vec<TopUrlRow>,
     daily_rt_stats: Vec<DailyRtStat>,
     rt_distribution_buckets: Vec<(String, u64)>,
 }
@@ -306,6 +302,7 @@ struct YearlySummary {
     method_codes: Vec<MethodRow>,
     totals: TotalsView,
     monthly_rt_stats: Vec<MonthlyRtStat>,
+    top_slow_urls: Vec<TopUrlRow>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -501,6 +498,7 @@ fn render_year_page(
     page_ctx.insert("proto_codes", &summary.proto_codes);
     page_ctx.insert("method_codes", &summary.method_codes);
     page_ctx.insert("totals", &summary.totals);
+    page_ctx.insert("top_slow_urls", &summary.top_slow_urls);
 
     page_ctx.insert(
         "overview_chart",
