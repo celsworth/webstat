@@ -168,3 +168,13 @@ rules:
         op: len_gt
         value: 300
     action: ignore
+
+  # This only ignores slow *backend* requests — static files are unaffected
+  # even if they take a long time to transfer (e.g. large downloads).
+  - name: "Ignore very slow requests"
+    enabled: false
+    when:
+      - field: response_time
+        op: gt
+        value: 10000  # > 10 000 ms
+    action: ignore
