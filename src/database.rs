@@ -85,31 +85,17 @@ CREATE TABLE IF NOT EXISTS hourly_stats (
     status_5xx INTEGER DEFAULT 0,
     PRIMARY KEY (date, hour)
 );
-CREATE TABLE IF NOT EXISTS monthly_top_urls_hits (
-    period    TEXT NOT NULL,
-    url       TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS monthly_top_urls (
+    period    TEXT    NOT NULL,
+    url       TEXT    NOT NULL,
     hits      INTEGER NOT NULL DEFAULT 0,
     bandwidth INTEGER NOT NULL DEFAULT 0,
+    rt_sum    INTEGER NOT NULL DEFAULT 0,
+    rt_count  INTEGER NOT NULL DEFAULT 0,
+    rt_max    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, url)
 );
-CREATE TABLE IF NOT EXISTS monthly_top_urls_bandwidth (
-    period    TEXT NOT NULL,
-    url       TEXT NOT NULL,
-    hits      INTEGER NOT NULL DEFAULT 0,
-    bandwidth INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (period, url)
-);
-CREATE TABLE IF NOT EXISTS monthly_top_ips_hits (
-    period       TEXT    NOT NULL,
-    host_kind    INTEGER NOT NULL,
-    host_hi      INTEGER NOT NULL,
-    host_lo      INTEGER NOT NULL,
-    hits         INTEGER NOT NULL DEFAULT 0,
-    bandwidth    INTEGER NOT NULL DEFAULT 0,
-    country_code TEXT    NOT NULL DEFAULT '--',
-    PRIMARY KEY (period, host_kind, host_hi, host_lo)
-);
-CREATE TABLE IF NOT EXISTS monthly_top_ips_bandwidth (
+CREATE TABLE IF NOT EXISTS monthly_top_ips (
     period       TEXT    NOT NULL,
     host_kind    INTEGER NOT NULL,
     host_hi      INTEGER NOT NULL,
@@ -249,14 +235,6 @@ CREATE TABLE IF NOT EXISTS daily_response_time_stats (
 CREATE TABLE IF NOT EXISTS monthly_response_time_histograms (
     period TEXT NOT NULL PRIMARY KEY,
     data   BLOB NOT NULL
-);
-CREATE TABLE IF NOT EXISTS monthly_top_urls_avg_rt (
-    period   TEXT    NOT NULL,
-    url      TEXT    NOT NULL,
-    rt_sum   INTEGER NOT NULL DEFAULT 0,
-    rt_count INTEGER NOT NULL DEFAULT 0,
-    rt_hist  BLOB,
-    PRIMARY KEY (period, url)
 );
 "#;
 

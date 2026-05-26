@@ -45,14 +45,13 @@ impl Processor {
         self.db.flush(FlushData {
             period,
             hourly: &run_acc.hourly,
-            urls: &run_acc.urls,
+            url_stats: &run_acc.url_stats,
             hosts: &run_acc.hosts,
             host_geo: &host_geo,
             refs: &run_acc.refs,
             agents: &run_acc.agents,
             daily_ips: &run_acc.daily_ips,
             daily_hists: &run_acc.daily_hists,
-            url_rt: &run_acc.url_rt,
             countries: &run_acc.countries,
             status_codes: &run_acc.status_codes,
             method_counts: &run_acc.method_counts,
@@ -103,29 +102,38 @@ fn pretrim_for_month_end(run_acc: &mut RunAccumulators, top_n: usize) {
     if top_n == 0 {
         return;
     }
-    pretrim_hits_bw_map(&mut run_acc.urls, top_n);
+    pretrim_url_stats(&mut run_acc.url_stats, top_n);
     pretrim_hits_bw_map(&mut run_acc.hosts, top_n);
     pretrim_count_map(&mut run_acc.refs, top_n);
     pretrim_count_map(&mut run_acc.agents, top_n);
-    pretrim_rt_map(&mut run_acc.url_rt, top_n);
 }
 
-/// Keep top-N by avg response time (rt_sum / rt_count), skipping zero-count entries.
-fn pretrim_rt_map(
-    map: &mut ahash::AHashMap<String, (u64, u64, crate::response_time::CompactHistogram)>,
+/// Keep the union of top-N by hits, top-N by bandwidth, and top-N by avg response time.
+fn pretrim_url_stats(
+    map: &mut ahash::AHashMap<String, crate::run_accumulators::UrlStats>,
     top_n: usize,
 ) {
     if map.len() <= top_n {
         return;
     }
-    let mut entries: Vec<(String, f64)> = map
+    let mut keep = ahash::AHashSet::with_capacity(top_n * 3);
+
+    let mut by_hits: Vec<(&String, u64)> = map.iter().map(|(k, v)| (k, v.hits)).collect();
+    by_hits.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    keep.extend(by_hits.into_iter().take(top_n).map(|(k, _)| k.clone()));
+
+    let mut by_bw: Vec<(&String, u64)> = map.iter().map(|(k, v)| (k, v.bandwidth)).collect();
+    by_bw.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    keep.extend(by_bw.into_iter().take(top_n).map(|(k, _)| k.clone()));
+
+    let mut by_rt: Vec<(&String, f64)> = map
         .iter()
-        .filter(|(_, (_, c, _))| *c > 0)
-        .map(|(k, &(s, c, _))| (k.clone(), s as f64 / c as f64))
+        .filter(|(_, v)| v.rt_count > 0)
+        .map(|(k, v)| (k, v.rt_sum as f64 / v.rt_count as f64))
         .collect();
-    entries.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    let keep: ahash::AHashSet<String> =
-        entries.into_iter().take(top_n).map(|(k, _)| k).collect();
+    by_rt.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    keep.extend(by_rt.into_iter().take(top_n).map(|(k, _)| k.clone()));
+
     map.retain(|k, _| keep.contains(k.as_str()));
 }
 

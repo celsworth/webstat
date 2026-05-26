@@ -282,8 +282,8 @@
 <div class="stats-panel">
   <table class="data-table stats-panel__table">
     <thead>
-      <tr><th colspan="4" class="stats-panel__heading">Top URLs by Hits</th></tr>
-      <tr><th>#</th><th>URL</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
+      <tr><th colspan="6" class="stats-panel__heading">Top URLs by Hits</th></tr>
+      <tr><th>#</th><th>URL</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th><th class="num-col">Avg RT</th><th class="num-col">Max RT</th></tr>
     </thead>
     <tbody>
       {% for row in top_urls_hits %}
@@ -292,6 +292,8 @@
         <td class="url-cell">{{ row.url }}</td>
         <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
         <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+        <td class="num-col">{{ row.avg_ms_fmt | default(value="—") }}</td>
+        <td class="num-col">{{ row.max_ms_fmt | default(value="—") }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -303,8 +305,8 @@
 <div class="stats-panel">
   <table class="data-table stats-panel__table">
     <thead>
-      <tr><th colspan="4" class="stats-panel__heading">Top URLs by Bandwidth</th></tr>
-      <tr><th>#</th><th>URL</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
+      <tr><th colspan="6" class="stats-panel__heading">Top URLs by Bandwidth</th></tr>
+      <tr><th>#</th><th>URL</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th><th class="num-col">Avg RT</th><th class="num-col">Max RT</th></tr>
     </thead>
     <tbody>
       {% for row in top_urls_bandwidth %}
@@ -313,6 +315,8 @@
         <td class="url-cell">{{ row.url }}</td>
         <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
         <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+        <td class="num-col">{{ row.avg_ms_fmt | default(value="—") }}</td>
+        <td class="num-col">{{ row.max_ms_fmt | default(value="—") }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -326,16 +330,23 @@
 <div class="stats-panel">
   <table class="data-table stats-panel__table">
     <thead>
-      <tr><th colspan="4" class="stats-panel__heading">Slowest Endpoints (avg response time)</th></tr>
-      <tr><th>#</th><th>URL</th><th class="num-col">Avg</th><th class="num-col">P95</th></tr>
+      <tr><th colspan="6" class="stats-panel__heading">Slowest Endpoints (avg response time)</th></tr>
+      <tr><th>#</th><th>URL</th>
+      <th class="num-col">Hits</th>
+      <th class="num-col">Bandwidth</th>
+      <th class="num-col">Avg RT</th>
+      <th class="num-col">Max RT</th>
+      </tr>
     </thead>
     <tbody>
       {% for row in top_slow_urls %}
       <tr>
         <td>{{ loop.index }}</td>
         <td class="url-cell">{{ row.url }}</td>
-        <td class="num-col">{{ row.avg_ms_fmt }}</td>
-        <td class="num-col">{{ row.p95_ms_fmt | default(value="—") }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+        <td class="num-col">{{ row.avg_ms_fmt | default(value="—") }}</td>
+        <td class="num-col">{{ row.max_ms_fmt | default(value="—") }}</td>
       </tr>
       {% endfor %}
     </tbody>

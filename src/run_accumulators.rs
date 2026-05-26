@@ -9,18 +9,26 @@ use crate::ip::IpBitmaps;
 
 use crate::accumulators::HourlyMap;
 use crate::method_proto::{METHOD_COUNT, PROTO_COUNT};
-use crate::response_time::{CompactHistogram, ResponseTimeHistogram};
+use crate::response_time::ResponseTimeHistogram;
+
+#[derive(Default)]
+pub(crate) struct UrlStats {
+    pub(crate) hits: u64,
+    pub(crate) bandwidth: u64,
+    pub(crate) rt_sum: u64,
+    pub(crate) rt_count: u64,
+    pub(crate) rt_max: u32,
+}
 
 pub(crate) struct RunAccumulators {
     pub(crate) current_month: String,
     pub(crate) hourly: HourlyMap,
-    pub(crate) urls: AHashMap<String, (u64, u64)>,
+    pub(crate) url_stats: AHashMap<String, UrlStats>,
     pub(crate) hosts: AHashMap<String, (u64, u64)>,
     pub(crate) refs: AHashMap<String, u64>,
     pub(crate) agents: AHashMap<String, u64>,
     pub(crate) daily_ips: AHashMap<Arc<str>, IpBitmaps>,
     pub(crate) daily_hists: AHashMap<Arc<str>, ResponseTimeHistogram>,
-    pub(crate) url_rt: AHashMap<String, (u64, u64, CompactHistogram)>,
     pub(crate) countries: AHashMap<String, u64>,
     pub(crate) status_codes: AHashMap<u16, u64>,
     pub(crate) method_counts: [u64; METHOD_COUNT],
@@ -32,13 +40,12 @@ impl RunAccumulators {
         Self {
             current_month,
             hourly: AHashMap::with_capacity(32),
-            urls: AHashMap::with_capacity(65_536),
+            url_stats: AHashMap::with_capacity(65_536),
             hosts: AHashMap::with_capacity(65_536),
             refs: AHashMap::with_capacity(4_096),
             agents: AHashMap::with_capacity(256),
             daily_ips: AHashMap::with_capacity(32),
             daily_hists: AHashMap::with_capacity(32),
-            url_rt: AHashMap::with_capacity(65_536),
             countries: AHashMap::with_capacity(256),
             status_codes: AHashMap::with_capacity(32),
             method_counts: [0; METHOD_COUNT],
@@ -48,7 +55,7 @@ impl RunAccumulators {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.hourly.is_empty()
-            && self.urls.is_empty()
+            && self.url_stats.is_empty()
             && self.hosts.is_empty()
             && self.refs.is_empty()
             && self.agents.is_empty()
@@ -111,7 +118,7 @@ mod tests {
     #[test]
     fn urls_populated_makes_non_empty() {
         let mut acc = RunAccumulators::new("2026-05".to_string());
-        acc.urls.insert("/index.html".to_string(), (5, 1024));
+        acc.url_stats.insert("/index.html".to_string(), UrlStats { hits: 5, bandwidth: 1024, ..Default::default() });
         assert!(!acc.is_empty());
     }
 
@@ -146,7 +153,7 @@ mod tests {
     #[test]
     fn clear_for_new_month_resets_all_and_updates_month() {
         let mut acc = RunAccumulators::new("2026-05".to_string());
-        acc.urls.insert("/index.html".to_string(), (5, 1024));
+        acc.url_stats.insert("/index.html".to_string(), UrlStats { hits: 5, bandwidth: 1024, ..Default::default() });
         acc.method_counts[METHOD_GET] = 10;
         acc.protocol_counts[PROTO_1_1] = 10;
         acc.clear_for_new_month("2026-06".to_string());

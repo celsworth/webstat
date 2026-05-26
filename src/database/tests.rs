@@ -18,27 +18,25 @@ mod tests {
 
     fn empty_flush(db: &mut Database, period: &str, method_counts: &[u64], protocol_counts: &[u64]) {
         let empty_hourly = ahash::AHashMap::new();
-        let empty_urls = ahash::AHashMap::new();
+        let empty_url_stats = ahash::AHashMap::new();
         let empty_hosts = ahash::AHashMap::new();
         let empty_host_geo = ahash::AHashMap::new();
         let empty_refs = ahash::AHashMap::new();
         let empty_agents = ahash::AHashMap::new();
         let empty_ips = ahash::AHashMap::new();
         let empty_hists = ahash::AHashMap::new();
-        let empty_url_rt = ahash::AHashMap::new();
         let empty_countries = ahash::AHashMap::new();
         let empty_status = ahash::AHashMap::new();
         db.flush(crate::database::writer::FlushData {
             period,
             hourly: &empty_hourly,
-            urls: &empty_urls,
+            url_stats: &empty_url_stats,
             hosts: &empty_hosts,
             host_geo: &empty_host_geo,
             refs: &empty_refs,
             agents: &empty_agents,
             daily_ips: &empty_ips,
             daily_hists: &empty_hists,
-            url_rt: &empty_url_rt,
             countries: &empty_countries,
             status_codes: &empty_status,
             method_counts,
@@ -226,7 +224,8 @@ mod tests {
         let mut daily2 = ahash::AHashMap::new();
         daily2.insert(Arc::from("2026-05-01"), bm2);
 
-        let empty_urls: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
+        let empty_urls: ahash::AHashMap<String, crate::run_accumulators::UrlStats> =
+            ahash::AHashMap::new();
         let empty_hosts: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
         let empty_geo: ahash::AHashMap<String, (std::sync::Arc<str>, std::sync::Arc<str>)> =
             ahash::AHashMap::new();
@@ -238,14 +237,13 @@ mod tests {
             db.flush(crate::database::writer::FlushData {
                 period: "2026-05",
                 hourly: &ahash::AHashMap::new(),
-                urls: &empty_urls,
+                url_stats: &empty_urls,
                 hosts: &empty_hosts,
                 host_geo: &empty_geo,
                 refs: &empty_refs,
                 agents: &empty_agents,
                 daily_ips: daily,
                 daily_hists: &ahash::AHashMap::new(),
-                url_rt: &ahash::AHashMap::new(),
                 countries: &empty_countries,
                 status_codes: &empty_status,
                 method_counts: &[0u64; METHOD_COUNT],
@@ -280,14 +278,13 @@ mod tests {
         db.flush(crate::database::writer::FlushData {
             period,
             hourly: &ahash::AHashMap::new(),
-            urls: &ahash::AHashMap::new(),
+            url_stats: &ahash::AHashMap::new(),
             hosts: &ahash::AHashMap::new(),
             host_geo: &ahash::AHashMap::new(),
             refs: &ahash::AHashMap::new(),
             agents: &ahash::AHashMap::new(),
             daily_ips: &daily,
             daily_hists: &ahash::AHashMap::new(),
-            url_rt: &ahash::AHashMap::new(),
             countries: &ahash::AHashMap::new(),
             status_codes: &ahash::AHashMap::new(),
             method_counts: &[0u64; METHOD_COUNT],
@@ -317,22 +314,29 @@ mod tests {
         let empty_geo: ahash::AHashMap<String, (std::sync::Arc<str>, std::sync::Arc<str>)> =
             ahash::AHashMap::new();
 
-        let mut urls = ahash::AHashMap::new();
+        let mut url_stats: ahash::AHashMap<String, crate::run_accumulators::UrlStats> =
+            ahash::AHashMap::new();
         for i in 0..30u64 {
-            urls.insert(format!("/page-{}.html", i), (100 - i, (100 - i) * 1024));
+            url_stats.insert(
+                format!("/page-{}.html", i),
+                crate::run_accumulators::UrlStats {
+                    hits: 100 - i,
+                    bandwidth: (100 - i) * 1024,
+                    ..Default::default()
+                },
+            );
         }
 
         db.flush(crate::database::writer::FlushData {
             period: "2026-05",
             hourly: &ahash::AHashMap::new(),
-            urls: &urls,
+            url_stats: &url_stats,
             hosts: &empty_hosts,
             host_geo: &empty_geo,
             refs: &ahash::AHashMap::new(),
             agents: &ahash::AHashMap::new(),
             daily_ips: &daily,
             daily_hists: &ahash::AHashMap::new(),
-            url_rt: &ahash::AHashMap::new(),
             countries: &ahash::AHashMap::new(),
             status_codes: &ahash::AHashMap::new(),
             method_counts: &[0u64; METHOD_COUNT],
@@ -383,7 +387,7 @@ mod tests {
         let url_count: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_top_urls_hits WHERE period='2026-05'",
+                "SELECT COUNT(*) FROM monthly_top_urls WHERE period='2026-05'",
                 [],
                 |r| r.get(0),
             )
