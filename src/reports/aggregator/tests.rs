@@ -224,3 +224,362 @@ mod tests {
         assert_eq!(totals.visitors, 2);
     }
 }
+
+/// Percentage regression tests.
+///
+/// Every table with a `pct_fmt` field must express each row as a fraction of the
+/// **total hits/bandwidth for the period** (from `hourly_stats`), not as a fraction
+/// of the rows that happen to be in the top-N table.  These tests enforce that
+/// invariant by inserting 1 000 total hits into `hourly_stats` but only 500 hits
+/// worth of rows into the top-N table, so any function that divides by the in-table
+/// sum would produce 60 % / 40 % instead of the correct 30 % / 20 %.
+#[cfg(test)]
+mod pct_tests {
+    use super::*;
+
+    // ── schema ────────────────────────────────────────────────────────────────
+
+    fn setup() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory sqlite");
+        conn.execute_batch(
+            "CREATE TABLE hourly_stats (
+                 date TEXT NOT NULL, hour INTEGER NOT NULL,
+                 hits INTEGER DEFAULT 0, visits INTEGER DEFAULT 0,
+                 bandwidth INTEGER DEFAULT 0,
+                 status_2xx INTEGER DEFAULT 0, status_3xx INTEGER DEFAULT 0,
+                 status_4xx INTEGER DEFAULT 0, status_5xx INTEGER DEFAULT 0,
+                 PRIMARY KEY (date, hour));
+             CREATE TABLE top_urls (
+                 period TEXT NOT NULL, url TEXT NOT NULL,
+                 hits INTEGER DEFAULT 0, bandwidth INTEGER DEFAULT 0,
+                 rt_sum INTEGER DEFAULT 0, rt_count INTEGER DEFAULT 0,
+                 rt_max INTEGER DEFAULT 0,
+                 PRIMARY KEY (period, url));
+             CREATE TABLE top_agents (
+                 period TEXT NOT NULL, agent_family TEXT NOT NULL,
+                 hits INTEGER DEFAULT 0, bandwidth INTEGER DEFAULT 0,
+                 PRIMARY KEY (period, agent_family));
+             CREATE TABLE top_countries (
+                 period TEXT NOT NULL, country_code TEXT NOT NULL,
+                 hits INTEGER DEFAULT 0, bandwidth INTEGER DEFAULT 0,
+                 PRIMARY KEY (period, country_code));
+             CREATE TABLE countries (
+                 country_code TEXT PRIMARY KEY,
+                 country_name TEXT NOT NULL DEFAULT 'Unknown');
+             CREATE TABLE status_codes (
+                 period TEXT NOT NULL, status INTEGER NOT NULL,
+                 hits INTEGER DEFAULT 0,
+                 PRIMARY KEY (period, status));
+             CREATE TABLE protocol_counts (
+                 period TEXT NOT NULL, proto TEXT NOT NULL,
+                 hits INTEGER DEFAULT 0,
+                 PRIMARY KEY (period, proto));
+             CREATE TABLE method_counts (
+                 period TEXT NOT NULL, method TEXT NOT NULL,
+                 hits INTEGER DEFAULT 0,
+                 PRIMARY KEY (period, method));",
+        )
+        .expect("create pct test schema");
+        conn
+    }
+
+    /// Insert one hourly_stats row contributing `hits` and `bandwidth` to a date.
+    fn add_hourly(conn: &Connection, date: &str, hits: i64, bandwidth: i64) {
+        conn.execute(
+            "INSERT OR REPLACE INTO hourly_stats
+             (date, hour, hits, visits, bandwidth,
+              status_2xx, status_3xx, status_4xx, status_5xx)
+             VALUES (?1, 0, ?2, 0, ?3, 0, 0, 0, 0)",
+            params![date, hits, bandwidth],
+        )
+        .unwrap();
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    /// Extract (pct_fmt, bandwidth_pct_fmt) for the first two rows by field name.
+    fn pcts2<T, F1, F2>(rows: &[T], get_hits_pct: F1, get_bw_pct: F2) -> [(&str, &str); 2]
+    where
+        F1: Fn(&T) -> &str,
+        F2: Fn(&T) -> &str,
+    {
+        assert_eq!(rows.len(), 2, "expected exactly 2 rows");
+        [
+            (get_hits_pct(&rows[0]), get_bw_pct(&rows[0])),
+            (get_hits_pct(&rows[1]), get_bw_pct(&rows[1])),
+        ]
+    }
+
+    // ── top_urls ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn top_urls_pct_is_of_period_total_not_table_sum() {
+        let conn = setup();
+        // 1 000 total hits, 10 000 total bandwidth for the period.
+        add_hourly(&conn, "2026-05-01", 1000, 10000);
+        // Only 500 hits / 5 000 bw represented in top_urls (simulates pruning).
+        conn.execute_batch(
+            "INSERT INTO top_urls VALUES ('2026-05', '/a', 300, 3000, 0, 0, 0);
+             INSERT INTO top_urls VALUES ('2026-05', '/b', 200, 2000, 0, 0, 0);",
+        )
+        .unwrap();
+
+        let rows = top_urls_hits(&conn, "2026-05", 10, false).unwrap();
+        assert_eq!(rows.len(), 2);
+        // /a: 300/1000 = 30 %, /b: 200/1000 = 20 %
+        assert_eq!(rows[0].pct_fmt, "30.0%", "/a hits pct");
+        assert_eq!(rows[0].bandwidth_pct_fmt, "30.0%", "/a bw pct");
+        assert_eq!(rows[1].pct_fmt, "20.0%", "/b hits pct");
+        assert_eq!(rows[1].bandwidth_pct_fmt, "20.0%", "/b bw pct");
+    }
+
+    // ── top_agents ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn top_agents_pct_is_of_period_total_not_table_sum() {
+        let conn = setup();
+        add_hourly(&conn, "2026-05-01", 1000, 10000);
+        // Only 500 hits / 5 000 bw in top_agents (simulates pruning of tail agents).
+        conn.execute_batch(
+            "INSERT INTO top_agents VALUES ('2026-05', 'Chrome', 300, 3000);
+             INSERT INTO top_agents VALUES ('2026-05', 'Firefox', 200, 2000);",
+        )
+        .unwrap();
+
+        let rows = top_agents_sorted(&conn, "2026-05", 10, false, "hits").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].pct_fmt, "30.0%", "Chrome hits pct");
+        assert_eq!(rows[0].bandwidth_pct_fmt, "30.0%", "Chrome bw pct");
+        assert_eq!(rows[1].pct_fmt, "20.0%", "Firefox hits pct");
+        assert_eq!(rows[1].bandwidth_pct_fmt, "20.0%", "Firefox bw pct");
+    }
+
+    #[test]
+    fn top_agents_all_pct_is_of_all_time_total_not_table_sum() {
+        let conn = setup();
+        // Two months of data, 500 hits each = 1 000 total.
+        add_hourly(&conn, "2026-04-01", 500, 5000);
+        add_hourly(&conn, "2026-05-01", 500, 5000);
+        // top_agents contains only 600 hits / 6 000 bw (simulates pruning).
+        conn.execute_batch(
+            "INSERT INTO top_agents VALUES ('2026-05', 'Chrome', 300, 3000);
+             INSERT INTO top_agents VALUES ('2026-05', 'Firefox', 300, 3000);",
+        )
+        .unwrap();
+
+        let rows = top_agents_sorted_all(&conn, 10, false, "hits").unwrap();
+        assert_eq!(rows.len(), 2);
+        // 300/1000 = 30 % each
+        assert_eq!(rows[0].pct_fmt, "30.0%");
+        assert_eq!(rows[1].pct_fmt, "30.0%");
+    }
+
+    // ── top_countries ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn top_countries_pct_is_of_period_total_not_table_sum() {
+        let conn = setup();
+        add_hourly(&conn, "2026-05-01", 1000, 10000);
+        // Only 500 hits / 5 000 bw present (e.g. ungeolocated hits not in table).
+        conn.execute_batch(
+            "INSERT INTO countries VALUES ('GB', 'United Kingdom');
+             INSERT INTO countries VALUES ('DE', 'Germany');
+             INSERT INTO top_countries VALUES ('2026-05', 'GB', 300, 3000);
+             INSERT INTO top_countries VALUES ('2026-05', 'DE', 200, 2000);",
+        )
+        .unwrap();
+
+        let rows = top_countries_sorted(&conn, "2026-05", 10, false, "hits").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].pct_fmt, "30.0%", "GB hits pct");
+        assert_eq!(rows[0].bandwidth_pct_fmt, "30.0%", "GB bw pct");
+        assert_eq!(rows[1].pct_fmt, "20.0%", "DE hits pct");
+        assert_eq!(rows[1].bandwidth_pct_fmt, "20.0%", "DE bw pct");
+    }
+
+    #[test]
+    fn top_countries_all_pct_is_of_all_time_total_not_table_sum() {
+        let conn = setup();
+        add_hourly(&conn, "2026-04-01", 500, 5000);
+        add_hourly(&conn, "2026-05-01", 500, 5000);
+        conn.execute_batch(
+            "INSERT INTO countries VALUES ('GB', 'United Kingdom');
+             INSERT INTO countries VALUES ('DE', 'Germany');
+             INSERT INTO top_countries VALUES ('2026-05', 'GB', 300, 3000);
+             INSERT INTO top_countries VALUES ('2026-05', 'DE', 300, 3000);",
+        )
+        .unwrap();
+
+        let rows = top_countries_sorted_all(&conn, 10, false, "hits").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].pct_fmt, "30.0%");
+        assert_eq!(rows[1].pct_fmt, "30.0%");
+    }
+
+    // ── status_codes ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn status_codes_pct_is_of_period_total_not_table_sum() {
+        let conn = setup();
+        // 1 000 total hits; status table accounts for all of them.
+        add_hourly(&conn, "2026-05-01", 1000, 0);
+        conn.execute_batch(
+            "INSERT INTO status_codes VALUES ('2026-05', 200, 600);
+             INSERT INTO status_codes VALUES ('2026-05', 404, 400);",
+        )
+        .unwrap();
+
+        let rows = status_codes(&conn, "2026-05", false).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].pct_fmt, "60.0%", "200 pct");
+        assert_eq!(rows[1].pct_fmt, "40.0%", "404 pct");
+    }
+
+    // ── proto_codes ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn proto_codes_pct_is_of_period_total_not_table_sum() {
+        let conn = setup();
+        add_hourly(&conn, "2026-05-01", 1000, 0);
+        conn.execute_batch(
+            "INSERT INTO protocol_counts VALUES ('2026-05', 'HTTP/2.0', 700);
+             INSERT INTO protocol_counts VALUES ('2026-05', 'HTTP/1.1', 300);",
+        )
+        .unwrap();
+
+        let rows = proto_codes(&conn, "2026-05", false).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].pct_fmt, "70.0%", "HTTP/2.0 pct");
+        assert_eq!(rows[1].pct_fmt, "30.0%", "HTTP/1.1 pct");
+    }
+
+    // ── method_codes ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn method_codes_pct_is_of_period_total_not_table_sum() {
+        let conn = setup();
+        add_hourly(&conn, "2026-05-01", 1000, 0);
+        conn.execute_batch(
+            "INSERT INTO method_counts VALUES ('2026-05', 'GET', 800);
+             INSERT INTO method_counts VALUES ('2026-05', 'POST', 200);",
+        )
+        .unwrap();
+
+        let rows = method_codes(&conn, "2026-05", false).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].pct_fmt, "80.0%", "GET pct");
+        assert_eq!(rows[1].pct_fmt, "20.0%", "POST pct");
+    }
+
+    // ── yearly sort order ─────────────────────────────────────────────────────
+
+    /// Regression: yearly top_urls was sorting by per-period `hits` instead of
+    /// `SUM(hits)`, so a URL whose hits were spread across two months could rank
+    /// below a URL with fewer total hits concentrated in a single month.
+    #[test]
+    fn top_urls_yearly_sorted_by_summed_hits_not_per_period_hits() {
+        let conn = setup();
+        // /a: 400 hits in Jan + 700 hits in Feb = 1100 total — should be #1.
+        // /b: 900 hits in Jan only = 900 total — should be #2.
+        // /c: 50 hits in Jan only = 50 total — should be #3.
+        // Total hourly hits needed so pct math doesn't divide by zero.
+        add_hourly(&conn, "2026-01-01", 950, 0);
+        add_hourly(&conn, "2026-02-01", 700, 0);
+        conn.execute_batch(
+            "INSERT INTO top_urls VALUES ('2026-01', '/a', 400, 0, 0, 0, 0);
+             INSERT INTO top_urls VALUES ('2026-02', '/a', 700, 0, 0, 0, 0);
+             INSERT INTO top_urls VALUES ('2026-01', '/b', 900, 0, 0, 0, 0);
+             INSERT INTO top_urls VALUES ('2026-01', '/c',  50, 0, 0, 0, 0);",
+        )
+        .unwrap();
+
+        let rows = top_urls_hits(&conn, "2026", 10, false).unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].url, "/a", "/a (1100 total) should be #1");
+        assert_eq!(rows[1].url, "/b", "/b (900 total) should be #2");
+        assert_eq!(rows[2].url, "/c", "/c (50 total) should be #3");
+        assert_eq!(rows[0].hits, 1100);
+        assert_eq!(rows[1].hits, 900);
+        assert_eq!(rows[2].hits, 50);
+    }
+
+    #[test]
+    fn top_urls_yearly_sorted_by_summed_bandwidth_not_per_period_bandwidth() {
+        let conn = setup();
+        add_hourly(&conn, "2026-01-01", 100, 0);
+        add_hourly(&conn, "2026-02-01", 100, 0);
+        conn.execute_batch(
+            "INSERT INTO top_urls VALUES ('2026-01', '/a', 10, 400, 0, 0, 0);
+             INSERT INTO top_urls VALUES ('2026-02', '/a', 10, 700, 0, 0, 0);
+             INSERT INTO top_urls VALUES ('2026-01', '/b', 10, 900, 0, 0, 0);
+             INSERT INTO top_urls VALUES ('2026-01', '/c', 10,  50, 0, 0, 0);",
+        )
+        .unwrap();
+
+        let rows = top_urls_bandwidth(&conn, "2026", 10, false).unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].url, "/a", "/a (1100 bw) should be #1");
+        assert_eq!(rows[1].url, "/b", "/b (900 bw) should be #2");
+        assert_eq!(rows[2].url, "/c", "/c (50 bw) should be #3");
+        assert_eq!(rows[0].bandwidth, 1100);
+        assert_eq!(rows[1].bandwidth, 900);
+        assert_eq!(rows[2].bandwidth, 50);
+    }
+
+    // ── yearly variants ───────────────────────────────────────────────────────
+
+    #[test]
+    fn top_urls_yearly_pct_is_of_year_total_not_table_sum() {
+        let conn = setup();
+        // Two months contribute to the year total.
+        add_hourly(&conn, "2026-01-15", 600, 6000);
+        add_hourly(&conn, "2026-03-10", 400, 4000);
+        // Only 300 + 200 = 500 hits represented in top_urls.
+        conn.execute_batch(
+            "INSERT INTO top_urls VALUES ('2026-01', '/a', 300, 3000, 0, 0, 0);
+             INSERT INTO top_urls VALUES ('2026-01', '/b', 200, 2000, 0, 0, 0);",
+        )
+        .unwrap();
+
+        let rows = top_urls_hits(&conn, "2026", 10, false).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].pct_fmt, "30.0%", "yearly /a hits pct");
+        assert_eq!(rows[1].pct_fmt, "20.0%", "yearly /b hits pct");
+    }
+
+    #[test]
+    fn top_agents_yearly_pct_is_of_year_total_not_table_sum() {
+        let conn = setup();
+        add_hourly(&conn, "2026-01-15", 600, 6000);
+        add_hourly(&conn, "2026-03-10", 400, 4000);
+        conn.execute_batch(
+            "INSERT INTO top_agents VALUES ('2026-01', 'Chrome', 300, 3000);
+             INSERT INTO top_agents VALUES ('2026-01', 'Firefox', 200, 2000);",
+        )
+        .unwrap();
+
+        let rows = top_agents_sorted(&conn, "2026", 10, false, "hits").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].pct_fmt, "30.0%");
+        assert_eq!(rows[1].pct_fmt, "20.0%");
+    }
+
+    #[test]
+    fn top_countries_yearly_pct_is_of_year_total_not_table_sum() {
+        let conn = setup();
+        add_hourly(&conn, "2026-01-15", 600, 6000);
+        add_hourly(&conn, "2026-03-10", 400, 4000);
+        conn.execute_batch(
+            "INSERT INTO countries VALUES ('GB', 'United Kingdom');
+             INSERT INTO countries VALUES ('DE', 'Germany');
+             INSERT INTO top_countries VALUES ('2026-01', 'GB', 300, 3000);
+             INSERT INTO top_countries VALUES ('2026-01', 'DE', 200, 2000);",
+        )
+        .unwrap();
+
+        let rows = top_countries_sorted(&conn, "2026", 10, false, "hits").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].pct_fmt, "30.0%");
+        assert_eq!(rows[1].pct_fmt, "20.0%");
+    }
+}

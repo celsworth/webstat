@@ -146,6 +146,8 @@ struct TopUrlRow {
     hits_fmt: String,
     hits_exact_fmt: String,
     bandwidth_fmt: String,
+    pct_fmt: String,
+    bandwidth_pct_fmt: String,
     avg_ms_fmt: Option<String>,
     max_ms_fmt: Option<String>,
 }

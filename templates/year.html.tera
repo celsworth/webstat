@@ -183,8 +183,12 @@
         <tr>
           <td>{{ loop.index }}</td>
           <td class="url-cell">{{ row.url }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
+            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
+          </td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">
+            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
+          </td>
           <td class="num-col">{{ row.avg_ms_fmt | default(value="—") }}</td>
           <td class="num-col">{{ row.max_ms_fmt | default(value="—") }}</td>
         </tr>
@@ -205,8 +209,12 @@
         <tr>
           <td>{{ loop.index }}</td>
           <td class="url-cell">{{ row.url }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
+            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
+          </td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">
+            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
+          </td>
           <td class="num-col">{{ row.avg_ms_fmt | default(value="—") }}</td>
           <td class="num-col">{{ row.max_ms_fmt | default(value="—") }}</td>
         </tr>
@@ -225,7 +233,7 @@
         <th class="num-col">Bandwidth</th>
         <th class="num-col">Avg RT</th>
         <th class="num-col">Max RT</th>
-        /tr>
+        </tr>
       </thead>
       <tbody>
         {% for row in top_slow_urls %}
@@ -246,50 +254,60 @@
 {% endif %}
 
 {% if top_ips_hits | length > 0 or top_ips_bandwidth | length > 0 %}
-<div class="paired-tables-grid">
-{% if top_ips_hits | length > 0 %}
-<div class="stats-panel">
-  <table class="data-table stats-panel__table">
-    <thead>
-      <tr><th colspan="5" class="stats-panel__heading">Top Sites by Hits</th></tr>
-      <tr><th>#</th><th>Site</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
-    </thead>
-    <tbody>
-      {% for row in top_ips_hits %}
-      <tr>
-        <td>{{ loop.index }}</td>
-        <td>{{ row.host }}</td>
-        <td>{{ row.country_flag }} {{ row.country_name }}</td>
-        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
-        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
+<div class="stats-panel" data-tabs>
+  <div class="tab-group-header">
+    <span class="tab-group-title" data-tabs-title></span>
+    <div data-tabs-nav>
+      {% if top_ips_hits | length > 0 %}
+      <button class="tab-btn" data-tabs-target="top-ips-hits" data-tabs-label="Top Sites by Hits">Hits</button>
+      {% endif %}
+      {% if top_ips_bandwidth | length > 0 %}
+      <button class="tab-btn" data-tabs-target="top-ips-bandwidth" data-tabs-label="Top Sites by Bandwidth">Bandwidth</button>
+      {% endif %}
+    </div>
+  </div>
 
-{% if top_ips_bandwidth | length > 0 %}
-<div class="stats-panel">
-  <table class="data-table stats-panel__table">
-    <thead>
-      <tr><th colspan="5" class="stats-panel__heading">Top Sites by Bandwidth</th></tr>
-      <tr><th>#</th><th>Site</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
-    </thead>
-    <tbody>
-      {% for row in top_ips_bandwidth %}
-      <tr>
-        <td>{{ loop.index }}</td>
-        <td>{{ row.host }}</td>
-        <td>{{ row.country_flag }} {{ row.country_name }}</td>
-        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
-        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
+  {% if top_ips_hits | length > 0 %}
+  <div id="top-ips-hits" data-tabs-panel>
+    <table class="data-table stats-panel__table">
+      <thead>
+        <tr><th>#</th><th>Site</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
+      </thead>
+      <tbody>
+        {% for row in top_ips_hits %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ row.host }}</td>
+          <td>{{ row.country_flag }} {{ row.country_name }}</td>
+          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if top_ips_bandwidth | length > 0 %}
+  <div id="top-ips-bandwidth" data-tabs-panel>
+    <table class="data-table stats-panel__table">
+      <thead>
+        <tr><th>#</th><th>Site</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
+      </thead>
+      <tbody>
+        {% for row in top_ips_bandwidth %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ row.host }}</td>
+          <td>{{ row.country_flag }} {{ row.country_name }}</td>
+          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 </div>
 {% endif %}
 

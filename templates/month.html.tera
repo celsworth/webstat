@@ -255,20 +255,24 @@
 -->
 
 {% if top_agents_hits | length > 0 or top_agents_bandwidth | length > 0 %}
-<div class="paired-tables-grid">
+<div class="stats-panel" data-tabs>
+  <div class="tab-group-header">
+    <span class="tab-group-title" data-tabs-title></span>
+    <div data-tabs-nav>
+      {% if top_agents_hits | length > 0 %}
+      <button class="tab-btn" data-tabs-target="top-agents-hits" data-tabs-label="Browser Families by Hits">Hits</button>
+      {% endif %}
+      {% if top_agents_bandwidth | length > 0 %}
+      <button class="tab-btn" data-tabs-target="top-agents-bandwidth" data-tabs-label="Browser Families by Bandwidth">Bandwidth</button>
+      {% endif %}
+    </div>
+  </div>
+
   {% if top_agents_hits | length > 0 %}
-  <div class="stats-panel">
+  <div id="top-agents-hits" data-tabs-panel>
     <table class="data-table stats-panel__table">
       <thead>
-        <tr>
-          <th colspan="4" class="stats-panel__heading">Browser Families by Hits</th>
-        </tr>
-        <tr>
-          <th>#</th>
-          <th>Browser Family</th>
-          <th class="num-col">Hits</th>
-          <th class="num-col">Bandwidth</th>
-        </tr>
+        <tr><th>#</th><th>Browser Family</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
       </thead>
       <tbody>
         {% for row in top_agents_hits %}
@@ -287,19 +291,12 @@
     </table>
   </div>
   {% endif %}
+
   {% if top_agents_bandwidth | length > 0 %}
-  <div class="stats-panel">
+  <div id="top-agents-bandwidth" data-tabs-panel>
     <table class="data-table stats-panel__table">
       <thead>
-        <tr>
-          <th colspan="4" class="stats-panel__heading">Browser Families by Bandwidth</th>
-        </tr>
-        <tr>
-          <th>#</th>
-          <th>Browser Family</th>
-          <th class="num-col">Hits</th>
-          <th class="num-col">Bandwidth</th>
-        </tr>
+        <tr><th>#</th><th>Browser Family</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
       </thead>
       <tbody>
         {% for row in top_agents_bandwidth %}
@@ -322,20 +319,24 @@
 {% endif %}
 
 {% if top_countries_hits | length > 0 or top_countries_bandwidth | length > 0 %}
-<div class="paired-tables-grid">
+<div class="stats-panel" data-tabs>
+  <div class="tab-group-header">
+    <span class="tab-group-title" data-tabs-title></span>
+    <div data-tabs-nav>
+      {% if top_countries_hits | length > 0 %}
+      <button class="tab-btn" data-tabs-target="top-countries-hits" data-tabs-label="Top Countries by Hits">Hits</button>
+      {% endif %}
+      {% if top_countries_bandwidth | length > 0 %}
+      <button class="tab-btn" data-tabs-target="top-countries-bandwidth" data-tabs-label="Top Countries by Bandwidth">Bandwidth</button>
+      {% endif %}
+    </div>
+  </div>
+
   {% if top_countries_hits | length > 0 %}
-  <div class="stats-panel">
+  <div id="top-countries-hits" data-tabs-panel>
     <table class="data-table stats-panel__table">
       <thead>
-        <tr>
-          <th colspan="4" class="stats-panel__heading">Top Countries by Hits</th>
-        </tr>
-        <tr>
-          <th>#</th>
-          <th>Country</th>
-          <th class="num-col">Hits</th>
-          <th class="num-col">Bandwidth</th>
-        </tr>
+        <tr><th>#</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
       </thead>
       <tbody>
         {% for row in top_countries_hits %}
@@ -354,19 +355,12 @@
     </table>
   </div>
   {% endif %}
+
   {% if top_countries_bandwidth | length > 0 %}
-  <div class="stats-panel">
+  <div id="top-countries-bandwidth" data-tabs-panel>
     <table class="data-table stats-panel__table">
       <thead>
-        <tr>
-          <th colspan="4" class="stats-panel__heading">Top Countries by Bandwidth</th>
-        </tr>
-        <tr>
-          <th>#</th>
-          <th>Country</th>
-          <th class="num-col">Hits</th>
-          <th class="num-col">Bandwidth</th>
-        </tr>
+        <tr><th>#</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
       </thead>
       <tbody>
         {% for row in top_countries_bandwidth %}
@@ -438,9 +432,11 @@
           <td>{{ loop.index }}</td>
           <td class="url-cell">{{ row.url }}</td>
           <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
-            {{ row.hits_fmt }}
+            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
           </td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">
+            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
+          </td>
           <td class="num-col">{{ row.avg_ms_fmt | default(value="—") }}</td>
           <td class="num-col">{{ row.max_ms_fmt | default(value="—") }}</td>
         </tr>
@@ -469,9 +465,11 @@
           <td>{{ loop.index }}</td>
           <td class="url-cell">{{ row.url }}</td>
           <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
-            {{ row.hits_fmt }}
+            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
           </td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">
+            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
+          </td>
           <td class="num-col">{{ row.avg_ms_fmt | default(value="—") }}</td>
           <td class="num-col">{{ row.max_ms_fmt | default(value="—") }}</td>
         </tr>
@@ -515,21 +513,24 @@
 {% endif %}
 
 {% if top_ips_hits | length > 0 or top_ips_bandwidth | length > 0 %}
-<div class="paired-tables-grid">
+<div class="stats-panel" data-tabs>
+  <div class="tab-group-header">
+    <span class="tab-group-title" data-tabs-title></span>
+    <div data-tabs-nav>
+      {% if top_ips_hits | length > 0 %}
+      <button class="tab-btn" data-tabs-target="top-ips-hits" data-tabs-label="Top Sites by Hits">Hits</button>
+      {% endif %}
+      {% if top_ips_bandwidth | length > 0 %}
+      <button class="tab-btn" data-tabs-target="top-ips-bandwidth" data-tabs-label="Top Sites by Bandwidth">Bandwidth</button>
+      {% endif %}
+    </div>
+  </div>
+
   {% if top_ips_hits | length > 0 %}
-  <div class="stats-panel">
+  <div id="top-ips-hits" data-tabs-panel>
     <table class="data-table stats-panel__table">
       <thead>
-        <tr>
-          <th colspan="5" class="stats-panel__heading">Top Sites by Hits</th>
-        </tr>
-        <tr>
-          <th>#</th>
-          <th>Site</th>
-          <th>Country</th>
-          <th class="num-col">Hits</th>
-          <th class="num-col">Bandwidth</th>
-        </tr>
+        <tr><th>#</th><th>Site</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
       </thead>
       <tbody>
         {% for row in top_ips_hits %}
@@ -537,9 +538,7 @@
           <td>{{ loop.index }}</td>
           <td>{{ row.host }}</td>
           <td>{{ row.country_flag }} {{ row.country_name }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
-            {{ row.hits_fmt }}
-          </td>
+          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
           <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
         </tr>
         {% endfor %}
@@ -547,20 +546,12 @@
     </table>
   </div>
   {% endif %}
+
   {% if top_ips_bandwidth | length > 0 %}
-  <div class="stats-panel">
+  <div id="top-ips-bandwidth" data-tabs-panel>
     <table class="data-table stats-panel__table">
       <thead>
-        <tr>
-          <th colspan="5" class="stats-panel__heading">Top Sites by Bandwidth</th>
-        </tr>
-        <tr>
-          <th>#</th>
-          <th>Site</th>
-          <th>Country</th>
-          <th class="num-col">Hits</th>
-          <th class="num-col">Bandwidth</th>
-        </tr>
+        <tr><th>#</th><th>Site</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr>
       </thead>
       <tbody>
         {% for row in top_ips_bandwidth %}
@@ -568,9 +559,7 @@
           <td>{{ loop.index }}</td>
           <td>{{ row.host }}</td>
           <td>{{ row.country_flag }} {{ row.country_name }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
-            {{ row.hits_fmt }}
-          </td>
+          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
           <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
         </tr>
         {% endfor %}

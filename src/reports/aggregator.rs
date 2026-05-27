@@ -28,8 +28,32 @@ fn period_clause(period: &str) -> (&'static str, String) {
     }
 }
 
-fn build_status_rows(raw: Vec<(u16, u64)>, compact_counts: bool) -> Vec<StatusRow> {
-    let total = raw.iter().map(|(_, hits)| *hits).sum::<u64>() as f64;
+/// Returns (total_hits, total_bandwidth) for a period from hourly_stats.
+/// Works for both monthly ("YYYY-MM") and yearly ("YYYY") periods.
+fn period_hits_bw_totals(conn: &Connection, period: &str) -> Result<(f64, f64)> {
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(SUM(hits), 0), COALESCE(SUM(bandwidth), 0)
+         FROM hourly_stats
+         WHERE date LIKE ?1",
+    )?;
+    let (hits, bw) = stmt.query_row(params![format!("{period}-%")], |row| {
+        Ok((row.get::<_, i64>(0)? as f64, row.get::<_, i64>(1)? as f64))
+    })?;
+    Ok((hits, bw))
+}
+
+/// Returns (total_hits, total_bandwidth) across all time from hourly_stats.
+fn all_time_hits_bw_totals(conn: &Connection) -> Result<(f64, f64)> {
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(SUM(hits), 0), COALESCE(SUM(bandwidth), 0) FROM hourly_stats",
+    )?;
+    let (hits, bw) = stmt.query_row([], |row| {
+        Ok((row.get::<_, i64>(0)? as f64, row.get::<_, i64>(1)? as f64))
+    })?;
+    Ok((hits, bw))
+}
+
+fn build_status_rows(raw: Vec<(u16, u64)>, compact_counts: bool, total: f64) -> Vec<StatusRow> {
     raw.into_iter()
         .map(|(status, hits)| StatusRow {
             status,
@@ -782,7 +806,7 @@ fn top_urls_sorted(
         format!(
             "SELECT url, SUM(hits), SUM(bandwidth), SUM(rt_sum), SUM(rt_count), MAX(rt_max) \
              FROM top_urls WHERE period {op} \
-             GROUP BY url ORDER BY {order_col} DESC LIMIT ?2"
+             GROUP BY url ORDER BY SUM({order_col}) DESC LIMIT ?2"
         )
     };
 
@@ -800,6 +824,7 @@ fn top_urls_sorted(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
+    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
     rows.into_iter()
         .map(|(url, hits, bandwidth, rt_sum, rt_count, rt_max)| {
             let (avg_ms_fmt, max_ms_fmt) = rt_display(rt_sum, rt_count, rt_max);
@@ -810,6 +835,8 @@ fn top_urls_sorted(
                 hits_fmt: count_fmt(hits, compact_counts),
                 hits_exact_fmt: super::number_fmt(hits),
                 bandwidth_fmt: format_bytes(bandwidth),
+                pct_fmt: percent_str(hits as f64, hits_total),
+                bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
                 avg_ms_fmt,
                 max_ms_fmt,
             })
@@ -996,7 +1023,8 @@ fn top_agents_sorted(
             ))
         })?
         .collect::<rusqlite::Result<_>>()?;
-    Ok(build_agent_rows(raw, compact_counts))
+    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
+    Ok(build_agent_rows(raw, compact_counts, hits_total, bw_total))
 }
 
 fn top_agents_sorted_all(
@@ -1025,12 +1053,11 @@ fn top_agents_sorted_all(
             ))
         })?
         .collect::<rusqlite::Result<_>>()?;
-    Ok(build_agent_rows(raw, compact_counts))
+    let (hits_total, bw_total) = all_time_hits_bw_totals(conn)?;
+    Ok(build_agent_rows(raw, compact_counts, hits_total, bw_total))
 }
 
-fn build_agent_rows(raw: Vec<(String, u64, u64)>, compact_counts: bool) -> Vec<TopAgentRow> {
-    let hits_total = raw.iter().map(|(_, h, _)| *h).sum::<u64>() as f64;
-    let bw_total = raw.iter().map(|(_, _, b)| *b).sum::<u64>() as f64;
+fn build_agent_rows(raw: Vec<(String, u64, u64)>, compact_counts: bool, hits_total: f64, bw_total: f64) -> Vec<TopAgentRow> {
     raw.into_iter()
         .map(|(agent, hits, bandwidth)| TopAgentRow {
             agent,
@@ -1079,7 +1106,8 @@ fn top_countries_sorted(
             ))
         })?
         .collect::<rusqlite::Result<_>>()?;
-    Ok(build_country_rows(raw, compact_counts))
+    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
+    Ok(build_country_rows(raw, compact_counts, hits_total, bw_total))
 }
 
 fn top_countries_sorted_all(
@@ -1117,12 +1145,11 @@ fn top_countries_sorted_all(
             ))
         })?
         .collect::<rusqlite::Result<_>>()?;
-    Ok(build_country_rows(raw, compact_counts))
+    let (hits_total, bw_total) = all_time_hits_bw_totals(conn)?;
+    Ok(build_country_rows(raw, compact_counts, hits_total, bw_total))
 }
 
-fn build_country_rows(raw: Vec<(String, String, u64, u64)>, compact_counts: bool) -> Vec<TopCountryRow> {
-    let hits_total = raw.iter().map(|(_, _, h, _)| *h).sum::<u64>() as f64;
-    let bw_total = raw.iter().map(|(_, _, _, b)| *b).sum::<u64>() as f64;
+fn build_country_rows(raw: Vec<(String, String, u64, u64)>, compact_counts: bool, hits_total: f64, bw_total: f64) -> Vec<TopCountryRow> {
     raw.into_iter()
         .map(|(country_code, country_name, hits, bandwidth)| TopCountryRow {
             country_flag: flag_emoji(&country_code),
@@ -1158,7 +1185,8 @@ fn status_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result
     for row in rows {
         raw.push(row?);
     }
-    Ok(build_status_rows(raw, compact_counts))
+    let (total, _) = period_hits_bw_totals(conn, period)?;
+    Ok(build_status_rows(raw, compact_counts, total))
 }
 
 fn status_codes_all(conn: &Connection, compact_counts: bool) -> Result<Vec<StatusRow>> {
@@ -1177,7 +1205,8 @@ fn status_codes_all(conn: &Connection, compact_counts: bool) -> Result<Vec<Statu
     for row in rows {
         raw.push(row?);
     }
-    Ok(build_status_rows(raw, compact_counts))
+    let (total, _) = all_time_hits_bw_totals(conn)?;
+    Ok(build_status_rows(raw, compact_counts, total))
 }
 
 fn proto_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result<Vec<ProtoRow>> {
@@ -1200,7 +1229,7 @@ fn proto_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result<
         raw.push(row?);
     }
 
-    let total = raw.iter().map(|(_, hits)| *hits).sum::<u64>() as f64;
+    let (total, _) = period_hits_bw_totals(conn, period)?;
     let out = raw
         .into_iter()
         .map(|(proto, hits)| ProtoRow {
@@ -1234,7 +1263,7 @@ fn method_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result
         raw.push(row?);
     }
 
-    let total = raw.iter().map(|(_, hits)| *hits).sum::<u64>() as f64;
+    let (total, _) = period_hits_bw_totals(conn, period)?;
     let out = raw
         .into_iter()
         .map(|(method, hits)| MethodRow {
@@ -1556,6 +1585,7 @@ fn top_urls_avg_rt(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
+    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
     rows.into_iter()
         .map(|(url, hits, bandwidth, rt_sum, rt_count, rt_max)| {
             let (avg_ms_fmt, max_ms_fmt) = rt_display(rt_sum, rt_count, rt_max);
@@ -1566,6 +1596,8 @@ fn top_urls_avg_rt(
                 hits_fmt: count_fmt(hits, compact_counts),
                 hits_exact_fmt: super::number_fmt(hits),
                 bandwidth_fmt: format_bytes(bandwidth),
+                pct_fmt: percent_str(hits as f64, hits_total),
+                bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
                 avg_ms_fmt,
                 max_ms_fmt,
             })
