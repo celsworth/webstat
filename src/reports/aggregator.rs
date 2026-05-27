@@ -853,13 +853,13 @@ fn top_urls_sorted(
     let sql = if is_monthly {
         format!(
             "SELECT url, hits, bandwidth, rt_sum, rt_count, rt_max \
-             FROM monthly_top_urls WHERE period {op} \
+             FROM top_urls WHERE period {op} \
              ORDER BY {order_col} DESC LIMIT ?2"
         )
     } else {
         format!(
             "SELECT url, SUM(hits), SUM(bandwidth), SUM(rt_sum), SUM(rt_count), MAX(rt_max) \
-             FROM monthly_top_urls WHERE period {op} \
+             FROM top_urls WHERE period {op} \
              GROUP BY url ORDER BY {order_col} DESC LIMIT ?2"
         )
     };
@@ -940,7 +940,7 @@ fn top_ips_sorted(
                 SUM(t.hits) AS hits, SUM(t.bandwidth) AS bandwidth,
                 COALESCE(MAX(t.country_code), '--'),
                 COALESCE(MAX(cn.country_name), 'Unknown')
-         FROM monthly_top_ips t
+         FROM top_ips t
          LEFT JOIN countries cn ON cn.country_code = t.country_code
          WHERE t.period {op}
          GROUP BY t.host_kind, t.host_hi, t.host_lo
@@ -1020,7 +1020,7 @@ fn top_refs(
     let (op, param) = period_clause(period);
     let sql = format!(
         "SELECT referrer, SUM(hits) AS hits
-         FROM monthly_referrers
+         FROM top_referrers
          WHERE period {op}
          GROUP BY referrer
          ORDER BY hits DESC
@@ -1049,7 +1049,7 @@ fn top_agents_raw(conn: &Connection, period: &str, top_n: usize) -> Result<Vec<(
     let (op, param) = period_clause(period);
     let sql = format!(
         "SELECT agent_family, SUM(hits) AS hits
-         FROM monthly_agents
+         FROM top_agents
          WHERE period {op}
          GROUP BY agent_family
          ORDER BY hits DESC
@@ -1071,7 +1071,7 @@ fn top_agents_raw(conn: &Connection, period: &str, top_n: usize) -> Result<Vec<(
 fn top_agents_all_raw(conn: &Connection, top_n: usize) -> Result<Vec<(String, u64)>> {
     let mut stmt = conn.prepare(
         "SELECT agent_family, SUM(hits) AS hits
-         FROM monthly_agents
+         FROM top_agents
          GROUP BY agent_family
          ORDER BY hits DESC
          LIMIT ?1",
@@ -1545,13 +1545,13 @@ fn top_urls_avg_rt(
     let sql = if period.len() == 7 {
         format!(
             "SELECT url, hits, bandwidth, rt_sum, rt_count, rt_max \
-             FROM monthly_top_urls WHERE period {op} AND rt_count>0 \
+             FROM top_urls WHERE period {op} AND rt_count>0 \
              ORDER BY rt_sum*1.0/rt_count DESC LIMIT ?2"
         )
     } else {
         format!(
             "SELECT url, SUM(hits), SUM(bandwidth), SUM(rt_sum), SUM(rt_count), MAX(rt_max) \
-             FROM monthly_top_urls WHERE period {op} \
+             FROM top_urls WHERE period {op} \
              GROUP BY url HAVING SUM(rt_count)>0 \
              ORDER BY SUM(rt_sum)*1.0/SUM(rt_count) DESC LIMIT ?2"
         )

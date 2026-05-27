@@ -386,7 +386,7 @@ mod tests {
         let url_count: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_top_urls WHERE period='2026-05'",
+                "SELECT COUNT(*) FROM top_urls WHERE period='2026-05'",
                 [],
                 |r| r.get(0),
             )

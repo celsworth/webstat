@@ -681,7 +681,7 @@ mod tests {
 
         let (month_hits, month_bw): (i64, i64) = conn
             .query_row(
-                "SELECT hits, bandwidth FROM monthly_top_urls WHERE period = '2026-05' AND url = '/popular.html'",
+                "SELECT hits, bandwidth FROM top_urls WHERE period = '2026-05' AND url = '/popular.html'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -784,7 +784,7 @@ mod tests {
         // Hidden URLs must not appear in top URLs.
         let hidden_url_rows: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_top_urls WHERE url LIKE '/static/%'",
+                "SELECT COUNT(*) FROM top_urls WHERE url LIKE '/static/%'",
                 [],
                 |row| row.get(0),
             )
@@ -797,7 +797,7 @@ mod tests {
         // The visible URL must appear normally.
         let visible_hits: i64 = conn
             .query_row(
-                "SELECT COALESCE(SUM(hits), 0) FROM monthly_top_urls WHERE url = '/page.html'",
+                "SELECT COALESCE(SUM(hits), 0) FROM top_urls WHERE url = '/page.html'",
                 [],
                 |row| row.get(0),
             )
@@ -836,21 +836,21 @@ mod tests {
         let conn = Connection::open(&db_path).expect("open db");
         let agent_rows: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_agents WHERE period = '2026-05'",
+                "SELECT COUNT(*) FROM top_agents WHERE period = '2026-05'",
                 [],
                 |row| row.get(0),
             )
             .expect("count agent rows");
-        assert!(agent_rows > 0, "enable_top_agents=true must populate monthly_agents");
+        assert!(agent_rows > 0, "enable_top_agents=true must populate top_agents");
 
         let total_hits: i64 = conn
             .query_row(
-                "SELECT COALESCE(SUM(hits), 0) FROM monthly_agents WHERE period = '2026-05'",
+                "SELECT COALESCE(SUM(hits), 0) FROM top_agents WHERE period = '2026-05'",
                 [],
                 |row| row.get(0),
             )
             .expect("sum agent hits");
-        assert_eq!(total_hits, 3, "all 3 entries should be counted in monthly_agents");
+        assert_eq!(total_hits, 3, "all 3 entries should be counted in top_agents");
     }
 
     #[test]
@@ -879,15 +879,15 @@ mod tests {
             .expect("sum hourly hits");
         assert_eq!(hits, 3, "hits must be recorded regardless of enable_top_agents");
 
-        // But monthly_agents must remain empty.
+        // But top_agents must remain empty.
         let agent_rows: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_agents WHERE period = '2026-05'",
+                "SELECT COUNT(*) FROM top_agents WHERE period = '2026-05'",
                 [],
                 |row| row.get(0),
             )
             .expect("count agent rows");
-        assert_eq!(agent_rows, 0, "enable_top_agents=false must not populate monthly_agents");
+        assert_eq!(agent_rows, 0, "enable_top_agents=false must not populate top_agents");
     }
 
     #[test]
@@ -922,7 +922,7 @@ mod tests {
         // Hidden referrer must not appear; visible one must.
         let hidden_ref: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_referrers WHERE referrer LIKE '%hidden-ref%'",
+                "SELECT COUNT(*) FROM top_referrers WHERE referrer LIKE '%hidden-ref%'",
                 [],
                 |row| row.get(0),
             )
@@ -934,7 +934,7 @@ mod tests {
 
         let visible_ref: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_referrers WHERE referrer LIKE '%visible-ref%'",
+                "SELECT COUNT(*) FROM top_referrers WHERE referrer LIKE '%visible-ref%'",
                 [],
                 |row| row.get(0),
             )
@@ -947,7 +947,7 @@ mod tests {
         // Exactly one host row (the visible entry); the hidden one must be absent.
         let host_rows: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_top_ips WHERE period = '2026-05'",
+                "SELECT COUNT(*) FROM top_ips WHERE period = '2026-05'",
                 [],
                 |row| row.get(0),
             )

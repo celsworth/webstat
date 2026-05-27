@@ -139,9 +139,9 @@ impl Database {
             }
         }
 
-        // monthly_top_urls — unified hits/bandwidth/rt
+        // top_urls — unified hits/bandwidth/rt
         if !data.url_stats.is_empty() {
-            let sql = "INSERT INTO monthly_top_urls \
+            let sql = "INSERT INTO top_urls \
                        (period,url,hits,bandwidth,rt_sum,rt_count,rt_max) \
                        VALUES (?1,?2,?3,?4,?5,?6,?7) \
                        ON CONFLICT (period,url) DO UPDATE SET \
@@ -166,9 +166,9 @@ impl Database {
 
         let unknown_geo: (Arc<str>, Arc<str>) = (Arc::from("--"), Arc::from("Unknown"));
 
-        // monthly_top_ips
+        // top_ips
         if !data.hosts.is_empty() {
-            let sql = "INSERT INTO monthly_top_ips \
+            let sql = "INSERT INTO top_ips \
                        (period,host_kind,host_hi,host_lo,hits,bandwidth,country_code) \
                        VALUES (?1,?2,?3,?4,?5,?6,?7) \
                        ON CONFLICT (period,host_kind,host_hi,host_lo) DO UPDATE SET \
@@ -202,9 +202,9 @@ impl Database {
             }
         }
 
-        // monthly_referrers
+        // top_referrers
         if !data.refs.is_empty() {
-            let sql = "INSERT INTO monthly_referrers (period,referrer,hits) VALUES (?1,?2,?3) \
+            let sql = "INSERT INTO top_referrers (period,referrer,hits) VALUES (?1,?2,?3) \
                        ON CONFLICT (period,referrer) DO UPDATE SET hits=hits+excluded.hits";
             let mut stmt = tx.prepare_cached(sql)?;
             for (referrer, hits) in data.refs {
@@ -212,9 +212,9 @@ impl Database {
             }
         }
 
-        // monthly_agents
+        // top_agents
         if !data.agents.is_empty() {
-            let sql = "INSERT INTO monthly_agents (period,agent_family,hits) VALUES (?1,?2,?3) \
+            let sql = "INSERT INTO top_agents (period,agent_family,hits) VALUES (?1,?2,?3) \
                        ON CONFLICT (period,agent_family) DO UPDATE SET hits=hits+excluded.hits";
             let mut stmt = tx.prepare_cached(sql)?;
             for (agent, hits) in data.agents {
@@ -607,27 +607,30 @@ impl Database {
 
         if top_n > 0 {
             tx.execute(
-                "DELETE FROM monthly_top_urls \
+                "DELETE FROM top_urls \
                  WHERE period=?1 \
-                 AND url NOT IN (SELECT url FROM monthly_top_urls WHERE period=?1 ORDER BY hits DESC LIMIT ?2) \
-                 AND url NOT IN (SELECT url FROM monthly_top_urls WHERE period=?1 ORDER BY bandwidth DESC LIMIT ?2) \
-                 AND url NOT IN (SELECT url FROM monthly_top_urls WHERE period=?1 AND rt_count>0 ORDER BY rt_sum*1.0/rt_count DESC LIMIT ?2)",
+                 AND url NOT IN (SELECT url FROM top_urls WHERE period=?1 ORDER BY hits DESC LIMIT ?2) \
+                 AND url NOT IN (SELECT url FROM top_urls WHERE period=?1 ORDER BY bandwidth DESC LIMIT ?2) \
+                 AND url NOT IN (SELECT url FROM top_urls WHERE period=?1 AND rt_count>0 ORDER BY rt_sum*1.0/rt_count DESC LIMIT ?2)",
                 params![period, top_n as i64],
             )?;
         }
 
         if top_n > 0 {
             tx.execute(
-                "DELETE FROM monthly_top_ips \
+                "DELETE FROM top_ips \
                  WHERE period=?1 \
-                 AND (host_kind,host_hi,host_lo) NOT IN (SELECT host_kind,host_hi,host_lo FROM monthly_top_ips WHERE period=?1 ORDER BY hits DESC LIMIT ?2) \
-                 AND (host_kind,host_hi,host_lo) NOT IN (SELECT host_kind,host_hi,host_lo FROM monthly_top_ips WHERE period=?1 ORDER BY bandwidth DESC LIMIT ?2)",
+                 AND (host_kind,host_hi,host_lo) NOT IN (SELECT host_kind,host_hi,host_lo FROM top_ips WHERE period=?1 ORDER BY hits DESC LIMIT ?2) \
+                 AND (host_kind,host_hi,host_lo) NOT IN (SELECT host_kind,host_hi,host_lo FROM top_ips WHERE period=?1 ORDER BY bandwidth DESC LIMIT ?2)",
                 params![period, top_n as i64],
             )?;
         }
 
-        for (table, col) in [("monthly_referrers", "hits"), ("monthly_agents", "hits")] {
-            Self::prune_monthly_table(&tx, table, period, col, top_n)?;
+        for (table, key_col, order_col) in [
+            ("top_referrers", "referrer", "hits"),
+            ("top_agents", "agent_family", "hits"),
+        ] {
+            Self::prune_monthly_table(&tx, table, key_col, period, order_col, top_n)?;
         }
 
         tx.execute(
@@ -650,6 +653,7 @@ impl Database {
     fn prune_monthly_table(
         tx: &rusqlite::Transaction<'_>,
         table: &str,
+        key_col: &str,
         period: &str,
         order_col: &str,
         top_n: usize,
@@ -657,8 +661,8 @@ impl Database {
         let sql = format!(
             "DELETE FROM {table} \
              WHERE period = ?1 \
-             AND rowid NOT IN ( \
-               SELECT rowid FROM {table} \
+             AND {key_col} NOT IN ( \
+               SELECT {key_col} FROM {table} \
                WHERE period = ?1 \
                ORDER BY {order_col} DESC \
                LIMIT ?2 \

@@ -53,10 +53,10 @@ pub fn rollback(db: &mut Database, target_month: &str, dry_run: bool) -> Result<
 
     // ── Monthly aggregated tables ─────────────────────────────────────────────
     for table in &[
-        "monthly_top_urls",
-        "monthly_top_ips",
-        "monthly_referrers",
-        "monthly_agents",
+        "top_urls",
+        "top_ips",
+        "top_referrers",
+        "top_agents",
         "status_codes",
         "method_counts",
         "protocol_counts",
@@ -285,7 +285,7 @@ fn print_dry_run(
         |r| r.get(0),
     )?;
     let monthly_url_rows: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM monthly_top_urls WHERE period >= ?1",
+        "SELECT COUNT(*) FROM top_urls WHERE period >= ?1",
         params![target_month],
         |r| r.get(0),
     )?;
@@ -312,7 +312,7 @@ fn print_dry_run(
 
     println!("Dry run — rollback to start of {target_month} (unix ts {rollback_ts})");
     println!("  hourly_stats rows to delete:         {hourly_rows}");
-    println!("  monthly_top_urls rows to delete:     {monthly_url_rows}");
+    println!("  top_urls rows to delete:     {monthly_url_rows}");
     println!("  monthly_unique_ips rows to delete:   {monthly_bitmaps}");
     println!("  visit_state rows to delete:          {visit_rows}");
     println!("  parse_state entries to reset:        {ps_rows}");

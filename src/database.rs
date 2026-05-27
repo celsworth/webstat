@@ -93,8 +93,8 @@ CREATE TABLE IF NOT EXISTS hourly_stats (
     status_4xx INTEGER DEFAULT 0,
     status_5xx INTEGER DEFAULT 0,
     PRIMARY KEY (date, hour)
-);
-CREATE TABLE IF NOT EXISTS monthly_top_urls (
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS top_urls (
     period    TEXT    NOT NULL,
     url       TEXT    NOT NULL,
     hits      INTEGER NOT NULL DEFAULT 0,
@@ -103,8 +103,8 @@ CREATE TABLE IF NOT EXISTS monthly_top_urls (
     rt_count  INTEGER NOT NULL DEFAULT 0,
     rt_max    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, url)
-);
-CREATE TABLE IF NOT EXISTS monthly_top_ips (
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS top_ips (
     period       TEXT    NOT NULL,
     host_kind    INTEGER NOT NULL,
     host_hi      INTEGER NOT NULL,
@@ -113,43 +113,43 @@ CREATE TABLE IF NOT EXISTS monthly_top_ips (
     bandwidth    INTEGER NOT NULL DEFAULT 0,
     country_code TEXT    NOT NULL DEFAULT '--',
     PRIMARY KEY (period, host_kind, host_hi, host_lo)
-);
-CREATE TABLE IF NOT EXISTS monthly_referrers (
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS top_referrers (
     period   TEXT NOT NULL,
     referrer TEXT NOT NULL,
     hits     INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, referrer)
-);
-CREATE TABLE IF NOT EXISTS monthly_agents (
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS top_agents (
     period       TEXT NOT NULL,
     agent_family TEXT NOT NULL,
     hits         INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, agent_family)
-);
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS top_countries (
-    period       TEXT,
-    country_code TEXT,
-    hits         INTEGER DEFAULT 0,
+    period       TEXT    NOT NULL,
+    country_code TEXT    NOT NULL,
+    hits         INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, country_code)
-);
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS status_codes (
-    period TEXT,
-    status INTEGER,
-    hits   INTEGER DEFAULT 0,
+    period TEXT    NOT NULL,
+    status INTEGER NOT NULL,
+    hits   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, status)
-);
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS method_counts (
-    period TEXT,
-    method TEXT,
-    hits   INTEGER DEFAULT 0,
+    period TEXT NOT NULL,
+    method TEXT NOT NULL,
+    hits   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, method)
-);
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS protocol_counts (
-    period TEXT,
-    proto  TEXT,
-    hits   INTEGER DEFAULT 0,
+    period TEXT NOT NULL,
+    proto  TEXT NOT NULL,
+    hits   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, proto)
-);
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS daily_unique_ips (
     date    TEXT    NOT NULL,
     ip_kind INTEGER NOT NULL,
