@@ -29,11 +29,12 @@ mod tests {
                  bitmap  BLOB    NOT NULL,
                  PRIMARY KEY (date, ip_kind, ip_hi)
              );
-             CREATE TABLE all_time_ips (
+             CREATE TABLE monthly_unique_ips (
+                 period  TEXT    NOT NULL,
                  ip_kind INTEGER NOT NULL,
-                 ip_hi   INTEGER NOT NULL,
+                 ip_hi   INTEGER NOT NULL DEFAULT 0,
                  bitmap  BLOB    NOT NULL,
-                 PRIMARY KEY (ip_kind, ip_hi)
+                 PRIMARY KEY (period, ip_kind, ip_hi)
              );
              CREATE TABLE countries (
                  country_code TEXT PRIMARY KEY,
@@ -47,13 +48,7 @@ mod tests {
                  date  TEXT PRIMARY KEY,
                  count INTEGER NOT NULL DEFAULT 0
              );
-             CREATE TABLE yearly_unique_ips (
-                 year    TEXT    NOT NULL,
-                 ip_kind INTEGER NOT NULL,
-                 ip_hi   INTEGER NOT NULL,
-                 bitmap  BLOB    NOT NULL,
-                 PRIMARY KEY (year, ip_kind, ip_hi)
-             );",
+             ",
         )
         .expect("create test schema");
         conn
@@ -97,14 +92,14 @@ mod tests {
         .expect("insert daily ip");
     }
 
-    /// Insert a single IPv4 address into yearly_unique_ips, merging with any existing bitmap.
-    fn insert_yearly_ip(conn: &Connection, year: &str, ip_lo: u32) {
+    /// Insert a single IPv4 address into monthly_unique_ips, merging with any existing bitmap.
+    fn insert_monthly_ip(conn: &Connection, period: &str, ip_lo: u32) {
         use roaring::RoaringBitmap;
         use rusqlite::OptionalExtension;
         let existing: Option<Vec<u8>> = conn
             .query_row(
-                "SELECT bitmap FROM yearly_unique_ips WHERE year=?1 AND ip_kind=1 AND ip_hi=0",
-                params![year],
+                "SELECT bitmap FROM monthly_unique_ips WHERE period=?1 AND ip_kind=1 AND ip_hi=0",
+                params![period],
                 |r| r.get(0),
             )
             .optional()
@@ -117,11 +112,11 @@ mod tests {
         let mut buf = Vec::new();
         bm.serialize_into(&mut buf).expect("serialize");
         conn.execute(
-            "INSERT OR REPLACE INTO yearly_unique_ips (year, ip_kind, ip_hi, bitmap) \
+            "INSERT OR REPLACE INTO monthly_unique_ips (period, ip_kind, ip_hi, bitmap) \
              VALUES (?1, 1, 0, ?2)",
-            params![year, buf],
+            params![period, buf],
         )
-        .expect("insert yearly ip");
+        .expect("insert monthly ip");
     }
 
     fn finalize_unique_visitor_counts(conn: &Connection, period: &str) {
@@ -187,49 +182,43 @@ mod tests {
     #[test]
     fn visitor_count_for_scope_yearly_fallback_to_yearly_unique_ips_and_daily_unique_ips() {
         let conn = setup_conn();
-        // Finalized months in yearly_unique_ips
-        insert_yearly_ip(&conn, "2026", 10);
-        insert_yearly_ip(&conn, "2026", 20);
+        // Finalized months in monthly_unique_ips
+        insert_monthly_ip(&conn, "2026-03", 10);
+        insert_monthly_ip(&conn, "2026-04", 20);
         // In-progress month still in daily_unique_ips
         insert_daily_ip(&conn, "2026-05-01", 30);
         // no cache entry — simulates in-progress year
 
         let visitors = yearly_visitor_count(&conn, "2026").expect("yearly fallback");
-        assert_eq!(visitors, 3, "should union yearly_unique_ips and daily_unique_ips");
+        assert_eq!(visitors, 3, "should union monthly_unique_ips and daily_unique_ips");
     }
 
     #[test]
     fn visitor_count_for_scope_yearly_fallback_deduplicates_across_sources() {
         let conn = setup_conn();
-        // IP 10 appears in both yearly_unique_ips (prior months) and daily_unique_ips (current month)
-        insert_yearly_ip(&conn, "2026", 10);
-        insert_yearly_ip(&conn, "2026", 20);
-        insert_daily_ip(&conn, "2026-05-01", 10); // duplicate of yearly ip 10
+        // IP 10 appears in both monthly_unique_ips (prior months) and daily_unique_ips (current month)
+        insert_monthly_ip(&conn, "2026-03", 10);
+        insert_monthly_ip(&conn, "2026-04", 20);
+        insert_daily_ip(&conn, "2026-05-01", 10); // duplicate of monthly ip 10
         insert_daily_ip(&conn, "2026-05-01", 30);
 
         let visitors = yearly_visitor_count(&conn, "2026").expect("yearly dedup");
         assert_eq!(
             visitors, 3,
-            "should deduplicate ip 10 across yearly_unique_ips and daily_unique_ips"
+            "should deduplicate ip 10 across monthly_unique_ips and daily_unique_ips"
         );
     }
 
     #[test]
-    fn overall_totals_uses_all_time_ips() {
+    fn overall_totals_uses_monthly_unique_ips() {
         let conn = setup_conn();
         insert_hourly(&conn, "2026-05-01", 0, 100, 10);
 
-        // Insert a bitmap with 2 IPv4 addresses into all_time_ips.
-        let mut bm = roaring::RoaringBitmap::new();
-        bm.insert(1);
-        bm.insert(2);
-        let mut buf = Vec::new();
-        bm.serialize_into(&mut buf).expect("serialize");
-        conn.execute(
-            "INSERT INTO all_time_ips (ip_kind, ip_hi, bitmap) VALUES (1, 0, ?1)",
-            params![buf],
-        )
-        .expect("insert all_time");
+        // Insert bitmaps with IPv4 addresses into monthly_unique_ips across two months.
+        insert_monthly_ip(&conn, "2026-04", 1);
+        insert_monthly_ip(&conn, "2026-05", 2);
+        // Also insert ip 1 in the current month — should be deduplicated.
+        insert_monthly_ip(&conn, "2026-05", 1);
 
         let totals = overall_totals(&conn, false).expect("overall totals");
         assert_eq!(totals.visitors, 2);

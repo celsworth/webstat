@@ -9,7 +9,7 @@ use crate::aggregator::messages::{
     pop_blocking, push_blocking, LoaderMsg, ParsedEntry, ParserMsg,
 };
 use crate::aggregator::{ProgressState, PARSER_BATCH_SIZE};
-use crate::parser::combined::parse_unix_timestamp;
+use crate::parser::combined::parse_local_epoch_days;
 use crate::parser::LogFormat;
 use crate::rules::{Action, HideMask, SharedRuleSet};
 use crate::ua::UaParser;
@@ -50,8 +50,17 @@ pub(crate) fn run_parser(
                 for (line, line_start) in batch {
                     if let Some(entry) = log_format.parse(line) {
                         if let Some(cutoff) = current_skip_before_ts {
-                            match parse_unix_timestamp(entry.time_str(), entry.month_num) {
-                                Some(ts) if ts < cutoff => {
+                            // Compare the entry's LOCAL date (epoch days) against the
+                            // rollback boundary.  skip_before_ts is always UTC midnight
+                            // (= epoch_days * 86400), so dividing by 86400 gives the
+                            // rollback epoch-day.  Using the LOCAL date avoids incorrectly
+                            // dropping entries whose UTC timestamp falls before midnight
+                            // but whose in-log local date is already in the rollback month
+                            // (e.g. BST +01:00 entries logged at UTC 23:xx on the last day
+                            // of the previous month).
+                            let skip_before_days = cutoff / 86400;
+                            match parse_local_epoch_days(entry.time_str(), entry.month_num) {
+                                Some(local_days) if local_days < skip_before_days => {
                                     ps.lines_done.fetch_add(1, Ordering::Relaxed);
                                     continue;
                                 }
