@@ -276,10 +276,10 @@
           <td>{{ loop.index }}</td>
           <td>{{ row.agent }}</td>
           <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
-            ({{ row.pct_fmt }}) {{ row.hits_fmt }}
+            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
           </td>
           <td class="num-col" data-value="{{ row.bandwidth }}">
-            ({{ row.bandwidth_pct_fmt }}) {{ row.bandwidth_fmt }}
+            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
           </td>
         </tr>
         {% endfor %}
@@ -296,8 +296,8 @@
         </tr>
         <tr>
           <th>#</th>
-          <th>Hits</th>
           <th>Browser Family</th>
+          <th class="num-col">Hits</th>
           <th class="num-col">Bandwidth</th>
         </tr>
       </thead>
@@ -307,10 +307,10 @@
           <td>{{ loop.index }}</td>
           <td>{{ row.agent }}</td>
           <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
-            ({{ row.pct_fmt }}) {{ row.hits_fmt }}
+            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
           </td>
           <td class="num-col" data-value="{{ row.bandwidth }}">
-            ({{ row.bandwidth_pct_fmt }}) {{ row.bandwidth_fmt }}
+            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
           </td>
         </tr>
         {% endfor %}
@@ -343,10 +343,10 @@
           <td>{{ loop.index }}</td>
           <td>{{ row.country_flag }} {{ row.country_name }}</td>
           <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
-            ({{ row.pct_fmt }}) {{ row.hits_fmt }}
+            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
           </td>
           <td class="num-col" data-value="{{ row.bandwidth }}">
-            ({{ row.bandwidth_pct_fmt }}) {{ row.bandwidth_fmt }}
+            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
           </td>
         </tr>
         {% endfor %}
@@ -374,10 +374,10 @@
           <td>{{ loop.index }}</td>
           <td>{{ row.country_flag }} {{ row.country_name }}</td>
           <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
-            ({{ row.pct_fmt }}) {{ row.hits_fmt }}
+            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
           </td>
           <td class="num-col" data-value="{{ row.bandwidth }}">
-            ({{ row.bandwidth_pct_fmt }}) {{ row.bandwidth_fmt }}
+            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
           </td>
         </tr>
         {% endfor %}

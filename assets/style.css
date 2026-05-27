@@ -429,6 +429,11 @@ main.container {
     white-space: nowrap;
 }
 
+.data-table .pct-value {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+}
+
 /* ---------- Month grid (index page) ---------- */
 .year-section {
     display: grid;
