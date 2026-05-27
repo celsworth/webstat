@@ -957,4 +957,200 @@ mod tests {
             "only the non-hidden host must appear in top hosts"
         );
     }
+
+    // ── Rollback + re-ingest with timezone-offset entries ─────────────────────
+    //
+    // These tests guard the fix for a bug where skip_before_ts filtering used UTC
+    // timestamps instead of local dates.  The bug caused entries logged at UTC
+    // 23:xx on day N with a positive timezone offset (+01:00 / BST) to be dropped
+    // on re-ingest even though their LOCAL date was day N+1 (already in the
+    // rollback month).  Concretely: access.log-20260402.gz had entries at
+    // UTC 2026-03-31 23:xx with +0100 → local date 2026-04-01; the old UTC
+    // comparison incorrectly filtered them, causing April hit counts to flip
+    // between correct and zero on alternating rollback+re-ingest cycles.
+
+    fn hits_for_date_hour(conn: &Connection, date: &str, hour: i64) -> i64 {
+        conn.query_row(
+            "SELECT COALESCE(SUM(hits),0) FROM hourly_stats WHERE date=?1 AND hour=?2",
+            rusqlite::params![date, hour],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+    }
+
+    fn total_hits(conn: &Connection) -> i64 {
+        conn.query_row(
+            "SELECT COALESCE(SUM(hits),0) FROM hourly_stats",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+    }
+
+    /// Build a plain log line with an explicit timestamp string (no brackets).
+    fn line_with_ts(ts: &str, path: &str) -> String {
+        format!(
+            r#"1.2.3.4 - - [{ts}] "GET {path} HTTP/1.1" 200 100 "-" "Mozilla/5.0""#
+        )
+    }
+
+    #[test]
+    fn rollback_reingest_bst_midnight_entries_preserved() {
+        // Regression test: entries logged at local 00:xx on the first day of month M
+        // with a +01:00 (BST) offset have a UTC timestamp in the last hour of month
+        // M-1.  After a rollback to month M, the skip_before_ts filter must keep
+        // these entries because their LOCAL date is already in month M (which is
+        // what hourly_stats uses).  The old bug compared UTC timestamps and dropped
+        // them incorrectly.
+        //
+        // File layout:
+        //   entry A  — 01/Apr/2026:00:30:00 +0100 → UTC Mar-31 23:30, local Apr-1 h0
+        //   entry B  — 01/Apr/2026:10:00:00 +0100 → UTC Apr-1  09:00, local Apr-1 h10
+        //   entry C  — 15/Mar/2026:12:00:00 +0000 → UTC Mar-15 12:00, local Mar-15
+        //
+        // After rollback to 2026-04 and re-ingest:
+        //   entry C (local March) must be skipped by skip_before_ts,
+        //   entry A (local April 1 hour 0) and entry B (local April 1 hour 10)
+        //   must both be counted.
+
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let log_path = temp.path().join("access.log");
+
+        let lines = vec![
+            line_with_ts("15/Mar/2026:12:00:00 +0000", "/march-entry"),
+            // BST midnight: logged as April 1 local time, UTC is still March 31.
+            line_with_ts("01/Apr/2026:00:30:00 +0100", "/bst-midnight"),
+            line_with_ts("01/Apr/2026:10:00:00 +0100", "/april-morning"),
+        ];
+        write_plain_file(&log_path, &lines);
+
+        // Initial ingest — all 3 entries processed.
+        let mut processor = new_processor(&db_path);
+        let processed = processor
+            .process_globs(log_path.to_str().unwrap())
+            .expect("initial ingest");
+        assert_eq!(processed, 3);
+
+        let conn = Connection::open(&db_path).expect("open db");
+        assert_eq!(total_hits(&conn), 3, "all 3 entries ingested initially");
+        // entry A is logged at local midnight (00:30) on April 1.
+        assert_eq!(
+            hits_for_date_hour(&conn, "2026-04-01", 0),
+            1,
+            "BST midnight entry should be in April-1 hour 0"
+        );
+
+        // Rollback to 2026-04: March data stays, April data is wiped.
+        let mut db = crate::database::Database::open(db_path.to_str().unwrap()).expect("open db");
+        crate::rollback::rollback(&mut db, "2026-04", false).expect("rollback");
+        drop(db);
+
+        let conn2 = Connection::open(&db_path).expect("open db after rollback");
+        let march_hits: i64 = conn2
+            .query_row(
+                "SELECT COALESCE(SUM(hits),0) FROM hourly_stats WHERE date LIKE '2026-03%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(march_hits, 1, "March data must survive rollback");
+        let april_hits_after_rollback: i64 = conn2
+            .query_row(
+                "SELECT COALESCE(SUM(hits),0) FROM hourly_stats WHERE date LIKE '2026-04%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(april_hits_after_rollback, 0, "April data must be wiped by rollback");
+        drop(conn2);
+
+        // Re-ingest with the new (fixed) local-date filter.
+        let mut processor2 = new_processor(&db_path);
+        processor2
+            .process_globs(log_path.to_str().unwrap())
+            .expect("re-ingest after rollback");
+
+        let conn3 = Connection::open(&db_path).expect("open db after reingest");
+
+        // Entry A (local date Apr-1 hour 0) must be present.
+        assert_eq!(
+            hits_for_date_hour(&conn3, "2026-04-01", 0),
+            1,
+            "BST midnight entry (local Apr-1 hour 0) must survive skip_before_ts filter on re-ingest"
+        );
+        // Entry B (local date Apr-1 hour 10) must also be present.
+        assert_eq!(
+            hits_for_date_hour(&conn3, "2026-04-01", 10),
+            1,
+            "Normal April entry must survive re-ingest"
+        );
+        // Entry C (March) must NOT be re-ingested (skip_before_ts filters it).
+        let march_rehits: i64 = conn3
+            .query_row(
+                "SELECT COALESCE(SUM(hits),0) FROM hourly_stats WHERE date LIKE '2026-03%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            march_rehits, 1,
+            "March data must not be double-counted after re-ingest (skip_before_ts must filter it)"
+        );
+    }
+
+    #[test]
+    fn rollback_reingest_is_idempotent_with_tz_offset_spanning_file() {
+        // Run the rollback+re-ingest cycle twice and verify hit counts are
+        // identical both times.  This is the exact alternating-count failure
+        // mode from the original bug report.
+
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let log_path = temp.path().join("access.log");
+
+        let lines = vec![
+            line_with_ts("15/Mar/2026:12:00:00 +0000", "/march-a"),
+            line_with_ts("15/Mar/2026:14:00:00 +0000", "/march-b"),
+            // Two entries logged at local April 1 00:xx BST (+01:00); their UTC
+            // timestamps are March 31 23:05 and 23:55 — before the rollback boundary.
+            line_with_ts("01/Apr/2026:00:05:00 +0100", "/bst-midnight-1"),
+            line_with_ts("01/Apr/2026:00:55:00 +0100", "/bst-midnight-2"),
+            // Regular April entries:
+            line_with_ts("01/Apr/2026:08:00:00 +0100", "/april-morning"),
+            line_with_ts("02/Apr/2026:10:00:00 +0100", "/april-day2"),
+        ];
+        write_plain_file(&log_path, &lines);
+
+        let mut processor = new_processor(&db_path);
+        processor
+            .process_globs(log_path.to_str().unwrap())
+            .expect("initial ingest");
+
+        // Helper closure: rollback to 2026-04, then re-ingest, return total hits.
+        let rollback_and_reingest = |db_path: &std::path::Path, log_path: &std::path::Path| -> i64 {
+            let mut db = crate::database::Database::open(db_path.to_str().unwrap()).expect("open db");
+            crate::rollback::rollback(&mut db, "2026-04", false).expect("rollback");
+            drop(db);
+
+            let mut p = new_processor(db_path);
+            p.process_globs(log_path.to_str().unwrap())
+                .expect("re-ingest");
+
+            let conn = Connection::open(db_path).expect("open db for count");
+            total_hits(&conn)
+        };
+
+        let hits_after_first = rollback_and_reingest(&db_path, &log_path);
+        let hits_after_second = rollback_and_reingest(&db_path, &log_path);
+
+        assert_eq!(
+            hits_after_first, 6,
+            "first rollback+re-ingest: all 6 entries should be present"
+        );
+        assert_eq!(
+            hits_after_second, 6,
+            "second rollback+re-ingest: hit count must be stable (no alternating bug)"
+        );
+    }
 }

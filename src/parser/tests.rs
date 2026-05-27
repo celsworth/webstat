@@ -1,6 +1,6 @@
 // Tests for the combined-log-format parser and LogEntry field extraction.
 
-use super::combined::{parse_line, parse_unix_timestamp};
+use super::combined::{parse_line, parse_local_epoch_days, parse_unix_timestamp};
 use super::*;
 
 #[cfg(test)]
@@ -700,6 +700,96 @@ mod tests {
     fn parse_unix_timestamp_invalid_sign_returns_none() {
         let ts = parse_unix_timestamp("01/Jan/1970:00:00:00 *0000", 1);
         assert!(ts.is_none());
+    }
+
+    // ── parse_local_epoch_days ────────────────────────────────────────────────
+    //
+    // This function is the basis of the skip_before_ts filter in the parser
+    // pipeline.  The critical invariant: it must return the LOCAL date baked into
+    // the log line, NOT the UTC-equivalent date.  Entries logged at UTC 23:xx with
+    // a +01:00 timezone have a local date of the NEXT calendar day; the filter must
+    // not drop them when the rollback boundary is that next day.
+
+    #[test]
+    fn parse_local_epoch_days_utc_epoch() {
+        // 01/Jan/1970:00:00:00 +0000  →  local date 1970-01-01  →  epoch-day 0
+        let d = parse_local_epoch_days("01/Jan/1970:00:00:00 +0000", 1).unwrap();
+        assert_eq!(d, 0);
+    }
+
+    #[test]
+    fn parse_local_epoch_days_ignores_timezone_offset() {
+        // "31/Mar/2026:23:00:03 +0100" — UTC timestamp would be
+        // 2026-03-31T22:00:03Z, but the LOCAL date in the log is March 31.
+        // days_from_civil(2026, 3, 31) is what we expect back.
+        let d = parse_local_epoch_days("31/Mar/2026:23:00:03 +0100", 3).unwrap();
+        let expected = days_from_civil(2026, 3, 31);
+        assert_eq!(d, expected);
+    }
+
+    #[test]
+    fn parse_local_epoch_days_bst_midnight_entry_matches_april() {
+        // The real-world bug: an entry at UTC 2026-03-31 23:00:03 with BST +01:00
+        // is logged with LOCAL date 01/Apr/2026 (00:00:03 local time).
+        // parse_local_epoch_days must return the April 1 epoch-day so that it is
+        // NOT filtered out when skip_before_ts is set to 2026-04-01 00:00:00 UTC.
+        let april1_utc_midnight: i64 = days_from_civil(2026, 4, 1) * 86_400;
+        let skip_before_days = april1_utc_midnight / 86_400;
+
+        let entry_days = parse_local_epoch_days("01/Apr/2026:00:00:03 +0100", 4).unwrap();
+        assert_eq!(
+            entry_days,
+            days_from_civil(2026, 4, 1),
+            "local date should be April 1"
+        );
+        // The entry must survive the filter (local_days >= skip_before_days).
+        assert!(
+            entry_days >= skip_before_days,
+            "BST midnight entry (local April 1) must not be filtered by rollback boundary at UTC April 1"
+        );
+    }
+
+    #[test]
+    fn parse_local_epoch_days_utc_timestamp_would_give_wrong_answer() {
+        // Demonstrate why UTC comparison was wrong: the entry below has UTC
+        // timestamp 2026-03-31T23:00:03Z which is BEFORE the rollback boundary
+        // 2026-04-01T00:00:00Z.  A UTC comparison would drop it; the local-date
+        // comparison must keep it.
+        let april1_utc_midnight: i64 = days_from_civil(2026, 4, 1) * 86_400;
+
+        // UTC timestamp of "01/Apr/2026:00:00:03 +0100"
+        let utc_ts = parse_unix_timestamp("01/Apr/2026:00:00:03 +0100", 4).unwrap();
+        // This should be 2026-03-31T23:00:03Z, which is < april1_utc_midnight
+        assert!(
+            utc_ts < april1_utc_midnight,
+            "UTC timestamp should be before midnight UTC (confirming old code was wrong)"
+        );
+
+        // But the local-date comparison correctly keeps the entry.
+        let local_days = parse_local_epoch_days("01/Apr/2026:00:00:03 +0100", 4).unwrap();
+        assert!(
+            local_days * 86_400 >= april1_utc_midnight,
+            "local-date comparison should keep the entry"
+        );
+    }
+
+    #[test]
+    fn parse_local_epoch_days_genuine_pre_rollback_entry_is_filtered() {
+        // An entry clearly in March should produce a day-count strictly less than
+        // the April rollback boundary.
+        let april1_utc_midnight: i64 = days_from_civil(2026, 4, 1) * 86_400;
+        let skip_before_days = april1_utc_midnight / 86_400;
+
+        let d = parse_local_epoch_days("15/Mar/2026:12:00:00 +0000", 3).unwrap();
+        assert!(
+            d < skip_before_days,
+            "March entry must be filtered out by April rollback boundary"
+        );
+    }
+
+    #[test]
+    fn parse_local_epoch_days_rejects_short_input() {
+        assert!(parse_local_epoch_days("short", 1).is_none());
     }
 
     // ── days_from_civil ───────────────────────────────────────────────────────
