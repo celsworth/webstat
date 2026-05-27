@@ -29,6 +29,7 @@ tera         = "1"
 chrono       = { version = "0.4", default-features = true }
 twox-hash    = "2.1"
 woothee      = "0.13"
+self_update = { version = "0.44.0", default-features = false, features = ["archive-zip", "reqwest", "rustls"] }
 
 [dev-dependencies]
 tempfile     = "3"

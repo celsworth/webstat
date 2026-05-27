@@ -19,6 +19,7 @@ mod rollback;
 mod rules;
 mod run_accumulators;
 mod ua;
+mod update;
 
 use anyhow::{bail, Result};
 use clap::{ArgAction, Parser, Subcommand};
@@ -124,6 +125,12 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Update webstat to the latest GitHub release
+    Update {
+        /// Check for an available update without installing it
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -142,6 +149,7 @@ fn main() -> Result<()> {
             let mut db = Database::open(&cfg.database)?;
             rollback::rollback(&mut db, &month, dry_run)
         }
+        Command::Update { check } => update::run(check),
     }
 }
 
