@@ -163,6 +163,8 @@ struct TopHostRow {
     hits_fmt: String,
     hits_exact_fmt: String,
     bandwidth_fmt: String,
+    pct_fmt: String,
+    bandwidth_pct_fmt: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

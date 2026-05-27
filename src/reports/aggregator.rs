@@ -898,30 +898,41 @@ fn top_ips_sorted(
     );
     let mut stmt = conn.prepare(&sql)?;
 
-    let rows = stmt.query_map(params![param, top_n as i64], |row| {
-        let host_kind = row.get::<_, i64>(0)? as u8;
-        let host_hi = row.get::<_, i64>(1)? as u64;
-        let host_lo = row.get::<_, i64>(2)? as u64;
-        let hits = row.get::<_, i64>(3)? as u64;
-        let bandwidth = row.get::<_, i64>(4)? as u64;
-        let country_code = row.get::<_, String>(5)?;
-        Ok(TopHostRow {
-            host: decode_host(host_kind, host_hi, host_lo, anonymise_ips),
-            hits,
-            bandwidth,
-            country_flag: flag_emoji(&country_code),
-            country_code: country_code.clone(),
-            country_name: row.get::<_, String>(6)?,
-            hits_fmt: count_fmt(hits, compact_counts),
-            hits_exact_fmt: super::number_fmt(hits),
-            bandwidth_fmt: format_bytes(bandwidth),
-        })
-    })?;
+    let raw: Vec<(u8, u64, u64, u64, u64, String, String)> = stmt
+        .query_map(params![param, top_n as i64], |row| {
+            Ok((
+                row.get::<_, i64>(0)? as u8,
+                row.get::<_, i64>(1)? as u64,
+                row.get::<_, i64>(2)? as u64,
+                row.get::<_, i64>(3)? as u64,
+                row.get::<_, i64>(4)? as u64,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
 
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row?);
-    }
+    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
+
+    let out = raw
+        .into_iter()
+        .map(|(host_kind, host_hi, host_lo, hits, bandwidth, country_code, country_name)| {
+            TopHostRow {
+                host: decode_host(host_kind, host_hi, host_lo, anonymise_ips),
+                hits,
+                bandwidth,
+                country_flag: flag_emoji(&country_code),
+                country_code,
+                country_name,
+                hits_fmt: count_fmt(hits, compact_counts),
+                hits_exact_fmt: super::number_fmt(hits),
+                bandwidth_fmt: format_bytes(bandwidth),
+                pct_fmt: percent_str(hits as f64, hits_total),
+                bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
+            }
+        })
+        .collect();
+
     Ok(out)
 }
 
