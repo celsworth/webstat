@@ -21,9 +21,9 @@ pub struct FlushData<'a> {
     pub hosts: &'a AHashMap<String, (u64, u64)>,
     pub host_geo: &'a AHashMap<String, (Arc<str>, Arc<str>)>,
     pub refs: &'a AHashMap<String, u64>,
-    pub agents: &'a AHashMap<String, u64>,
+    pub agents: &'a AHashMap<String, (u64, u64)>,
     pub daily_ips: &'a AHashMap<Arc<str>, IpBitmaps>,
-    pub countries: &'a AHashMap<String, u64>,
+    pub countries: &'a AHashMap<String, (u64, u64)>,
     pub status_codes: &'a AHashMap<u16, u64>,
     pub method_counts: &'a [u64],
     pub protocol_counts: &'a [u64],
@@ -214,11 +214,12 @@ impl Database {
 
         // top_agents
         if !data.agents.is_empty() {
-            let sql = "INSERT INTO top_agents (period,agent_family,hits) VALUES (?1,?2,?3) \
-                       ON CONFLICT (period,agent_family) DO UPDATE SET hits=hits+excluded.hits";
+            let sql = "INSERT INTO top_agents (period,agent_family,hits,bandwidth) VALUES (?1,?2,?3,?4) \
+                       ON CONFLICT (period,agent_family) DO UPDATE SET \
+                       hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth";
             let mut stmt = tx.prepare_cached(sql)?;
-            for (agent, hits) in data.agents {
-                stmt.execute(params![data.period, agent, *hits as i64])?;
+            for (agent, (hits, bw)) in data.agents {
+                stmt.execute(params![data.period, agent, *hits as i64, *bw as i64])?;
             }
         }
 
@@ -301,11 +302,12 @@ impl Database {
 
         // top_countries
         if !data.countries.is_empty() {
-            let sql = "INSERT INTO top_countries (period,country_code,hits) VALUES (?1,?2,?3) \
-                       ON CONFLICT (period,country_code) DO UPDATE SET hits=hits+excluded.hits";
+            let sql = "INSERT INTO top_countries (period,country_code,hits,bandwidth) VALUES (?1,?2,?3,?4) \
+                       ON CONFLICT (period,country_code) DO UPDATE SET \
+                       hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth";
             let mut stmt = tx.prepare_cached(sql)?;
-            for (cc, hits) in data.countries {
-                stmt.execute(params![data.period, cc, *hits as i64])?;
+            for (cc, (hits, bw)) in data.countries {
+                stmt.execute(params![data.period, cc, *hits as i64, *bw as i64])?;
             }
         }
 
@@ -626,11 +628,16 @@ impl Database {
             )?;
         }
 
-        for (table, key_col, order_col) in [
-            ("top_referrers", "referrer", "hits"),
-            ("top_agents", "agent_family", "hits"),
-        ] {
-            Self::prune_monthly_table(&tx, table, key_col, period, order_col, top_n)?;
+        Self::prune_monthly_table(&tx, "top_referrers", "referrer", period, "hits", top_n)?;
+
+        if top_n > 0 {
+            tx.execute(
+                "DELETE FROM top_agents \
+                 WHERE period=?1 \
+                 AND agent_family NOT IN (SELECT agent_family FROM top_agents WHERE period=?1 ORDER BY hits DESC LIMIT ?2) \
+                 AND agent_family NOT IN (SELECT agent_family FROM top_agents WHERE period=?1 ORDER BY bandwidth DESC LIMIT ?2)",
+                params![period, top_n as i64],
+            )?;
         }
 
         tx.execute(

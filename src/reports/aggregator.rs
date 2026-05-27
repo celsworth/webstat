@@ -137,38 +137,10 @@ pub(super) fn monthly_summary(
     let top_ips_bandwidth = top_ips_bandwidth(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_refs = top_refs(conn, &period, top_n, compact_counts)?;
 
-    let top_agents_raw = top_agents_raw(conn, &period, top_n)?;
-    let top_countries_raw = top_countries_raw(conn, &period, top_n)?;
-
-    let top_agents_total = top_agents_raw.iter().map(|(_, hits)| *hits).sum::<u64>() as f64;
-    let top_countries_total = top_countries_raw
-        .iter()
-        .map(|(_, _, hits)| *hits)
-        .sum::<u64>() as f64;
-
-    let top_agents = top_agents_raw
-        .into_iter()
-        .map(|(agent, hits)| TopAgentRow {
-            agent,
-            hits,
-            hits_fmt: count_fmt(hits, compact_counts),
-            hits_exact_fmt: super::number_fmt(hits),
-            pct_fmt: percent_str(hits as f64, top_agents_total),
-        })
-        .collect();
-
-    let top_countries = top_countries_raw
-        .into_iter()
-        .map(|(country_code, country_name, hits)| TopCountryRow {
-            country_flag: flag_emoji(&country_code),
-            country_code,
-            country_name,
-            hits,
-            hits_fmt: count_fmt(hits, compact_counts),
-            hits_exact_fmt: super::number_fmt(hits),
-            pct_fmt: percent_str(hits as f64, top_countries_total),
-        })
-        .collect();
+    let top_agents_hits = top_agents_sorted(conn, &period, top_n, compact_counts, "hits")?;
+    let top_agents_bandwidth = top_agents_sorted(conn, &period, top_n, compact_counts, "bandwidth")?;
+    let top_countries_hits = top_countries_sorted(conn, &period, top_n, compact_counts, "hits")?;
+    let top_countries_bandwidth = top_countries_sorted(conn, &period, top_n, compact_counts, "bandwidth")?;
 
     let status_codes = status_codes(conn, &period, compact_counts)?;
     let proto_codes = proto_codes(conn, &period, compact_counts)?;
@@ -191,8 +163,10 @@ pub(super) fn monthly_summary(
         top_ips_hits,
         top_ips_bandwidth,
         top_refs,
-        top_agents,
-        top_countries,
+        top_agents_hits,
+        top_agents_bandwidth,
+        top_countries_hits,
+        top_countries_bandwidth,
         status_codes,
         proto_codes,
         method_codes,
@@ -224,38 +198,10 @@ pub(super) fn yearly_summary(
     let top_ips_hits = top_ips_hits(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_ips_bandwidth = top_ips_bandwidth(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_refs = top_refs(conn, &period, top_n, compact_counts)?;
-    let top_agents_raw = top_agents_raw(conn, &period, top_n)?;
-    let top_countries_raw = top_countries_raw(conn, &period, top_n)?;
-
-    let top_agents_total = top_agents_raw.iter().map(|(_, hits)| *hits).sum::<u64>() as f64;
-    let top_countries_total = top_countries_raw
-        .iter()
-        .map(|(_, _, hits)| *hits)
-        .sum::<u64>() as f64;
-
-    let top_agents = top_agents_raw
-        .into_iter()
-        .map(|(agent, hits)| TopAgentRow {
-            agent,
-            hits,
-            hits_fmt: count_fmt(hits, compact_counts),
-            hits_exact_fmt: super::number_fmt(hits),
-            pct_fmt: percent_str(hits as f64, top_agents_total),
-        })
-        .collect();
-
-    let top_countries = top_countries_raw
-        .into_iter()
-        .map(|(country_code, country_name, hits)| TopCountryRow {
-            country_flag: flag_emoji(&country_code),
-            country_code,
-            country_name,
-            hits,
-            hits_fmt: count_fmt(hits, compact_counts),
-            hits_exact_fmt: super::number_fmt(hits),
-            pct_fmt: percent_str(hits as f64, top_countries_total),
-        })
-        .collect();
+    let top_agents_hits = top_agents_sorted(conn, &period, top_n, compact_counts, "hits")?;
+    let top_agents_bandwidth = top_agents_sorted(conn, &period, top_n, compact_counts, "bandwidth")?;
+    let top_countries_hits = top_countries_sorted(conn, &period, top_n, compact_counts, "hits")?;
+    let top_countries_bandwidth = top_countries_sorted(conn, &period, top_n, compact_counts, "bandwidth")?;
 
     let status_codes = status_codes(conn, &period, compact_counts)?;
     let proto_codes = proto_codes(conn, &period, compact_counts)?;
@@ -271,8 +217,10 @@ pub(super) fn yearly_summary(
         top_ips_hits,
         top_ips_bandwidth,
         top_refs,
-        top_agents,
-        top_countries,
+        top_agents_hits,
+        top_agents_bandwidth,
+        top_countries_hits,
+        top_countries_bandwidth,
         status_codes,
         proto_codes,
         method_codes,
@@ -290,46 +238,20 @@ pub(super) fn overall_summary(
     let yearly_rows = yearly_rows(conn, compact_counts)?;
     let totals = overall_totals(conn, compact_counts)?;
 
-    let top_agents_raw = top_agents_all_raw(conn, top_n)?;
-    let top_countries_raw = top_countries_all_raw(conn, top_n)?;
-
-    let top_agents_total = top_agents_raw.iter().map(|(_, hits)| *hits).sum::<u64>() as f64;
-    let top_countries_total = top_countries_raw
-        .iter()
-        .map(|(_, _, hits)| *hits)
-        .sum::<u64>() as f64;
-
-    let top_agents = top_agents_raw
-        .into_iter()
-        .map(|(agent, hits)| TopAgentRow {
-            agent,
-            hits,
-            hits_fmt: count_fmt(hits, compact_counts),
-            hits_exact_fmt: super::number_fmt(hits),
-            pct_fmt: percent_str(hits as f64, top_agents_total),
-        })
-        .collect();
-
-    let top_countries = top_countries_raw
-        .into_iter()
-        .map(|(country_code, country_name, hits)| TopCountryRow {
-            country_flag: flag_emoji(&country_code),
-            country_code,
-            country_name,
-            hits,
-            hits_fmt: count_fmt(hits, compact_counts),
-            hits_exact_fmt: super::number_fmt(hits),
-            pct_fmt: percent_str(hits as f64, top_countries_total),
-        })
-        .collect();
+    let top_agents_hits = top_agents_sorted_all(conn, top_n, compact_counts, "hits")?;
+    let top_agents_bandwidth = top_agents_sorted_all(conn, top_n, compact_counts, "bandwidth")?;
+    let top_countries_hits = top_countries_sorted_all(conn, top_n, compact_counts, "hits")?;
+    let top_countries_bandwidth = top_countries_sorted_all(conn, top_n, compact_counts, "bandwidth")?;
 
     let status_codes = status_codes_all(conn, compact_counts)?;
     let all_time_available = all_time_visitor_count(conn)? > 0;
 
     Ok(OverallSummary {
         yearly_rows,
-        top_agents,
-        top_countries,
+        top_agents_hits,
+        top_agents_bandwidth,
+        top_countries_hits,
+        top_countries_bandwidth,
         status_codes,
         totals,
         all_time_available,
@@ -1045,112 +967,176 @@ fn top_refs(
     Ok(out)
 }
 
-fn top_agents_raw(conn: &Connection, period: &str, top_n: usize) -> Result<Vec<(String, u64)>> {
+fn top_agents_sorted(
+    conn: &Connection,
+    period: &str,
+    top_n: usize,
+    compact_counts: bool,
+    order_col: &str,
+) -> Result<Vec<TopAgentRow>> {
+    if top_n == 0 {
+        return Ok(Vec::new());
+    }
     let (op, param) = period_clause(period);
     let sql = format!(
-        "SELECT agent_family, SUM(hits) AS hits
+        "SELECT agent_family, SUM(hits) AS hits, SUM(bandwidth) AS bandwidth
          FROM top_agents
          WHERE period {op}
          GROUP BY agent_family
-         ORDER BY hits DESC
+         ORDER BY {order_col} DESC
          LIMIT ?2"
     );
     let mut stmt = conn.prepare(&sql)?;
-
-    let rows = stmt.query_map(params![param, top_n as i64], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
-    })?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row?);
-    }
-    Ok(out)
+    let raw: Vec<(String, u64, u64)> = stmt
+        .query_map(params![param, top_n as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)? as u64,
+                row.get::<_, i64>(2)? as u64,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(build_agent_rows(raw, compact_counts))
 }
 
-fn top_agents_all_raw(conn: &Connection, top_n: usize) -> Result<Vec<(String, u64)>> {
-    let mut stmt = conn.prepare(
-        "SELECT agent_family, SUM(hits) AS hits
+fn top_agents_sorted_all(
+    conn: &Connection,
+    top_n: usize,
+    compact_counts: bool,
+    order_col: &str,
+) -> Result<Vec<TopAgentRow>> {
+    if top_n == 0 {
+        return Ok(Vec::new());
+    }
+    let sql = format!(
+        "SELECT agent_family, SUM(hits) AS hits, SUM(bandwidth) AS bandwidth
          FROM top_agents
          GROUP BY agent_family
-         ORDER BY hits DESC
-         LIMIT ?1",
-    )?;
-
-    let rows = stmt.query_map(params![top_n as i64], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
-    })?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row?);
-    }
-    Ok(out)
+         ORDER BY {order_col} DESC
+         LIMIT ?1"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let raw: Vec<(String, u64, u64)> = stmt
+        .query_map(params![top_n as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)? as u64,
+                row.get::<_, i64>(2)? as u64,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(build_agent_rows(raw, compact_counts))
 }
 
-fn top_countries_raw(
+fn build_agent_rows(raw: Vec<(String, u64, u64)>, compact_counts: bool) -> Vec<TopAgentRow> {
+    let hits_total = raw.iter().map(|(_, h, _)| *h).sum::<u64>() as f64;
+    let bw_total = raw.iter().map(|(_, _, b)| *b).sum::<u64>() as f64;
+    raw.into_iter()
+        .map(|(agent, hits, bandwidth)| TopAgentRow {
+            agent,
+            hits,
+            bandwidth,
+            hits_fmt: count_fmt(hits, compact_counts),
+            hits_exact_fmt: super::number_fmt(hits),
+            bandwidth_fmt: format_bytes(bandwidth),
+            pct_fmt: percent_str(hits as f64, hits_total),
+            bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
+        })
+        .collect()
+}
+
+fn top_countries_sorted(
     conn: &Connection,
     period: &str,
-    limit: usize,
-) -> Result<Vec<(String, String, u64)>> {
+    top_n: usize,
+    compact_counts: bool,
+    order_col: &str,
+) -> Result<Vec<TopCountryRow>> {
+    if top_n == 0 {
+        return Ok(Vec::new());
+    }
     let (op, param) = period_clause(period);
     let sql = format!(
         "SELECT c.country_code,
                 COALESCE(n.country_name, 'Unknown') AS country_name,
-                SUM(c.hits) AS hits
+                SUM(c.hits) AS hits,
+                SUM(c.bandwidth) AS bandwidth
          FROM top_countries c
          LEFT JOIN countries n ON n.country_code = c.country_code
          WHERE c.period {op}
          GROUP BY c.country_code
-         ORDER BY hits DESC
+         ORDER BY {order_col} DESC
          LIMIT ?2"
     );
     let mut stmt = conn.prepare(&sql)?;
-
-    let rows = stmt.query_map(params![param, limit as i64], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, i64>(2)? as u64,
-        ))
-    })?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row?);
-    }
-    Ok(out)
+    let raw: Vec<(String, String, u64, u64)> = stmt
+        .query_map(params![param, top_n as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)? as u64,
+                row.get::<_, i64>(3)? as u64,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(build_country_rows(raw, compact_counts))
 }
 
-fn top_countries_all_raw(conn: &Connection, limit: usize) -> Result<Vec<(String, String, u64)>> {
-    let mut stmt = conn.prepare(
-        "WITH country_hits AS (
-             SELECT country_code, SUM(hits) AS hits
+fn top_countries_sorted_all(
+    conn: &Connection,
+    top_n: usize,
+    compact_counts: bool,
+    order_col: &str,
+) -> Result<Vec<TopCountryRow>> {
+    if top_n == 0 {
+        return Ok(Vec::new());
+    }
+    let sql = format!(
+        "WITH agg AS (
+             SELECT country_code, SUM(hits) AS hits, SUM(bandwidth) AS bandwidth
              FROM top_countries
              GROUP BY country_code
          )
-         SELECT h.country_code,
+         SELECT a.country_code,
                 COALESCE(n.country_name, 'Unknown') AS country_name,
-                h.hits
-         FROM country_hits h
-         LEFT JOIN countries n ON n.country_code = h.country_code
-         ORDER BY h.hits DESC
-         LIMIT ?1",
-    )?;
+                a.hits,
+                a.bandwidth
+         FROM agg a
+         LEFT JOIN countries n ON n.country_code = a.country_code
+         ORDER BY {order_col} DESC
+         LIMIT ?1"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let raw: Vec<(String, String, u64, u64)> = stmt
+        .query_map(params![top_n as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)? as u64,
+                row.get::<_, i64>(3)? as u64,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(build_country_rows(raw, compact_counts))
+}
 
-    let rows = stmt.query_map(params![limit as i64], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, i64>(2)? as u64,
-        ))
-    })?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row?);
-    }
-    Ok(out)
+fn build_country_rows(raw: Vec<(String, String, u64, u64)>, compact_counts: bool) -> Vec<TopCountryRow> {
+    let hits_total = raw.iter().map(|(_, _, h, _)| *h).sum::<u64>() as f64;
+    let bw_total = raw.iter().map(|(_, _, _, b)| *b).sum::<u64>() as f64;
+    raw.into_iter()
+        .map(|(country_code, country_name, hits, bandwidth)| TopCountryRow {
+            country_flag: flag_emoji(&country_code),
+            country_code,
+            country_name,
+            hits,
+            bandwidth,
+            hits_fmt: count_fmt(hits, compact_counts),
+            hits_exact_fmt: super::number_fmt(hits),
+            bandwidth_fmt: format_bytes(bandwidth),
+            pct_fmt: percent_str(hits as f64, hits_total),
+            bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
+        })
+        .collect()
 }
 
 fn status_codes(conn: &Connection, period: &str, compact_counts: bool) -> Result<Vec<StatusRow>> {

@@ -230,8 +230,8 @@ mod tests {
         let empty_geo: ahash::AHashMap<String, (std::sync::Arc<str>, std::sync::Arc<str>)> =
             ahash::AHashMap::new();
         let empty_refs: ahash::AHashMap<String, u64> = ahash::AHashMap::new();
-        let empty_agents: ahash::AHashMap<String, u64> = ahash::AHashMap::new();
-        let empty_countries: ahash::AHashMap<String, u64> = ahash::AHashMap::new();
+        let empty_agents: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
+        let empty_countries: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
         let empty_status: ahash::AHashMap<u16, u64> = ahash::AHashMap::new();
         for daily in [&daily1, &daily2] {
             db.flush(crate::database::writer::FlushData {

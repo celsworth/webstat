@@ -175,9 +175,12 @@ struct TopRefRow {
 struct TopAgentRow {
     agent: String,
     hits: u64,
+    bandwidth: u64,
     hits_fmt: String,
     hits_exact_fmt: String,
+    bandwidth_fmt: String,
     pct_fmt: String,
+    bandwidth_pct_fmt: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -186,9 +189,12 @@ struct TopCountryRow {
     country_name: String,
     country_flag: String,
     hits: u64,
+    bandwidth: u64,
     hits_fmt: String,
     hits_exact_fmt: String,
+    bandwidth_fmt: String,
     pct_fmt: String,
+    bandwidth_pct_fmt: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -274,8 +280,10 @@ struct MonthlySummary {
     top_ips_hits: Vec<TopHostRow>,
     top_ips_bandwidth: Vec<TopHostRow>,
     top_refs: Vec<TopRefRow>,
-    top_agents: Vec<TopAgentRow>,
-    top_countries: Vec<TopCountryRow>,
+    top_agents_hits: Vec<TopAgentRow>,
+    top_agents_bandwidth: Vec<TopAgentRow>,
+    top_countries_hits: Vec<TopCountryRow>,
+    top_countries_bandwidth: Vec<TopCountryRow>,
     status_codes: Vec<StatusRow>,
     proto_codes: Vec<ProtoRow>,
     method_codes: Vec<MethodRow>,
@@ -295,8 +303,10 @@ struct YearlySummary {
     top_ips_hits: Vec<TopHostRow>,
     top_ips_bandwidth: Vec<TopHostRow>,
     top_refs: Vec<TopRefRow>,
-    top_agents: Vec<TopAgentRow>,
-    top_countries: Vec<TopCountryRow>,
+    top_agents_hits: Vec<TopAgentRow>,
+    top_agents_bandwidth: Vec<TopAgentRow>,
+    top_countries_hits: Vec<TopCountryRow>,
+    top_countries_bandwidth: Vec<TopCountryRow>,
     status_codes: Vec<StatusRow>,
     proto_codes: Vec<ProtoRow>,
     method_codes: Vec<MethodRow>,
@@ -324,8 +334,10 @@ struct YearAggregateRow {
 #[derive(Debug, Clone)]
 struct OverallSummary {
     yearly_rows: Vec<YearAggregateRow>,
-    top_agents: Vec<TopAgentRow>,
-    top_countries: Vec<TopCountryRow>,
+    top_agents_hits: Vec<TopAgentRow>,
+    top_agents_bandwidth: Vec<TopAgentRow>,
+    top_countries_hits: Vec<TopCountryRow>,
+    top_countries_bandwidth: Vec<TopCountryRow>,
     status_codes: Vec<StatusRow>,
     totals: TotalsView,
     all_time_available: bool,
@@ -452,8 +464,10 @@ fn render_index_page(
     page_ctx.insert("totals", &overall.totals);
     page_ctx.insert("all_time_available", &overall.all_time_available);
     page_ctx.insert("status_codes", &overall.status_codes);
-    page_ctx.insert("top_countries", &overall.top_countries);
-    page_ctx.insert("top_agents", &overall.top_agents);
+    page_ctx.insert("top_countries_hits", &overall.top_countries_hits);
+    page_ctx.insert("top_countries_bandwidth", &overall.top_countries_bandwidth);
+    page_ctx.insert("top_agents_hits", &overall.top_agents_hits);
+    page_ctx.insert("top_agents_bandwidth", &overall.top_agents_bandwidth);
     page_ctx.insert(
         "overview_chart",
         &charts::yearly_overview_chart(&overall.yearly_rows, &cfg.style)?,
@@ -468,9 +482,9 @@ fn render_index_page(
     );
     page_ctx.insert(
         "country_chart",
-        &charts::countries_chart(&overall.top_countries)?,
+        &charts::countries_chart(&overall.top_countries_hits)?,
     );
-    page_ctx.insert("agents_chart", &charts::agents_chart(&overall.top_agents)?);
+    page_ctx.insert("agents_chart", &charts::agents_chart(&overall.top_agents_hits)?);
 
     let page = tera.render("index.html.tera", &page_ctx)?;
     let html = render_layout(tera, cfg, "assets", "index.html", page)?;
@@ -492,8 +506,10 @@ fn render_year_page(
     page_ctx.insert("top_ips_hits", &summary.top_ips_hits);
     page_ctx.insert("top_ips_bandwidth", &summary.top_ips_bandwidth);
     page_ctx.insert("top_refs", &summary.top_refs);
-    page_ctx.insert("top_agents", &summary.top_agents);
-    page_ctx.insert("top_countries", &summary.top_countries);
+    page_ctx.insert("top_agents_hits", &summary.top_agents_hits);
+    page_ctx.insert("top_agents_bandwidth", &summary.top_agents_bandwidth);
+    page_ctx.insert("top_countries_hits", &summary.top_countries_hits);
+    page_ctx.insert("top_countries_bandwidth", &summary.top_countries_bandwidth);
     page_ctx.insert("status_codes", &summary.status_codes);
     page_ctx.insert("proto_codes", &summary.proto_codes);
     page_ctx.insert("method_codes", &summary.method_codes);
@@ -514,9 +530,9 @@ fn render_year_page(
     );
     page_ctx.insert(
         "country_chart",
-        &charts::countries_chart(&summary.top_countries)?,
+        &charts::countries_chart(&summary.top_countries_hits)?,
     );
-    page_ctx.insert("agents_chart", &charts::agents_chart(&summary.top_agents)?);
+    page_ctx.insert("agents_chart", &charts::agents_chart(&summary.top_agents_hits)?);
     if !summary.monthly_rt_stats.is_empty() {
         let labels: Vec<&str> = summary.monthly_rt_stats.iter().map(|r| r.label.as_str()).collect();
         let avgs: Vec<f64> = summary.monthly_rt_stats.iter().map(|r| r.avg_ms).collect();
@@ -554,8 +570,10 @@ fn render_month_page(
     page_ctx.insert("top_ips_hits", &summary.top_ips_hits);
     page_ctx.insert("top_ips_bandwidth", &summary.top_ips_bandwidth);
     page_ctx.insert("top_refs", &summary.top_refs);
-    page_ctx.insert("top_agents", &summary.top_agents);
-    page_ctx.insert("top_countries", &summary.top_countries);
+    page_ctx.insert("top_agents_hits", &summary.top_agents_hits);
+    page_ctx.insert("top_agents_bandwidth", &summary.top_agents_bandwidth);
+    page_ctx.insert("top_countries_hits", &summary.top_countries_hits);
+    page_ctx.insert("top_countries_bandwidth", &summary.top_countries_bandwidth);
     page_ctx.insert("status_codes", &summary.status_codes);
     page_ctx.insert("proto_codes", &summary.proto_codes);
     page_ctx.insert("method_codes", &summary.method_codes);
@@ -598,9 +616,9 @@ fn render_month_page(
     );
     page_ctx.insert(
         "country_chart",
-        &charts::countries_chart(&summary.top_countries)?,
+        &charts::countries_chart(&summary.top_countries_hits)?,
     );
-    page_ctx.insert("agents_chart", &charts::agents_chart(&summary.top_agents)?);
+    page_ctx.insert("agents_chart", &charts::agents_chart(&summary.top_agents_hits)?);
 
     let page = tera.render("month.html.tera", &page_ctx)?;
     let html = render_layout(tera, cfg, "../assets", "../index.html", page)?;

@@ -121,15 +121,17 @@ CREATE TABLE IF NOT EXISTS top_referrers (
     PRIMARY KEY (period, referrer)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS top_agents (
-    period       TEXT NOT NULL,
-    agent_family TEXT NOT NULL,
+    period       TEXT    NOT NULL,
+    agent_family TEXT    NOT NULL,
     hits         INTEGER NOT NULL DEFAULT 0,
+    bandwidth    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, agent_family)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS top_countries (
     period       TEXT    NOT NULL,
     country_code TEXT    NOT NULL,
     hits         INTEGER NOT NULL DEFAULT 0,
+    bandwidth    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, country_code)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS status_codes (

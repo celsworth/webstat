@@ -249,9 +249,10 @@ impl Processor {
 
         if self.enable_top_agents && !hide.contains(HideMask::TOP_AGENTS) {
             if let Some(v) = run_acc.agents.get_mut(agent.as_ref()) {
-                *v += 1;
+                v.0 += 1;
+                v.1 += bytes;
             } else {
-                run_acc.agents.insert(agent.as_ref().to_string(), 1);
+                run_acc.agents.insert(agent.as_ref().to_string(), (1, bytes));
             }
         }
 
@@ -267,9 +268,10 @@ impl Processor {
 
         if !hide.contains(HideMask::TOP_COUNTRIES) {
             if let Some(v) = run_acc.countries.get_mut(&*country_code) {
-                *v += 1;
+                v.0 += 1;
+                v.1 += bytes;
             } else {
-                run_acc.countries.insert(country_code.to_string(), 1);
+                run_acc.countries.insert(country_code.to_string(), (1, bytes));
             }
         }
 

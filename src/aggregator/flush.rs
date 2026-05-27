@@ -105,7 +105,7 @@ fn pretrim_for_month_end(run_acc: &mut RunAccumulators, top_n: usize) {
     pretrim_url_stats(&mut run_acc.url_stats, top_n);
     pretrim_hits_bw_map(&mut run_acc.hosts, top_n);
     pretrim_count_map(&mut run_acc.refs, top_n);
-    pretrim_count_map(&mut run_acc.agents, top_n);
+    pretrim_hits_bw_map(&mut run_acc.agents, top_n);
 }
 
 /// Keep the union of top-N by hits, top-N by bandwidth, and top-N by avg response time.

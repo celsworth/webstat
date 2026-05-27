@@ -26,10 +26,10 @@ pub(crate) struct RunAccumulators {
     pub(crate) url_stats: AHashMap<String, UrlStats>,
     pub(crate) hosts: AHashMap<String, (u64, u64)>,
     pub(crate) refs: AHashMap<String, u64>,
-    pub(crate) agents: AHashMap<String, u64>,
+    pub(crate) agents: AHashMap<String, (u64, u64)>,
     pub(crate) daily_ips: AHashMap<Arc<str>, IpBitmaps>,
     pub(crate) daily_hists: AHashMap<Arc<str>, ResponseTimeHistogram>,
-    pub(crate) countries: AHashMap<String, u64>,
+    pub(crate) countries: AHashMap<String, (u64, u64)>,
     pub(crate) status_codes: AHashMap<u16, u64>,
     pub(crate) method_counts: [u64; METHOD_COUNT],
     pub(crate) protocol_counts: [u64; PROTO_COUNT],
@@ -139,14 +139,14 @@ mod tests {
     #[test]
     fn agents_populated_makes_non_empty() {
         let mut acc = RunAccumulators::new("2026-05".to_string());
-        acc.agents.insert("Chrome".to_string(), 4);
+        acc.agents.insert("Chrome".to_string(), (4, 1024));
         assert!(!acc.is_empty());
     }
 
     #[test]
     fn countries_populated_makes_non_empty() {
         let mut acc = RunAccumulators::new("2026-05".to_string());
-        acc.countries.insert("US".to_string(), 100);
+        acc.countries.insert("US".to_string(), (100, 4096));
         assert!(!acc.is_empty());
     }
 
