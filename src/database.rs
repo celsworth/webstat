@@ -23,6 +23,9 @@ pub struct ParseState {
     pub uncompressed_offset: u64,
     pub mtime_ns: i64,
     pub completed: bool,
+    pub earliest_ts: Option<i64>,
+    pub latest_ts: Option<i64>,
+    pub skip_before_ts: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +40,9 @@ pub struct ParseStateUpdate {
     pub uncompressed_offset: u64,
     pub mtime_ns: i64,
     pub completed: bool,
+    pub earliest_ts: Option<i64>,
+    pub latest_ts: Option<i64>,
+    pub skip_before_ts: Option<i64>,
 }
 
 impl From<&ParseState> for ParseStateUpdate {
@@ -52,6 +58,9 @@ impl From<&ParseState> for ParseStateUpdate {
             uncompressed_offset: state.uncompressed_offset,
             mtime_ns: state.mtime_ns,
             completed: state.completed,
+            earliest_ts: state.earliest_ts,
+            latest_ts: state.latest_ts,
+            skip_before_ts: state.skip_before_ts,
         }
     }
 }
@@ -84,8 +93,8 @@ CREATE TABLE IF NOT EXISTS hourly_stats (
     status_4xx INTEGER DEFAULT 0,
     status_5xx INTEGER DEFAULT 0,
     PRIMARY KEY (date, hour)
-);
-CREATE TABLE IF NOT EXISTS monthly_top_urls (
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS top_urls (
     period    TEXT    NOT NULL,
     url       TEXT    NOT NULL,
     hits      INTEGER NOT NULL DEFAULT 0,
@@ -94,8 +103,8 @@ CREATE TABLE IF NOT EXISTS monthly_top_urls (
     rt_count  INTEGER NOT NULL DEFAULT 0,
     rt_max    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, url)
-);
-CREATE TABLE IF NOT EXISTS monthly_top_ips (
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS top_ips (
     period       TEXT    NOT NULL,
     host_kind    INTEGER NOT NULL,
     host_hi      INTEGER NOT NULL,
@@ -104,43 +113,43 @@ CREATE TABLE IF NOT EXISTS monthly_top_ips (
     bandwidth    INTEGER NOT NULL DEFAULT 0,
     country_code TEXT    NOT NULL DEFAULT '--',
     PRIMARY KEY (period, host_kind, host_hi, host_lo)
-);
-CREATE TABLE IF NOT EXISTS monthly_referrers (
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS top_referrers (
     period   TEXT NOT NULL,
     referrer TEXT NOT NULL,
     hits     INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, referrer)
-);
-CREATE TABLE IF NOT EXISTS monthly_agents (
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS top_agents (
     period       TEXT NOT NULL,
     agent_family TEXT NOT NULL,
     hits         INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, agent_family)
-);
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS top_countries (
-    period       TEXT,
-    country_code TEXT,
-    hits         INTEGER DEFAULT 0,
+    period       TEXT    NOT NULL,
+    country_code TEXT    NOT NULL,
+    hits         INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, country_code)
-);
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS status_codes (
-    period TEXT,
-    status INTEGER,
-    hits   INTEGER DEFAULT 0,
+    period TEXT    NOT NULL,
+    status INTEGER NOT NULL,
+    hits   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, status)
-);
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS method_counts (
-    period TEXT,
-    method TEXT,
-    hits   INTEGER DEFAULT 0,
+    period TEXT NOT NULL,
+    method TEXT NOT NULL,
+    hits   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, method)
-);
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS protocol_counts (
-    period TEXT,
-    proto  TEXT,
-    hits   INTEGER DEFAULT 0,
+    period TEXT NOT NULL,
+    proto  TEXT NOT NULL,
+    hits   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, proto)
-);
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS daily_unique_ips (
     date    TEXT    NOT NULL,
     ip_kind INTEGER NOT NULL,
@@ -149,12 +158,12 @@ CREATE TABLE IF NOT EXISTS daily_unique_ips (
     bitmap  BLOB    NOT NULL,
     PRIMARY KEY (date, ip_kind, ip_hi)
 );
-CREATE TABLE IF NOT EXISTS yearly_unique_ips (
-    year    TEXT    NOT NULL,
+CREATE TABLE IF NOT EXISTS monthly_unique_ips (
+    period  TEXT    NOT NULL,
     ip_kind INTEGER NOT NULL,
-    ip_hi   INTEGER NOT NULL,
+    ip_hi   INTEGER NOT NULL DEFAULT 0,
     bitmap  BLOB    NOT NULL,
-    PRIMARY KEY (year, ip_kind, ip_hi)
+    PRIMARY KEY (period, ip_kind, ip_hi)
 );
 CREATE TABLE IF NOT EXISTS unique_visitor_counts (
     period TEXT PRIMARY KEY,
@@ -172,12 +181,6 @@ CREATE TABLE IF NOT EXISTS countries (
     country_code TEXT PRIMARY KEY,
     country_name TEXT NOT NULL DEFAULT 'Unknown'
 );
-CREATE TABLE IF NOT EXISTS all_time_ips (
-    ip_kind INTEGER NOT NULL,
-    ip_hi   INTEGER NOT NULL,
-    bitmap  BLOB    NOT NULL,
-    PRIMARY KEY (ip_kind, ip_hi)
-);
 CREATE TABLE IF NOT EXISTS parse_state (
     filepath    TEXT PRIMARY KEY,
     inode       INTEGER,
@@ -188,7 +191,10 @@ CREATE TABLE IF NOT EXISTS parse_state (
     compressed_offset INTEGER,
     uncompressed_offset INTEGER,
     mtime_ns    INTEGER,
-    completed   INTEGER NOT NULL DEFAULT 0
+    completed   INTEGER NOT NULL DEFAULT 0,
+    earliest_ts INTEGER,
+    latest_ts   INTEGER,
+    skip_before_ts INTEGER
 );
 CREATE TABLE IF NOT EXISTS parse_state_archive (
     filepath    TEXT NOT NULL,
@@ -201,6 +207,9 @@ CREATE TABLE IF NOT EXISTS parse_state_archive (
     uncompressed_offset INTEGER,
     mtime_ns    INTEGER,
     completed   INTEGER NOT NULL DEFAULT 0,
+    earliest_ts INTEGER,
+    latest_ts   INTEGER,
+    skip_before_ts INTEGER,
     PRIMARY KEY (filepath, inode)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS parse_state_inode ON parse_state (inode);
@@ -258,6 +267,14 @@ impl Database {
     fn apply_schema(&mut self) -> Result<()> {
         self.conn.execute_batch(SCHEMA)?;
         Ok(())
+    }
+
+    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+
+    pub(crate) fn conn_ref(&self) -> &Connection {
+        &self.conn
     }
 
     pub fn get_meta(&self, key: &str) -> Result<Option<String>> {

@@ -17,6 +17,8 @@ pub(crate) struct ParsedEntry {
 pub(crate) enum LoaderMsg {
     FileStart {
         file_idx: usize,
+        /// If set, the parser must drop entries with unix timestamp < this value.
+        skip_before_ts: Option<i64>,
     },
     Lines {
         /// Each line paired with its start byte offset in the (decoded) file.

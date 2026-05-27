@@ -350,8 +350,7 @@ mod tests {
 
         db.finalize_month("2026-05", 20).expect("finalize");
 
-        // all_time_ips and yearly_unique_ips each have one blob row (ip_kind=1, ip_hi=0)
-        // with both IPs in the bitmap.
+        // monthly_unique_ips should have one blob row for the month with both IPs.
         let monthly_count: i64 = db
             .conn
             .query_row(
@@ -365,29 +364,29 @@ mod tests {
         let blob: Vec<u8> = db
             .conn
             .query_row(
-                "SELECT bitmap FROM all_time_ips WHERE ip_kind=1 AND ip_hi=0",
+                "SELECT bitmap FROM monthly_unique_ips WHERE period='2026-05' AND ip_kind=1 AND ip_hi=0",
                 [],
                 |r| r.get(0),
             )
-            .expect("all_time bitmap");
+            .expect("monthly_unique_ips bitmap");
         let bm = roaring::RoaringBitmap::deserialize_from(&blob[..]).expect("deserialize");
-        assert_eq!(bm.len(), 2, "all_time_ips should contain 2 IPv4 addresses");
+        assert_eq!(bm.len(), 2, "monthly_unique_ips should contain 2 IPv4 addresses");
 
-        let blob: Vec<u8> = db
+        // yearly count for 2026 should also be 2 (only one month so far)
+        let yearly_count: i64 = db
             .conn
             .query_row(
-                "SELECT bitmap FROM yearly_unique_ips WHERE year='2026' AND ip_kind=1 AND ip_hi=0",
+                "SELECT count FROM unique_visitor_counts WHERE period='2026'",
                 [],
                 |r| r.get(0),
             )
-            .expect("yearly bitmap");
-        let bm = roaring::RoaringBitmap::deserialize_from(&blob[..]).expect("deserialize");
-        assert_eq!(bm.len(), 2, "yearly_unique_ips should contain 2 IPv4 addresses");
+            .expect("yearly count");
+        assert_eq!(yearly_count, 2, "yearly count should equal monthly count when only one month exists");
 
         let url_count: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM monthly_top_urls WHERE period='2026-05'",
+                "SELECT COUNT(*) FROM top_urls WHERE period='2026-05'",
                 [],
                 |r| r.get(0),
             )
@@ -424,18 +423,19 @@ mod tests {
             "yearly cache should deduplicate ip2 across months"
         );
 
+        // finalize_year is now a no-op (yearly count is kept current by finalize_month)
         db.finalize_year("2026").expect("finalize year");
 
-        // yearly_unique_ips for 2026 should be cleared
-        let remaining: i64 = db
+        // monthly_unique_ips snapshots should still exist for both months
+        let monthly_rows: i64 = db
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM yearly_unique_ips WHERE year='2026'",
+                "SELECT COUNT(*) FROM monthly_unique_ips WHERE period LIKE '2026-%'",
                 [],
                 |r| r.get(0),
             )
-            .expect("yearly_unique_ips after finalize_year");
-        assert_eq!(remaining, 0);
+            .expect("monthly_unique_ips rows after finalize_year");
+        assert_eq!(monthly_rows, 2, "monthly snapshots should be retained");
 
         // unique_visitor_counts should still have the final count
         let final_count: i64 = db
@@ -464,6 +464,9 @@ mod tests {
             uncompressed_offset: 456,
             mtime_ns: 1_700_000_000,
             completed: true,
+            earliest_ts: Some(1_700_000_000),
+            latest_ts: Some(1_700_086_400),
+            skip_before_ts: None,
         })
         .expect("set parse state");
 

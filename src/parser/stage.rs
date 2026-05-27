@@ -9,6 +9,7 @@ use crate::aggregator::messages::{
     pop_blocking, push_blocking, LoaderMsg, ParsedEntry, ParserMsg,
 };
 use crate::aggregator::{ProgressState, PARSER_BATCH_SIZE};
+use crate::parser::combined::parse_local_epoch_days;
 use crate::parser::LogFormat;
 use crate::rules::{Action, HideMask, SharedRuleSet};
 use crate::ua::UaParser;
@@ -32,10 +33,12 @@ pub(crate) fn run_parser(
     let mut current_offset: u64 = 0;
     let mut rule_stats: BTreeMap<Arc<str>, RuleStats> = BTreeMap::new();
     let mut bot_filtered: u64 = 0;
+    let mut current_skip_before_ts: Option<i64> = None;
 
     loop {
         match pop_blocking(&mut rx) {
-            LoaderMsg::FileStart { file_idx } => {
+            LoaderMsg::FileStart { file_idx, skip_before_ts } => {
+                current_skip_before_ts = skip_before_ts;
                 push_blocking(&mut tx, ParserMsg::FileStart { file_idx });
             }
 
@@ -46,6 +49,24 @@ pub(crate) fn run_parser(
                 current_offset = offset;
                 for (line, line_start) in batch {
                     if let Some(entry) = log_format.parse(line) {
+                        if let Some(cutoff) = current_skip_before_ts {
+                            // Compare the entry's LOCAL date (epoch days) against the
+                            // rollback boundary.  skip_before_ts is always UTC midnight
+                            // (= epoch_days * 86400), so dividing by 86400 gives the
+                            // rollback epoch-day.  Using the LOCAL date avoids incorrectly
+                            // dropping entries whose UTC timestamp falls before midnight
+                            // but whose in-log local date is already in the rollback month
+                            // (e.g. BST +01:00 entries logged at UTC 23:xx on the last day
+                            // of the previous month).
+                            let skip_before_days = cutoff / 86400;
+                            match parse_local_epoch_days(entry.time_str(), entry.month_num) {
+                                Some(local_days) if local_days < skip_before_days => {
+                                    ps.lines_done.fetch_add(1, Ordering::Relaxed);
+                                    continue;
+                                }
+                                _ => {}
+                            }
+                        }
                         let ua_result = ua.parse(entry.user_agent());
                         if bot_filter && ua_result.is_bot {
                             bot_filtered += 1;

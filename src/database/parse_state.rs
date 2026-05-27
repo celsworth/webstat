@@ -8,7 +8,8 @@ macro_rules! ps_cols {
     () => {
         "filepath, inode, compressed_size, uncompressed_size, \
          compressed_head_fingerprint, uncompressed_head_fingerprint, \
-         compressed_offset, uncompressed_offset, mtime_ns, completed"
+         compressed_offset, uncompressed_offset, mtime_ns, completed, \
+         earliest_ts, latest_ts, skip_before_ts"
     };
 }
 
@@ -30,8 +31,6 @@ impl Database {
         Ok(ParseState {
             filepath: row.get::<_, String>(0)?,
             inode: row.get::<_, i64>(1)? as u64,
-            // Columns 2-8 are non-null in practice; unwrap_or(0) guards against
-            // legacy rows written before the schema was tightened.
             compressed_size: row.get::<_, Option<i64>>(2)?.unwrap_or(0) as u64,
             uncompressed_size: row.get::<_, Option<i64>>(3)?.unwrap_or(0) as u64,
             compressed_head_fingerprint: row.get::<_, Option<i64>>(4)?.map(|v| v as u64),
@@ -40,6 +39,9 @@ impl Database {
             uncompressed_offset: row.get::<_, Option<i64>>(7)?.unwrap_or(0) as u64,
             mtime_ns: row.get::<_, Option<i64>>(8)?.unwrap_or(0),
             completed: row.get::<_, Option<i64>>(9)?.unwrap_or(0) != 0,
+            earliest_ts: row.get::<_, Option<i64>>(10)?,
+            latest_ts: row.get::<_, Option<i64>>(11)?,
+            skip_before_ts: row.get::<_, Option<i64>>(12)?,
         })
     }
 
@@ -178,8 +180,9 @@ impl Database {
             "INSERT INTO parse_state \
              (filepath, inode, compressed_size, uncompressed_size, \
               compressed_head_fingerprint, uncompressed_head_fingerprint, \
-              compressed_offset, uncompressed_offset, mtime_ns, completed) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+              compressed_offset, uncompressed_offset, mtime_ns, completed, \
+              earliest_ts, latest_ts, skip_before_ts) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
              ON CONFLICT (filepath) DO UPDATE SET \
                inode = ?2, \
                compressed_size = ?3, \
@@ -189,7 +192,10 @@ impl Database {
                compressed_offset = ?7, \
                uncompressed_offset = ?8, \
                mtime_ns = ?9, \
-               completed = ?10",
+               completed = ?10, \
+               earliest_ts = ?11, \
+               latest_ts = ?12, \
+               skip_before_ts = ?13",
             params![
                 state.filepath,
                 state.inode as i64,
@@ -201,6 +207,9 @@ impl Database {
                 state.uncompressed_offset as i64,
                 state.mtime_ns,
                 state.completed as i64,
+                state.earliest_ts,
+                state.latest_ts,
+                state.skip_before_ts,
             ],
         )?;
         Ok(())

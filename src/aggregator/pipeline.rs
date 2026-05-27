@@ -11,6 +11,7 @@ use anyhow::Result;
 use super::messages::{pop_blocking, LoaderMsg, ParserMsg};
 use super::{FileResumePlan, Processor, CHANNEL_CAPACITY};
 use crate::database::ParseStateUpdate;
+use crate::parser::combined::parse_unix_timestamp;
 use crate::loader;
 use crate::parser::stage::{self as parser_stage, RuleStats};
 use crate::parser::LogFormat;
@@ -33,9 +34,22 @@ struct ActiveFile {
     plan: FileResumePlan,
     /// Most recent offset reported via a ParserMsg::Entries batch.
     last_offset: u64,
+    earliest_ts: Option<i64>,
+    latest_ts: Option<i64>,
 }
 
 impl ActiveFile {
+    fn observe_ts(&mut self, ts: i64) {
+        self.earliest_ts = Some(match self.earliest_ts {
+            Some(e) => e.min(ts),
+            None => ts,
+        });
+        self.latest_ts = Some(match self.latest_ts {
+            Some(l) => l.max(ts),
+            None => ts,
+        });
+    }
+
     /// Build a partial (not-completed) ParseStateUpdate for checkpointing mid-file.
     fn partial_parse_state(&self) -> ParseStateUpdate {
         let is_compressed = self.plan.compression.is_compressed();
@@ -63,6 +77,9 @@ impl ActiveFile {
             uncompressed_offset: self.last_offset,
             mtime_ns: self.plan.mtime_ns,
             completed: false,
+            earliest_ts: self.earliest_ts,
+            latest_ts: self.latest_ts,
+            skip_before_ts: None,
         }
     }
 }
@@ -72,6 +89,8 @@ fn make_file_parse_state(
     plan: &FileResumePlan,
     final_offset: u64,
     completed: bool,
+    earliest_ts: Option<i64>,
+    latest_ts: Option<i64>,
 ) -> ParseStateUpdate {
     let is_compressed = plan.compression.is_compressed();
     ParseStateUpdate {
@@ -97,6 +116,9 @@ fn make_file_parse_state(
         uncompressed_offset: final_offset,
         mtime_ns: plan.mtime_ns,
         completed,
+        earliest_ts,
+        latest_ts,
+        skip_before_ts: None,
     }
 }
 
@@ -160,9 +182,9 @@ impl Processor {
         // Files are strictly ordered. If pending file[k]'s first-line timestamp
         // is strictly before last_log_ts, every pending file before k is
         // guaranteed entirely processed already.
+        let last_log_ts = self.db.get_last_log_ts().unwrap_or(0);
         let mut order_skip: AHashSet<usize> = AHashSet::new();
         if pending_indices.len() > 1 {
-            let last_log_ts = self.db.get_last_log_ts().unwrap_or(0);
             if last_log_ts > 0 {
                 let t0b = std::time::Instant::now();
                 let pending_first_tss: Vec<Option<i64>> = pending_indices
@@ -304,6 +326,8 @@ impl Processor {
                             path: path.clone(),
                             plan: plan.clone(),
                             last_offset: initial_offset,
+                            earliest_ts: None,
+                            latest_ts: None,
                         });
                     }
                 }
@@ -356,6 +380,11 @@ impl Processor {
                                 self.db.set_meta("current_month", &run_acc.current_month)?;
                             }
                         }
+                        if let Some(ts) = parse_unix_timestamp(parsed.entry.time_str(), parsed.entry.month_num) {
+                            if let Some(ref mut af) = active {
+                                af.observe_ts(ts);
+                            }
+                        }
                         self.aggregate_entry(parsed, &mut run_acc);
                     }
 
@@ -381,12 +410,18 @@ impl Processor {
                     final_offset,
                     completed,
                 } => {
+                    let (earliest_ts, latest_ts) = active
+                        .as_ref()
+                        .map(|af| (af.earliest_ts, af.latest_ts))
+                        .unwrap_or((None, None));
                     if let Some((path, plan)) = file_plans.get(&file_idx) {
                         pending_parse_states.push(make_file_parse_state(
                             path,
                             plan,
                             final_offset,
                             completed,
+                            earliest_ts,
+                            latest_ts,
                         ));
                     }
                     ps.files_done.fetch_add(1, Ordering::Relaxed);

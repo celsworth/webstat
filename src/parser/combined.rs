@@ -273,6 +273,24 @@ fn find_kv_ms(b: &[u8], key: &[u8]) -> Option<u32> {
     None
 }
 
+/// Return the epoch-day number for the **local date** embedded in a CLF
+/// timestamp (`DD/Mon/YYYY:HH:MM:SS ±HHMM`).
+///
+/// Unlike `parse_unix_timestamp`, this ignores the clock time and timezone
+/// offset entirely: it returns `days_from_civil(year, month, day)` where
+/// year/month/day are read directly from the log line.  This is correct for
+/// comparing against a rollback date boundary because `hourly_stats` stores
+/// data keyed by the LOCAL date, not the UTC date.
+pub(crate) fn parse_local_epoch_days(time_str: &str, month_num: u8) -> Option<i64> {
+    let b = time_str.as_bytes();
+    if b.len() < 11 {
+        return None;
+    }
+    let day: u32 = std::str::from_utf8(&b[0..2]).ok()?.parse().ok()?;
+    let year: i32 = std::str::from_utf8(&b[7..11]).ok()?.parse().ok()?;
+    Some(crate::parser::days_from_civil(year, month_num as u32, day))
+}
+
 /// Parse a CLF timestamp (`DD/Mon/YYYY:HH:MM:SS ±HHMM`) into a Unix
 /// timestamp (seconds since epoch, UTC).
 pub(crate) fn parse_unix_timestamp(time_str: &str, month_num: u8) -> Option<i64> {

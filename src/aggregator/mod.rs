@@ -65,6 +65,9 @@ pub(crate) struct FileResumePlan {
     pub(crate) uncompressed_size: Option<u64>,
     pub(crate) compressed_head_fingerprint: Option<u64>,
     pub(crate) uncompressed_head_fingerprint: Option<u64>,
+    /// If set, entries with unix timestamp < this value are dropped by the parser.
+    /// Used when re-ingesting a file that spans the rollback boundary.
+    pub(crate) skip_before_ts: Option<i64>,
 }
 
 // ── Processor ─────────────────────────────────────────────────────────────────
