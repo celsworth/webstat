@@ -188,8 +188,9 @@ recognised as the same stream and not reprocessed.
    - **Loader** — reads and decompresses raw bytes into line batches (`src/loader.rs`, `src/compression.rs`)
    - **Parser** — parses combined-log-format lines, classifies user agents, drops bots (`src/parser/`)
    - **Aggregator** — updates in-memory accumulators, detects month boundaries, triggers finalisation (`src/aggregator/aggregation.rs`, `src/aggregator/flush.rs`)
-6. On month finalisation: prune top-N tables, compute unique-IP counts (`src/database/writer.rs`)
-7. Flush accumulators and update per-file parse state (`src/aggregator/flush.rs`, `src/database.rs`)
+6. At each checkpoint and end-of-run: **cull** top-N tables, removing rows with no realistic chance of reaching the top `top_n` (every metric below 1/10th of the current N-th-best value; only fires when a table exceeds `top_n × 50` rows)
+7. On month finalisation: **trim** top-N tables to exactly `top_n` rows, compute unique-IP counts (`src/database/writer.rs`)
+8. Flush accumulators and update per-file parse state (`src/aggregator/flush.rs`, `src/database.rs`)
 
 ### `generate`
 

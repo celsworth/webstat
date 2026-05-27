@@ -393,6 +393,7 @@ impl Processor {
                             pending_parse_states.push(af.partial_parse_state());
                         }
                         self.flush_run(&run_acc, &pending_parse_states, &retired_parse_states)?;
+                        self.db.cull_period(&run_acc.current_month, self.top_n)?;
                         let month = run_acc.current_month.clone();
                         run_acc.clear_for_new_month(month);
                         self.geo.mem_cache.clear();

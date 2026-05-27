@@ -30,7 +30,7 @@ cargo test
 - **`src/geo.rs`** — GeoIP lookup and cache
 - **`src/ua.rs`** — UA family classification and bot detection; runs in the parser thread
 - **`src/database.rs`** — SQLite connection wrapper: schema initialisation, WAL mode, and module re-exports
-- **`src/database/writer.rs`** — `flush_data`, `finalize_month`, per-period pruning
+- **`src/database/writer.rs`** — `flush_data`, `finalize_month`, `cull_period`, per-period pruning
 - **`src/database/parse_state.rs`** — parse state load/save
 - **`src/database/visit_state.rs`** — visit state load/save
 - **`src/database/maintenance.rs`** — vacuum, meta key-value ops
@@ -88,7 +88,13 @@ Unique IP counting is exact, not approximate, and uses roaring bitmaps for compa
 
 ## Top-N tables
 
-Top-N tables (`monthly_top_urls_hits`, `monthly_top_urls_bandwidth`, `monthly_top_ips_hits`, `monthly_top_ips_bandwidth`, `monthly_referrers`, `monthly_agents`) accumulate exact counts during ingestion. `finalize_month` prunes each table to the top `top_n` rows per period via `DELETE … WHERE … NOT IN (SELECT … ORDER BY … LIMIT top_n)`. Each table can be individually disabled via config flags (`enable_top_urls`, `enable_top_sites`, `enable_top_refs`, `enable_top_agents`). All-time unique IP tracking (`all_time_ips` table) is always enabled.
+Top-N tables (`top_urls`, `top_ips`, `top_referrers`, `top_agents`) accumulate exact counts during ingestion. Two distinct cleanup operations keep them from growing unbounded:
+
+**Culling** (`cull_period`, called at each checkpoint and at end-of-run): removes rows that have no realistic chance of appearing in the final top `top_n`. A row is culled when every tracked metric (hits, bandwidth, avg response time where available) is below 1/10th of the current N-th-best value for that metric. The guard condition `row_count > top_n * 50` ensures culling only fires when the table is well above the safety margin, making it safe to run mid-month.
+
+**Trimming** (`finalize_month`): at month end, prunes each table to exactly the top `top_n` rows per period via `DELETE … WHERE … NOT IN (SELECT … ORDER BY … LIMIT top_n)`.
+
+Each table can be individually disabled via config flags (`enable_top_urls`, `enable_top_sites`, `enable_top_refs`, `enable_top_agents`). All-time unique IP tracking (`all_time_ips` table) is always enabled.
 
 ## Resume / dedup system
 

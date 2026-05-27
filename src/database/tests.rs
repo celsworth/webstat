@@ -500,4 +500,227 @@ mod tests {
             Some("2026-06".to_string())
         );
     }
+
+    // ── cull_period helpers ───────────────────────────────────────────────────
+
+    fn insert_url(db: &mut Database, period: &str, url: &str, hits: i64, bw: i64, rt_sum: i64, rt_count: i64) {
+        db.conn.execute(
+            "INSERT INTO top_urls (period,url,hits,bandwidth,rt_sum,rt_count,rt_max) \
+             VALUES (?1,?2,?3,?4,?5,?6,0)",
+            rusqlite::params![period, url, hits, bw, rt_sum, rt_count],
+        ).unwrap();
+    }
+
+    fn insert_ip(db: &mut Database, period: &str, lo: i64, hits: i64, bw: i64) {
+        db.conn.execute(
+            "INSERT INTO top_ips (period,host_kind,host_hi,host_lo,hits,bandwidth,country_code) \
+             VALUES (?1,0,0,?2,?3,?4,'--')",
+            rusqlite::params![period, lo, hits, bw],
+        ).unwrap();
+    }
+
+    fn insert_ref(db: &mut Database, period: &str, referrer: &str, hits: i64) {
+        db.conn.execute(
+            "INSERT INTO top_referrers (period,referrer,hits) VALUES (?1,?2,?3)",
+            rusqlite::params![period, referrer, hits],
+        ).unwrap();
+    }
+
+    fn insert_agent(db: &mut Database, period: &str, family: &str, hits: i64, bw: i64) {
+        db.conn.execute(
+            "INSERT INTO top_agents (period,agent_family,hits,bandwidth) VALUES (?1,?2,?3,?4)",
+            rusqlite::params![period, family, hits, bw],
+        ).unwrap();
+    }
+
+    fn count_table(db: &Database, table: &str, period: &str) -> i64 {
+        db.conn.query_row(
+            &format!("SELECT COUNT(*) FROM {table} WHERE period=?1"),
+            rusqlite::params![period],
+            |r| r.get(0),
+        ).unwrap()
+    }
+
+    fn url_exists(db: &Database, period: &str, url: &str) -> bool {
+        let n: i64 = db.conn.query_row(
+            "SELECT COUNT(*) FROM top_urls WHERE period=?1 AND url=?2",
+            rusqlite::params![period, url],
+            |r| r.get(0),
+        ).unwrap();
+        n > 0
+    }
+
+    fn ip_lo_exists(db: &Database, period: &str, lo: i64) -> bool {
+        let n: i64 = db.conn.query_row(
+            "SELECT COUNT(*) FROM top_ips \
+             WHERE period=?1 AND host_kind=0 AND host_hi=0 AND host_lo=?2",
+            rusqlite::params![period, lo],
+            |r| r.get(0),
+        ).unwrap();
+        n > 0
+    }
+
+    // Insert n rows into top_urls: hits=1..=n, bw=hits*100, rt_sum=hits, rt_count=1.
+    // All metrics are proportional so the same rows rank lowest across every metric.
+    fn seed_urls(db: &mut Database, period: &str, n: i64) {
+        for i in 1..=n {
+            insert_url(db, period, &format!("/url-{i}"), i, i * 100, i, 1);
+        }
+    }
+
+    // ── cull_period tests ─────────────────────────────────────────────────────
+    //
+    // Logic: delete rows where every metric is below 1/10th of the current
+    // top_n-th best value. Guard: only fires when count > top_n * 50.
+    //
+    // Test datasets use top_n=1, so the guard threshold is 50 rows (need 51+).
+    // The "top" row always has hits=1000, bw=100_000, rt_avg=10_000.
+    // Thresholds: hits<100, bw<10_000, rt<1_000.
+    // "Junk" rows (hits=1, bw=10, rt_avg=1) fall below all three → culled.
+
+    #[test]
+    fn cull_period_no_op_when_top_n_is_zero() {
+        let mut db = open_test_db();
+        seed_urls(&mut db, "2026-05", 200);
+        db.cull_period("2026-05", 0).unwrap();
+        assert_eq!(count_table(&db, "top_urls", "2026-05"), 200);
+    }
+
+    #[test]
+    fn cull_top_urls_no_op_at_threshold() {
+        // threshold = top_n*50 = 50; exactly 50 rows → count > 50 is false.
+        let mut db = open_test_db();
+        insert_url(&mut db, "2026-05", "/top", 1000, 100_000, 10_000, 1);
+        for i in 1i64..=49 {
+            insert_url(&mut db, "2026-05", &format!("/junk-{i}"), 1, 10, 1, 1);
+        }
+        db.cull_period("2026-05", 1).unwrap();
+        assert_eq!(count_table(&db, "top_urls", "2026-05"), 50);
+    }
+
+    #[test]
+    fn cull_top_urls_removes_junk_below_fraction_of_nth_best() {
+        // 51 rows (1 top + 50 junk). Top-1 hits=1000 → thresh=100.
+        // Junk has hits=1 < 100, bw=10 < 10_000, rt=1 < 1_000 → all culled.
+        let mut db = open_test_db();
+        insert_url(&mut db, "2026-05", "/top", 1000, 100_000, 10_000, 1);
+        for i in 1i64..=50 {
+            insert_url(&mut db, "2026-05", &format!("/junk-{i}"), 1, 10, 1, 1);
+        }
+        db.cull_period("2026-05", 1).unwrap();
+        assert!(url_exists(&db, "2026-05", "/top"), "/top must survive");
+        assert!(!url_exists(&db, "2026-05", "/junk-1"), "junk must be culled");
+        assert_eq!(count_table(&db, "top_urls", "2026-05"), 1);
+    }
+
+    #[test]
+    fn cull_top_urls_spares_low_hits_entry_with_high_bandwidth() {
+        // /mixed has hits=1 (below thresh=100) but bw=200_000 (above thresh=10_000).
+        // bw condition fails → not culled.
+        let mut db = open_test_db();
+        insert_url(&mut db, "2026-05", "/top", 1000, 100_000, 10_000, 1);
+        insert_url(&mut db, "2026-05", "/mixed", 1, 200_000, 1, 1);
+        for i in 1i64..=49 {
+            insert_url(&mut db, "2026-05", &format!("/junk-{i}"), 1, 10, 1, 1);
+        }
+        db.cull_period("2026-05", 1).unwrap();
+        assert!(url_exists(&db, "2026-05", "/mixed"), "/mixed should survive (high bw)");
+    }
+
+    #[test]
+    fn cull_top_urls_spares_low_bw_entry_with_high_hits() {
+        // /mixed has bw=1 (below thresh) but hits=999 (above thresh=100).
+        // hits condition fails → not culled.
+        let mut db = open_test_db();
+        insert_url(&mut db, "2026-05", "/top", 1000, 100_000, 10_000, 1);
+        insert_url(&mut db, "2026-05", "/mixed", 999, 1, 1, 1);
+        for i in 1i64..=49 {
+            insert_url(&mut db, "2026-05", &format!("/junk-{i}"), 1, 10, 1, 1);
+        }
+        db.cull_period("2026-05", 1).unwrap();
+        assert!(url_exists(&db, "2026-05", "/mixed"), "/mixed should survive (high hits)");
+    }
+
+    #[test]
+    fn cull_top_urls_zero_rt_treated_as_worst() {
+        // /zero-rt has rt_count=0 → rt_avg=0.0, below thresh=1_000.
+        // Also has low hits and bw → all conditions met → culled.
+        let mut db = open_test_db();
+        insert_url(&mut db, "2026-05", "/top", 1000, 100_000, 10_000, 1);
+        insert_url(&mut db, "2026-05", "/zero-rt", 1, 10, 0, 0);
+        for i in 1i64..=49 {
+            insert_url(&mut db, "2026-05", &format!("/junk-{i}"), 1, 10, 1, 1);
+        }
+        db.cull_period("2026-05", 1).unwrap();
+        assert!(!url_exists(&db, "2026-05", "/zero-rt"), "/zero-rt should be culled");
+    }
+
+    #[test]
+    fn cull_top_urls_zero_rt_spared_by_high_hits() {
+        // /zero-rt has rt_count=0 but hits=999 ≥ thresh=100 → not culled.
+        let mut db = open_test_db();
+        insert_url(&mut db, "2026-05", "/top", 1000, 100_000, 10_000, 1);
+        insert_url(&mut db, "2026-05", "/zero-rt", 999, 100_000, 0, 0);
+        for i in 1i64..=49 {
+            insert_url(&mut db, "2026-05", &format!("/junk-{i}"), 1, 10, 1, 1);
+        }
+        db.cull_period("2026-05", 1).unwrap();
+        assert!(url_exists(&db, "2026-05", "/zero-rt"), "/zero-rt should survive (high hits)");
+    }
+
+    #[test]
+    fn cull_top_ips_removes_junk_below_fraction_of_nth_best() {
+        let mut db = open_test_db();
+        insert_ip(&mut db, "2026-05", 0, 1000, 100_000); // top
+        for i in 1i64..=50 {
+            insert_ip(&mut db, "2026-05", i, 1, 10); // junk
+        }
+        db.cull_period("2026-05", 1).unwrap();
+        assert!(ip_lo_exists(&db, "2026-05", 0), "top ip must survive");
+        assert!(!ip_lo_exists(&db, "2026-05", 1), "junk ip must be culled");
+        assert_eq!(count_table(&db, "top_ips", "2026-05"), 1);
+    }
+
+    #[test]
+    fn cull_top_referrers_removes_junk_below_fraction_of_nth_best() {
+        let mut db = open_test_db();
+        insert_ref(&mut db, "2026-05", "https://top.example", 1000);
+        for i in 1i64..=50 {
+            insert_ref(&mut db, "2026-05", &format!("https://junk-{i}.example"), 1);
+        }
+        db.cull_period("2026-05", 1).unwrap();
+        assert_eq!(count_table(&db, "top_referrers", "2026-05"), 1);
+        let n: i64 = db.conn.query_row(
+            "SELECT COUNT(*) FROM top_referrers \
+             WHERE period='2026-05' AND referrer='https://top.example'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(n, 1, "top referrer must survive");
+    }
+
+    #[test]
+    fn cull_top_agents_removes_junk_below_fraction_of_nth_best() {
+        let mut db = open_test_db();
+        insert_agent(&mut db, "2026-05", "TopAgent", 1000, 100_000);
+        for i in 1i64..=50 {
+            insert_agent(&mut db, "2026-05", &format!("JunkAgent/{i}"), 1, 10);
+        }
+        db.cull_period("2026-05", 1).unwrap();
+        assert_eq!(count_table(&db, "top_agents", "2026-05"), 1);
+    }
+
+    #[test]
+    fn cull_period_does_not_affect_other_periods() {
+        let mut db = open_test_db();
+        insert_url(&mut db, "2026-05", "/top", 1000, 100_000, 10_000, 1);
+        insert_url(&mut db, "2026-06", "/top", 1000, 100_000, 10_000, 1);
+        for i in 1i64..=50 {
+            insert_url(&mut db, "2026-05", &format!("/junk-{i}"), 1, 10, 1, 1);
+            insert_url(&mut db, "2026-06", &format!("/junk-{i}"), 1, 10, 1, 1);
+        }
+        db.cull_period("2026-05", 1).unwrap();
+        assert_eq!(count_table(&db, "top_urls", "2026-06"), 51, "2026-06 must be untouched");
+        assert_eq!(count_table(&db, "top_urls", "2026-05"), 1, "2026-05 junk must be culled");
+    }
 }

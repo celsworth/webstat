@@ -330,6 +330,7 @@ impl Processor {
         ) = result?;
 
         self.flush_run(&run_acc, &pending_parse_states, &retired_parse_states)?;
+        self.db.cull_period(&run_acc.current_month, self.top_n)?;
 
         let total_elapsed = dir_started.elapsed().as_secs_f64();
         let total_for_log = ps.lines_done.load(Ordering::Relaxed);

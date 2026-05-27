@@ -657,6 +657,174 @@ impl Database {
         Ok(())
     }
 
+    /// Remove rows from top-N tables that have no realistic chance of reaching
+    /// the top `top_n` by end of month. A row is culled when every tracked metric
+    /// is below 1/10th of the current N-th-best value for that metric.
+    /// Per-table guard: only runs when row count exceeds `top_n * CULL_THRESHOLD_FACTOR`.
+    pub fn cull_period(&mut self, period: &str, top_n: usize) -> Result<()> {
+        const CULL_THRESHOLD_FACTOR: usize = 50;
+        const CULL_FRACTION: i64 = 10;
+
+        if top_n == 0 {
+            return Ok(());
+        }
+        let threshold = (top_n * CULL_THRESHOLD_FACTOR) as i64;
+        let offset = (top_n - 1) as i64;
+        let tx = self.conn.transaction()?;
+
+        // ── top_urls ──────────────────────────────────────────────────────────
+        {
+            let count: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM top_urls WHERE period=?1",
+                params![period],
+                |r| r.get(0),
+            )?;
+            if count > threshold {
+                let hits_nth: i64 = tx
+                    .query_row(
+                        "SELECT hits FROM top_urls WHERE period=?1 \
+                         ORDER BY hits DESC LIMIT 1 OFFSET ?2",
+                        params![period, offset],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or(0);
+                let bw_nth: i64 = tx
+                    .query_row(
+                        "SELECT bandwidth FROM top_urls WHERE period=?1 \
+                         ORDER BY bandwidth DESC LIMIT 1 OFFSET ?2",
+                        params![period, offset],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or(0);
+                let rt_nth: Option<f64> = tx
+                    .query_row(
+                        "SELECT rt_sum * 1.0 / rt_count FROM top_urls \
+                         WHERE period=?1 AND rt_count > 0 \
+                         ORDER BY rt_sum * 1.0 / rt_count DESC LIMIT 1 OFFSET ?2",
+                        params![period, offset],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+
+                let hits_thresh = hits_nth / CULL_FRACTION;
+                let bw_thresh = bw_nth / CULL_FRACTION;
+
+                if let Some(rt) = rt_nth {
+                    let rt_thresh = rt / CULL_FRACTION as f64;
+                    tx.execute(
+                        "DELETE FROM top_urls WHERE period=?1 \
+                         AND hits < ?2 AND bandwidth < ?3 \
+                         AND (CASE WHEN rt_count > 0 \
+                                   THEN rt_sum * 1.0 / rt_count \
+                                   ELSE 0.0 END) < ?4",
+                        params![period, hits_thresh, bw_thresh, rt_thresh],
+                    )?;
+                } else {
+                    tx.execute(
+                        "DELETE FROM top_urls WHERE period=?1 \
+                         AND hits < ?2 AND bandwidth < ?3",
+                        params![period, hits_thresh, bw_thresh],
+                    )?;
+                }
+            }
+        }
+
+        // ── top_ips ───────────────────────────────────────────────────────────
+        {
+            let count: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM top_ips WHERE period=?1",
+                params![period],
+                |r| r.get(0),
+            )?;
+            if count > threshold {
+                let hits_nth: i64 = tx
+                    .query_row(
+                        "SELECT hits FROM top_ips WHERE period=?1 \
+                         ORDER BY hits DESC LIMIT 1 OFFSET ?2",
+                        params![period, offset],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or(0);
+                let bw_nth: i64 = tx
+                    .query_row(
+                        "SELECT bandwidth FROM top_ips WHERE period=?1 \
+                         ORDER BY bandwidth DESC LIMIT 1 OFFSET ?2",
+                        params![period, offset],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or(0);
+                tx.execute(
+                    "DELETE FROM top_ips WHERE period=?1 AND hits < ?2 AND bandwidth < ?3",
+                    params![period, hits_nth / CULL_FRACTION, bw_nth / CULL_FRACTION],
+                )?;
+            }
+        }
+
+        // ── top_referrers ─────────────────────────────────────────────────────
+        {
+            let count: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM top_referrers WHERE period=?1",
+                params![period],
+                |r| r.get(0),
+            )?;
+            if count > threshold {
+                let hits_nth: i64 = tx
+                    .query_row(
+                        "SELECT hits FROM top_referrers WHERE period=?1 \
+                         ORDER BY hits DESC LIMIT 1 OFFSET ?2",
+                        params![period, offset],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or(0);
+                tx.execute(
+                    "DELETE FROM top_referrers WHERE period=?1 AND hits < ?2",
+                    params![period, hits_nth / CULL_FRACTION],
+                )?;
+            }
+        }
+
+        // ── top_agents ────────────────────────────────────────────────────────
+        {
+            let count: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM top_agents WHERE period=?1",
+                params![period],
+                |r| r.get(0),
+            )?;
+            if count > threshold {
+                let hits_nth: i64 = tx
+                    .query_row(
+                        "SELECT hits FROM top_agents WHERE period=?1 \
+                         ORDER BY hits DESC LIMIT 1 OFFSET ?2",
+                        params![period, offset],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or(0);
+                let bw_nth: i64 = tx
+                    .query_row(
+                        "SELECT bandwidth FROM top_agents WHERE period=?1 \
+                         ORDER BY bandwidth DESC LIMIT 1 OFFSET ?2",
+                        params![period, offset],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or(0);
+                tx.execute(
+                    "DELETE FROM top_agents WHERE period=?1 AND hits < ?2 AND bandwidth < ?3",
+                    params![period, hits_nth / CULL_FRACTION, bw_nth / CULL_FRACTION],
+                )?;
+            }
+        }
+
+        tx.commit().context("Failed to commit cull_period transaction")?;
+        Ok(())
+    }
+
     fn prune_monthly_table(
         tx: &rusqlite::Transaction<'_>,
         table: &str,
