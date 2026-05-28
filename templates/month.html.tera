@@ -217,26 +217,26 @@
         </tr>
         <tr>
           <th>Day</th>
-          <th class="metric-hits">Hits</th>
-          <th class="metric-visits">Visits</th>
-          <th class="metric-sites">Sites</th>
-          <th class="metric-bandwidth">Bandwidth</th>
+          <th class="num-col metric-hits">Hits</th>
+          <th class="num-col metric-visits">Visits</th>
+          <th class="num-col umetric-sites">Sites</th>
+          <th class="num-col metric-bandwidth">Bandwidth</th>
         </tr>
       </thead>
       <tbody>
         {% for row in daily %}
         <tr{% if row.is_weekend %} class="daily-row--weekend"{% endif %}>
           <td>{{ row.date }}</td>
-          <td data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
+          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
             {{ row.hits_fmt }}
           </td>
-          <td data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">
+          <td class="num-col" data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">
             {{ row.visits_fmt }}
           </td>
-          <td data-value="{{ row.visitors }}" title="{{ row.visitors_exact_fmt }}">
+          <td class="num-col" data-value="{{ row.visitors }}" title="{{ row.visitors_exact_fmt }}">
             {{ row.visitors_fmt }}
           </td>
-          <td data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -244,12 +244,33 @@
   </div>
 </section>
 
-<!--
-  Hourly table omitted — the Hourly Distribution chart is more useful.
-  <section class="stats-group">
-    ...
-  </section>
--->
+<section class="stats-group">
+  <div class="stats-panel">
+    <table class="data-table stats-panel__table">
+      <thead>
+        <tr>
+          <th colspan="4" class="stats-panel__heading">Hourly Statistics</th>
+        </tr>
+        <tr>
+          <th>Hour</th>
+          <th class="num-col metric-hits">Hits</th>
+          <th class="num-col metric-visits">Visits</th>
+          <th class="num-col metric-bandwidth">Bandwidth</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in hourly %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+          <td class="num-col" data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">{{ row.visits_fmt }}</td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 
 {% if top_agents_hits | length > 0 or top_agents_bandwidth | length > 0 %}
 <div class="stats-panel" data-tabs>
