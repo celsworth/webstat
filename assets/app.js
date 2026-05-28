@@ -25,7 +25,43 @@
     activate(buttons[0]);
   }
 
+  function initCollapsible(details) {
+    var body = details.querySelector('.collapsible-section__body');
+    var summary = details.querySelector('summary');
+    if (!body || !summary) return;
+
+    summary.addEventListener('click', function(e) {
+      e.preventDefault();
+      if (details.open) {
+        body.style.height = body.scrollHeight + 'px';
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            body.style.height = '0';
+          });
+        });
+        body.addEventListener('transitionend', function handler() {
+          body.removeEventListener('transitionend', handler);
+          details.removeAttribute('open');
+          body.style.height = '';
+        });
+      } else {
+        details.setAttribute('open', '');
+        body.style.height = '0';
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            body.style.height = body.scrollHeight + 'px';
+          });
+        });
+        body.addEventListener('transitionend', function handler() {
+          body.removeEventListener('transitionend', handler);
+          body.style.height = '';
+        });
+      }
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('[data-tabs]').forEach(initTabs);
+    document.querySelectorAll('.collapsible-section').forEach(initCollapsible);
   });
 })();

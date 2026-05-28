@@ -648,6 +648,49 @@ code {
     background: var(--surface-alt);
 }
 
+/* ---------- Collapsible sections ---------- */
+.collapsible-section > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.75rem;
+  background: var(--surface-alt);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid transparent;
+}
+
+.collapsible-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-section > summary::before {
+  content: '▶';
+  font-size: 0.55rem;
+  display: inline-block;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.collapsible-section[open] > summary {
+  border-bottom-color: var(--border);
+}
+
+.collapsible-section[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.collapsible-section__body {
+  overflow: hidden;
+  transition: height 0.15s ease;
+}
+
 /* ---------- Footer ---------- */
 .site-footer {
     border-top: 1px solid var(--border);

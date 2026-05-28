@@ -210,65 +210,69 @@
 
 <section class="stats-group">
   <div class="stats-panel">
-    <table class="data-table stats-panel__table">
-      <thead>
-        <tr>
-          <th colspan="5" class="stats-panel__heading">Daily Statistics</th>
-        </tr>
-        <tr>
-          <th>Day</th>
-          <th class="num-col metric-hits">Hits</th>
-          <th class="num-col metric-visits">Visits</th>
-          <th class="num-col umetric-sites">Sites</th>
-          <th class="num-col metric-bandwidth">Bandwidth</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in daily %}
-        <tr{% if row.is_weekend %} class="daily-row--weekend"{% endif %}>
-          <td>{{ row.date }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
-            {{ row.hits_fmt }}
-          </td>
-          <td class="num-col" data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">
-            {{ row.visits_fmt }}
-          </td>
-          <td class="num-col" data-value="{{ row.visitors }}" title="{{ row.visitors_exact_fmt }}">
-            {{ row.visitors_fmt }}
-          </td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <details class="collapsible-section">
+      <summary>Daily Statistics</summary>
+      <div class="collapsible-section__body">
+        <table class="data-table stats-panel__table">
+          <thead>
+            <tr>
+              <th>Day</th>
+              <th class="num-col metric-hits">Hits</th>
+              <th class="num-col metric-visits">Visits</th>
+              <th class="num-col umetric-sites">Sites</th>
+              <th class="num-col metric-bandwidth">Bandwidth</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in daily %}
+            <tr{% if row.is_weekend %} class="daily-row--weekend"{% endif %}>
+              <td>{{ row.date }}</td>
+              <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
+                {{ row.hits_fmt }}
+              </td>
+              <td class="num-col" data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">
+                {{ row.visits_fmt }}
+              </td>
+              <td class="num-col" data-value="{{ row.visitors }}" title="{{ row.visitors_exact_fmt }}">
+                {{ row.visitors_fmt }}
+              </td>
+              <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
   </div>
 </section>
 
 <section class="stats-group">
   <div class="stats-panel">
-    <table class="data-table stats-panel__table">
-      <thead>
-        <tr>
-          <th colspan="4" class="stats-panel__heading">Hourly Statistics</th>
-        </tr>
-        <tr>
-          <th>Hour</th>
-          <th class="num-col metric-hits">Hits</th>
-          <th class="num-col metric-visits">Visits</th>
-          <th class="num-col metric-bandwidth">Bandwidth</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in hourly %}
-        <tr>
-          <td>{{ row.label }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
-          <td class="num-col" data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">{{ row.visits_fmt }}</td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <details class="collapsible-section">
+      <summary>Hourly Statistics</summary>
+      <div class="collapsible-section__body">
+        <table class="data-table stats-panel__table">
+          <thead>
+            <tr>
+              <th>Hour</th>
+              <th class="num-col metric-hits">Hits</th>
+              <th class="num-col metric-visits">Visits</th>
+              <th class="num-col metric-bandwidth">Bandwidth</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in hourly %}
+            <tr>
+              <td>{{ row.label }}</td>
+              <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+              <td class="num-col" data-value="{{ row.visits }}" title="{{ row.visits_exact_fmt }}">{{ row.visits_fmt }}</td>
+              <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
   </div>
 </section>
 
