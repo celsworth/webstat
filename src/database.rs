@@ -42,7 +42,6 @@ pub struct ParseStateUpdate {
     pub completed: bool,
     pub earliest_ts: Option<i64>,
     pub latest_ts: Option<i64>,
-    pub skip_before_ts: Option<i64>,
 }
 
 impl From<&ParseState> for ParseStateUpdate {
@@ -60,7 +59,6 @@ impl From<&ParseState> for ParseStateUpdate {
             completed: state.completed,
             earliest_ts: state.earliest_ts,
             latest_ts: state.latest_ts,
-            skip_before_ts: state.skip_before_ts,
         }
     }
 }

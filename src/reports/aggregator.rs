@@ -959,18 +959,6 @@ fn decode_host(kind: u8, hi: u64, lo: u64, anonymise: bool) -> String {
     }
 }
 
-#[cfg(test)]
-fn encode_host(host: &str) -> (u8, u64, u64, String) {
-    if let Ok(v4) = host.parse::<Ipv4Addr>() {
-        return (1, 0, u32::from(v4) as u64, String::new());
-    }
-    if let Ok(v6) = host.parse::<Ipv6Addr>() {
-        let n = u128::from(v6);
-        return (2, (n >> 64) as u64, n as u64, String::new());
-    }
-    (0, 0, 0, host.to_string())
-}
-
 fn top_refs(
     conn: &Connection,
     period: &str,

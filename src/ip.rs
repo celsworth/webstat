@@ -62,9 +62,6 @@ impl IpBitmaps {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.v4.is_empty() && self.v6.values().all(|t| t.is_empty())
-    }
 }
 
 // ── Parsers ───────────────────────────────────────────────────────────────────

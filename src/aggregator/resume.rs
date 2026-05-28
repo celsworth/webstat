@@ -108,7 +108,6 @@ impl Processor {
                 completed: true,
                 earliest_ts: state.earliest_ts,
                 latest_ts: state.latest_ts,
-                skip_before_ts: None,
             }),
             retired_parse_states,
         }))
@@ -144,7 +143,6 @@ impl Processor {
             completed: true,
             earliest_ts: None,
             latest_ts: None,
-            skip_before_ts: None,
         }
     }
 
@@ -250,7 +248,6 @@ impl Processor {
                         completed: true,
                         earliest_ts: state.earliest_ts,
                         latest_ts: state.latest_ts,
-                        skip_before_ts: None,
                     }),
                     retired_parse_states,
                 });

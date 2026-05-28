@@ -79,7 +79,6 @@ impl ActiveFile {
             completed: false,
             earliest_ts: self.earliest_ts,
             latest_ts: self.latest_ts,
-            skip_before_ts: None,
         }
     }
 }
@@ -118,7 +117,6 @@ fn make_file_parse_state(
         completed,
         earliest_ts,
         latest_ts,
-        skip_before_ts: None,
     }
 }
 

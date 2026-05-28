@@ -295,21 +295,6 @@ mod pct_tests {
         .unwrap();
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
-
-    /// Extract (pct_fmt, bandwidth_pct_fmt) for the first two rows by field name.
-    fn pcts2<T, F1, F2>(rows: &[T], get_hits_pct: F1, get_bw_pct: F2) -> [(&str, &str); 2]
-    where
-        F1: Fn(&T) -> &str,
-        F2: Fn(&T) -> &str,
-    {
-        assert_eq!(rows.len(), 2, "expected exactly 2 rows");
-        [
-            (get_hits_pct(&rows[0]), get_bw_pct(&rows[0])),
-            (get_hits_pct(&rows[1]), get_bw_pct(&rows[1])),
-        ]
-    }
-
     // ── top_urls ──────────────────────────────────────────────────────────────
 
     #[test]
