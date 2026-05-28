@@ -138,10 +138,10 @@
 
   <div class="stats-panel">
     {% if status_codes | length > 0 %}
-    <table class="data-table stats-panel__table stats-panel__table--3col">
+    <table class="data-table stats-panel__table">
       <thead>
         <tr>
-          <th colspan="3" class="stats-panel__heading">Hits by Response Code</th>
+          <th colspan="2" class="stats-panel__heading">Hits by Response Code</th>
         </tr>
       </thead>
       <tbody>
@@ -159,8 +159,7 @@
         {% endif %}
         <tr class="{{ row_class }}">
           <td>{{ s.label }}</td>
-          <td class="stats-panel__pct">{{ s.pct_fmt }}</td>
-          <td title="{{ s.hits_exact_fmt }}">{{ s.hits_fmt }}</td>
+          <td class="num-col" title="{{ s.hits_exact_fmt }}"><span class="pct-value">({{ s.pct_fmt }})</span> {{ s.hits_fmt }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -170,18 +169,17 @@
 
   <div class="stats-panel">
     {% if proto_codes | length > 0 %}
-    <table class="data-table stats-panel__table stats-panel__table--3col">
+    <table class="data-table stats-panel__table">
       <thead>
         <tr>
-          <th colspan="3" class="stats-panel__heading">Hits by Protocol</th>
+          <th colspan="2" class="stats-panel__heading">Hits by Protocol</th>
         </tr>
       </thead>
       <tbody>
         {% for p in proto_codes %}
         <tr>
           <td>{{ p.proto }}</td>
-          <td class="stats-panel__pct">{{ p.pct_fmt }}</td>
-          <td title="{{ p.hits_exact_fmt }}">{{ p.hits_fmt }}</td>
+          <td class="num-col" title="{{ p.hits_exact_fmt }}"><span class="pct-value">({{ p.pct_fmt }})</span> {{ p.hits_fmt }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -191,18 +189,17 @@
 
   <div class="stats-panel">
     {% if method_codes | length > 0 %}
-    <table class="data-table stats-panel__table stats-panel__table--3col">
+    <table class="data-table stats-panel__table">
       <thead>
         <tr>
-          <th colspan="3" class="stats-panel__heading">Hits by Method</th>
+          <th colspan="2" class="stats-panel__heading">Hits by Method</th>
         </tr>
       </thead>
       <tbody>
         {% for m in method_codes %}
         <tr>
           <td>{{ m.method }}</td>
-          <td class="stats-panel__pct">{{ m.pct_fmt }}</td>
-          <td title="{{ m.hits_exact_fmt }}">{{ m.hits_fmt }}</td>
+          <td class="num-col" title="{{ m.hits_exact_fmt }}"><span class="pct-value">({{ m.pct_fmt }})</span> {{ m.hits_fmt }}</td>
         </tr>
         {% endfor %}
       </tbody>
