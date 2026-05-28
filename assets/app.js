@@ -3,64 +3,68 @@
 
   function initTabs(container) {
     const buttons = Array.from(container.querySelectorAll('[data-tabs-target]'));
-    const titleEl = container.querySelector('[data-tabs-title]');
-
     if (buttons.length === 0) return;
+
+    const titleEl = container.querySelector('[data-tabs-title]');
+    const panels = Array.from(container.querySelectorAll('[data-tabs-panel]'));
 
     function activate(btn) {
       const targetId = btn.dataset.tabsTarget;
-      buttons.forEach(function(b) {
-        b.classList.toggle('tab-btn--active', b === btn);
-      });
-      container.querySelectorAll('[data-tabs-panel]').forEach(function(panel) {
-        panel.hidden = panel.id !== targetId;
-      });
+      buttons.forEach((b) => b.classList.toggle('tab-btn--active', b === btn));
+      panels.forEach((panel) => { panel.hidden = panel.id !== targetId; });
       if (titleEl) titleEl.textContent = btn.dataset.tabsLabel || btn.textContent;
     }
 
-    buttons.forEach(function(btn) {
-      btn.addEventListener('click', function() { activate(btn); });
-    });
+    buttons.forEach((btn) => btn.addEventListener('click', () => activate(btn)));
 
-    activate(buttons[0]);
+    const initial = buttons.find((b) => b.classList.contains('tab-btn--active')) || buttons[0];
+    activate(initial);
   }
 
   function initCollapsible(details) {
-    var body = details.querySelector('.collapsible-section__body');
-    var summary = details.querySelector('summary');
+    const body = details.querySelector('.collapsible-section__body');
+    const summary = details.querySelector('summary');
     if (!body || !summary) return;
 
-    summary.addEventListener('click', function(e) {
+    let animating = false;
+
+    summary.addEventListener('click', (e) => {
       e.preventDefault();
-      if (details.open) {
-        body.style.height = body.scrollHeight + 'px';
-        requestAnimationFrame(function() {
-          requestAnimationFrame(function() {
-            body.style.height = '0';
-          });
-        });
-        body.addEventListener('transitionend', function handler() {
-          body.removeEventListener('transitionend', handler);
-          details.removeAttribute('open');
-          body.style.height = '';
-        });
-      } else {
+      if (animating) return;
+      animating = true;
+
+      const opening = !details.open;
+
+      function onEnd(ev) {
+        if (ev.propertyName !== 'height') return;
+        body.removeEventListener('transitionend', onEnd);
+        if (!opening) details.removeAttribute('open');
+        body.style.height = '';
+        animating = false;
+      }
+
+      if (opening) {
         details.setAttribute('open', '');
         body.style.height = '0';
-        requestAnimationFrame(function() {
-          requestAnimationFrame(function() {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            body.addEventListener('transitionend', onEnd);
             body.style.height = body.scrollHeight + 'px';
           });
         });
-        body.addEventListener('transitionend', function handler() {
-          body.removeEventListener('transitionend', handler);
-          body.style.height = '';
+      } else {
+        body.style.height = body.scrollHeight + 'px';
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            body.addEventListener('transitionend', onEnd);
+            body.style.height = '0';
+          });
         });
       }
     });
   }
 
-  document.addEventListener('DOMContentLoaded', function() {
+  document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('[data-tabs]').forEach(initTabs);
     document.querySelectorAll('.collapsible-section').forEach(initCollapsible);
   });

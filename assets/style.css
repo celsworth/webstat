@@ -340,15 +340,10 @@ main.container {
 .data-table thead th {
     background: var(--surface-alt);
     font-weight: 600;
-    font-size: 0.8rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--text-muted);
     user-select: none;
-}
-
-.data-table thead th.stats-panel__heading {
-    background: var(--surface-alt);
 }
 
 .data-table thead th.metric-hits {
@@ -426,7 +421,6 @@ main.container {
 
 .data-table .num-col {
     text-align: right;
-    white-space: nowrap;
 }
 
 .data-table .pct-value {
