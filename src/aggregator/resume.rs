@@ -700,7 +700,12 @@ fn classify_relation(
     }
 
     // ── In-progress compressed file (same inode, not yet complete) ────────────
-    if is_compressed && !state.completed && same_inode && state.uncompressed_offset > 0 {
+    if is_compressed
+        && !state.completed
+        && same_inode
+        && state.uncompressed_offset > 0
+        && stat_size >= state.compressed_size
+    {
         return FileRelation::CompressedExtended;
     }
 
@@ -1326,5 +1331,247 @@ mod tests {
             plan.skip_decoded_prefix_bytes, partial_offset,
             "must skip already-processed uncompressed bytes to avoid double-counting"
         );
+    }
+
+    // ── invariant: Identical / AliasPath always → Skip ────────────────────────
+
+    #[test]
+    fn identical_relation_always_skips() {
+        let state = blank_state("/log/a", 1);
+        let point = derive_resume_point(&FileRelation::Identical, Some(&state), None, 100, false);
+        assert_eq!(point, ResumePoint::Skip);
+    }
+
+    #[test]
+    fn alias_path_relation_always_skips() {
+        let state = blank_state("/log/a", 1);
+        let point = derive_resume_point(&FileRelation::AliasPath, Some(&state), None, 100, false);
+        assert_eq!(point, ResumePoint::Skip);
+    }
+
+    // ── invariant: extended relations never return FromZero ───────────────────
+
+    #[test]
+    fn plain_extended_never_from_zero() {
+        let mut state = blank_state("/log/a", 1);
+        state.uncompressed_offset = 50;
+        let point =
+            derive_resume_point(&FileRelation::PlainExtended, Some(&state), None, 200, false);
+        assert!(
+            !matches!(point, ResumePoint::FromZero),
+            "PlainExtended must not restart from zero"
+        );
+    }
+
+    #[test]
+    fn compressed_extended_never_from_zero() {
+        let mut state = blank_state("/log/a", 1);
+        state.uncompressed_offset = 50;
+        let point = derive_resume_point(
+            &FileRelation::CompressedExtended,
+            Some(&state),
+            None,
+            999,
+            true,
+        );
+        assert!(
+            !matches!(point, ResumePoint::FromZero),
+            "CompressedExtended must not restart from zero"
+        );
+    }
+
+    #[test]
+    fn rotated_plain_to_gz_never_from_zero() {
+        let mut state = blank_state("/log/a", 1);
+        state.uncompressed_offset = 100;
+        let point = derive_resume_point(
+            &FileRelation::RotatedPlainToGz,
+            Some(&state),
+            None,
+            999,
+            true,
+        );
+        assert!(
+            !matches!(point, ResumePoint::FromZero),
+            "RotatedPlainToGz must not restart from zero"
+        );
+    }
+
+    // ── invariant: compressed relations never yield PlainOffset ───────────────
+
+    #[test]
+    fn compressed_extended_never_plain_offset() {
+        let mut state = blank_state("/log/a", 1);
+        state.uncompressed_offset = 42;
+        let point = derive_resume_point(
+            &FileRelation::CompressedExtended,
+            Some(&state),
+            None,
+            999,
+            true,
+        );
+        assert!(
+            !matches!(point, ResumePoint::PlainOffset(_)),
+            "CompressedExtended must never yield PlainOffset"
+        );
+    }
+
+    #[test]
+    fn rotated_plain_to_gz_never_plain_offset() {
+        let mut state = blank_state("/log/a", 1);
+        state.uncompressed_offset = 42;
+        let point = derive_resume_point(
+            &FileRelation::RotatedPlainToGz,
+            Some(&state),
+            None,
+            999,
+            true,
+        );
+        assert!(
+            !matches!(point, ResumePoint::PlainOffset(_)),
+            "RotatedPlainToGz must never yield PlainOffset"
+        );
+    }
+
+    #[test]
+    fn head_match_complete_compressed_never_plain_offset() {
+        let point =
+            derive_resume_point(&FileRelation::HeadMatchComplete(100), None, None, 999, true);
+        assert!(
+            !matches!(point, ResumePoint::PlainOffset(_)),
+            "HeadMatchComplete on a compressed file must never yield PlainOffset"
+        );
+    }
+
+    #[test]
+    fn head_match_partial_compressed_never_plain_offset() {
+        let point =
+            derive_resume_point(&FileRelation::HeadMatchPartial(50), None, None, 999, true);
+        assert!(
+            !matches!(point, ResumePoint::PlainOffset(_)),
+            "HeadMatchPartial on a compressed file must never yield PlainOffset"
+        );
+    }
+
+    // ── invariant: shrinking files never reuse offsets ────────────────────────
+
+    #[test]
+    fn plain_shrunk_file_classified_unrelated() {
+        let mut state = blank_state("/log/a", 1);
+        state.uncompressed_size = 500;
+        state.uncompressed_offset = 500;
+        state.uncompressed_head_fingerprint = Some(0xaaaa);
+
+        let relation = classify_relation(
+            Some(&state),
+            None,
+            1,
+            100, // shrank to 100
+            0,
+            false,
+            false,
+            &fps(Some(0xaaaa)),
+        );
+        assert_eq!(relation, FileRelation::Unrelated);
+        let point = derive_resume_point(&relation, Some(&state), None, 100, false);
+        assert_eq!(point, ResumePoint::FromZero);
+    }
+
+    #[test]
+    fn compressed_shrunk_file_classified_unrelated() {
+        let mut state = blank_state("/log/a", 1);
+        state.compressed_size = 1000;
+        state.uncompressed_offset = 5000;
+        state.compressed_head_fingerprint = Some(0xbbbb);
+
+        let relation = classify_relation(
+            Some(&state),
+            None,
+            1,
+            200, // compressed size shrank
+            0,
+            true,
+            false,
+            &Fingerprints {
+                compressed_head: Some(0xbbbb),
+                uncompressed_head: None,
+                uncompressed_size: 0,
+            },
+        );
+        assert_eq!(relation, FileRelation::Unrelated);
+        let point = derive_resume_point(&relation, Some(&state), None, 200, true);
+        assert_eq!(point, ResumePoint::FromZero);
+    }
+
+    // ── invariant: plain in-progress (same size, not complete) resumes ────────
+
+    #[test]
+    fn plain_in_progress_same_size_resumes_from_offset() {
+        let mut state = blank_state("/log/a", 1);
+        state.uncompressed_size = 200;
+        state.uncompressed_offset = 150;
+        state.uncompressed_head_fingerprint = Some(0xcccc);
+
+        let relation = classify_relation(
+            Some(&state),
+            None,
+            1,   // same inode
+            200, // same size as stored — file didn't grow
+            0,
+            false,
+            false,
+            &fps(Some(0xcccc)),
+        );
+        assert_eq!(relation, FileRelation::PlainExtended);
+        let point = derive_resume_point(&relation, Some(&state), None, 200, false);
+        assert_eq!(point, ResumePoint::PlainOffset(150));
+    }
+
+    // ── invariant: HeadMatch routes offset correctly by compression ───────────
+
+    #[test]
+    fn head_match_complete_plain_yields_plain_offset() {
+        let point =
+            derive_resume_point(&FileRelation::HeadMatchComplete(80), None, None, 200, false);
+        assert_eq!(point, ResumePoint::PlainOffset(80));
+    }
+
+    #[test]
+    fn head_match_complete_compressed_yields_decoded_offset() {
+        let point =
+            derive_resume_point(&FileRelation::HeadMatchComplete(80), None, None, 999, true);
+        assert_eq!(point, ResumePoint::DecodedOffset(80));
+    }
+
+    #[test]
+    fn head_match_partial_plain_yields_plain_offset() {
+        let point =
+            derive_resume_point(&FileRelation::HeadMatchPartial(30), None, None, 200, false);
+        assert_eq!(point, ResumePoint::PlainOffset(30));
+    }
+
+    #[test]
+    fn head_match_partial_compressed_yields_decoded_offset() {
+        let point =
+            derive_resume_point(&FileRelation::HeadMatchPartial(30), None, None, 999, true);
+        assert_eq!(point, ResumePoint::DecodedOffset(30));
+    }
+
+    // ── invariant: plain offset is clamped to stat_size ──────────────────────
+
+    #[test]
+    fn plain_extended_clamps_offset_to_stat_size() {
+        let mut state = blank_state("/log/a", 1);
+        state.uncompressed_offset = 999; // stored offset larger than current file size
+        let point =
+            derive_resume_point(&FileRelation::PlainExtended, Some(&state), None, 100, false);
+        assert_eq!(point, ResumePoint::PlainOffset(100));
+    }
+
+    #[test]
+    fn head_match_complete_plain_clamps_offset_to_stat_size() {
+        let point =
+            derive_resume_point(&FileRelation::HeadMatchComplete(500), None, None, 100, false);
+        assert_eq!(point, ResumePoint::PlainOffset(100));
     }
 }
