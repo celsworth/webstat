@@ -401,6 +401,15 @@ impl Processor {
             if is_compressed && !state.completed && state.uncompressed_offset > 0 {
                 skip_decoded_prefix_bytes = state.uncompressed_offset;
                 offset = 0;
+            } else if is_compressed
+                && state.compressed_size == 0
+                && uncompressed_head_fingerprint.is_some()
+                && uncompressed_head_fingerprint == state.uncompressed_head_fingerprint
+                && state.uncompressed_offset > 0
+            {
+                // Plain file was rotated and compressed (same inode, same content prefix).
+                // Resume from where the plain-file processing left off.
+                skip_decoded_prefix_bytes = state.uncompressed_offset;
             } else if previous_size > 0 {
                 if stat_size < previous_size {
                     offset = 0;
@@ -466,6 +475,9 @@ impl Processor {
             }
         }
 
+        // Skip global dedup when we already have a direct inode-based match — that state is
+        // authoritative and the cross-format head-fingerprint check would false-positive on
+        // the rotation case (plain file completed, then rotated+compressed on same inode).
         let should_check_global_dedupe = state_by_path
             .as_ref()
             .map(|s| {
@@ -476,7 +488,7 @@ impl Processor {
                 };
                 !(s.inode == current_inode && stat_size > previous_size)
             })
-            .unwrap_or(true);
+            .unwrap_or_else(|| state_by_inode.is_none());
 
         if should_check_global_dedupe {
             if is_compressed {
@@ -580,6 +592,7 @@ mod tests {
     use super::read_first_line_ts;
     use flate2::{write::GzEncoder, Compression};
     use std::io::Write;
+    use std::os::unix::fs::MetadataExt;
     use tempfile::NamedTempFile;
 
     fn log_line(ts: &str) -> String {
@@ -647,5 +660,118 @@ mod tests {
         let refs: Vec<&str> = garbage.iter().map(String::as_str).collect();
         let f = write_plain(&refs);
         assert_eq!(read_first_line_ts(f.path().to_str().unwrap()), None);
+    }
+
+    // ── rotation regression tests ─────────────────────────────────────────────
+    //
+    // Scenario: access.log (plain) was fully processed to N bytes, stored as
+    // completed=true with compressed_size=0.  Overnight nginx kept writing, then
+    // logrotate renamed+gzipped the file to access.log-YYYYMMDD.gz (same inode,
+    // larger uncompressed content).
+    //
+    // Bug 1 (global-dedup false positive): find_completed_by_uncompressed_head_only
+    //   matched the old plain-file record (same uncompressed head fingerprint,
+    //   compressed_head IS NULL) and returned plan=None, silently skipping the gz.
+    //
+    // Bug 2 (missing skip prefix): even if the global dedup were suppressed, the
+    //   skip_decoded_prefix_bytes was not set for the plain→compressed case
+    //   (previous_size=compressed_size=0, so the else-if branch was dead).
+
+    fn make_test_processor(db: crate::database::Database) -> super::super::Processor {
+        super::super::Processor::new(
+            db,
+            crate::geo::Geo::new(None),
+            super::super::ProcessorConfig {
+                top_n: 10,
+                bot_filter: false,
+                enable_top_urls: false,
+                enable_top_sites: false,
+                enable_top_refs: false,
+                enable_top_agents: false,
+                rule_set: None,
+            },
+        )
+    }
+
+    #[test]
+    fn rotation_plain_to_gz_same_inode_not_falsely_skipped() {
+        // Regression for bug 1: the gz file must produce a plan (not be skipped).
+        // Before the fix, find_completed_by_uncompressed_head_only found the old
+        // plain-file completed record and returned plan=None.
+
+        let gz_file = write_gz(&["line one", "line two", "line three"]);
+        let gz_path = gz_file.path().to_str().unwrap().to_string();
+        let gz_inode = std::fs::metadata(&gz_path).unwrap().ino();
+
+        // Seed the DB as if access.log (plain) was completed at partial_offset bytes
+        // and then rotated to this gz path (same inode).
+        let partial_offset = 50u64;
+        let db = crate::database::Database::open(":memory:").unwrap();
+        db.set_parse_state(&crate::database::ParseState {
+            filepath: "/var/log/nginx/access.log".into(),
+            inode: gz_inode,
+            compressed_size: 0,                      // was plain
+            uncompressed_size: partial_offset,
+            compressed_head_fingerprint: None,        // plain — no compressed head
+            uncompressed_head_fingerprint: Some(0xaabb_ccdd_eeff_0011),
+            compressed_offset: 0,
+            uncompressed_offset: partial_offset,
+            mtime_ns: 1_748_000_000_000_000_000,      // old mtime, before rotation
+            completed: true,
+            earliest_ts: None,
+            latest_ts: None,
+            skip_before_ts: None,
+        })
+        .unwrap();
+
+        let mut processor = make_test_processor(db);
+        let outcome = processor.resolve_resume_plan(&gz_path).unwrap();
+
+        assert!(
+            outcome.plan.is_some(),
+            "rotated gz file must not be falsely skipped via uncompressed-head global dedup"
+        );
+    }
+
+    #[test]
+    fn rotation_plain_to_gz_same_inode_sets_skip_decoded_prefix() {
+        // Regression for bug 2: skip_decoded_prefix_bytes must equal the old plain
+        // offset so already-processed lines are not double-counted.
+        // Before the fix, previous_size=compressed_size=0 so the else-if branch that
+        // sets skip_decoded_prefix_bytes was never reached.
+
+        let gz_file = write_gz(&["line one", "line two", "line three"]);
+        let gz_path = gz_file.path().to_str().unwrap().to_string();
+        let gz_inode = std::fs::metadata(&gz_path).unwrap().ino();
+
+        let partial_offset = 50u64;
+        let db = crate::database::Database::open(":memory:").unwrap();
+        db.set_parse_state(&crate::database::ParseState {
+            filepath: "/var/log/nginx/access.log".into(),
+            inode: gz_inode,
+            compressed_size: 0,
+            uncompressed_size: partial_offset,
+            compressed_head_fingerprint: None,
+            uncompressed_head_fingerprint: Some(0xaabb_ccdd_eeff_0011),
+            compressed_offset: 0,
+            uncompressed_offset: partial_offset,
+            mtime_ns: 1_748_000_000_000_000_000,
+            completed: true,
+            earliest_ts: None,
+            latest_ts: None,
+            skip_before_ts: None,
+        })
+        .unwrap();
+
+        let mut processor = make_test_processor(db);
+        let outcome = processor.resolve_resume_plan(&gz_path).unwrap();
+
+        let plan = outcome
+            .plan
+            .expect("rotated gz file must produce a resume plan");
+        assert_eq!(
+            plan.skip_decoded_prefix_bytes, partial_offset,
+            "must skip already-processed uncompressed bytes to avoid double-counting"
+        );
     }
 }
