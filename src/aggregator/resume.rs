@@ -173,6 +173,32 @@ impl Processor {
         })
     }
 
+    /// Look up a prior parse state by head fingerprint for files with no direct path/inode match.
+    /// For compressed files, prefers an exact compressed-head match; falls back to uncompressed
+    /// head so that a plain-file record (in-progress or completed) can seed the resume offset
+    /// when the same content later appears as a gz.
+    fn find_head_match_state(
+        &mut self,
+        is_compressed: bool,
+        compressed_head_fingerprint: Option<u64>,
+        uncompressed_head_fingerprint: Option<u64>,
+    ) -> Result<Option<ParseState>> {
+        if is_compressed {
+            if let Some(fp) = compressed_head_fingerprint {
+                let found = self.db.find_parse_state_by_compressed_head_fingerprint(fp)?;
+                if found.is_some() {
+                    return Ok(found);
+                }
+            }
+        }
+        // Plain files, or compressed files with no compressed-head match:
+        // check uncompressed head to find prior plain-file records for the same content.
+        if let Some(fp) = uncompressed_head_fingerprint {
+            return Ok(self.db.find_parse_state_by_uncompressed_head_fingerprint(fp)?);
+        }
+        Ok(None)
+    }
+
     pub(super) fn resolve_resume_plan(&mut self, filepath: &str) -> Result<ResolutionOutcome> {
         let meta = std::fs::metadata(filepath)?;
         let current_inode = meta.ino();
@@ -328,34 +354,18 @@ impl Processor {
 
         let head_match_state = if state_by_path.is_none() && state_by_inode.is_none() {
             // No state by path or inode: try lookup by head fingerprint
-            if is_compressed {
-                if let Some(head_fp) = compressed_head_fingerprint {
-                    self.db
-                        .find_parse_state_by_compressed_head_fingerprint(head_fp)?
-                } else {
-                    None
-                }
-            } else if let Some(head_fp) = uncompressed_head_fingerprint {
-                self.db
-                    .find_parse_state_by_uncompressed_head_fingerprint(head_fp)?
-            } else {
-                None
-            }
+            self.find_head_match_state(
+                is_compressed,
+                compressed_head_fingerprint,
+                uncompressed_head_fingerprint,
+            )?
         } else if inode_changed_for_path {
             // Inode changed: also try fingerprint lookup to detect rename/rotation
-            if is_compressed {
-                if let Some(head_fp) = compressed_head_fingerprint {
-                    self.db
-                        .find_parse_state_by_compressed_head_fingerprint(head_fp)?
-                } else {
-                    None
-                }
-            } else if let Some(head_fp) = uncompressed_head_fingerprint {
-                self.db
-                    .find_parse_state_by_uncompressed_head_fingerprint(head_fp)?
-            } else {
-                None
-            }
+            self.find_head_match_state(
+                is_compressed,
+                compressed_head_fingerprint,
+                uncompressed_head_fingerprint,
+            )?
         } else {
             None
         };
@@ -682,6 +692,55 @@ mod tests {
                 rule_set: None,
             },
         )
+    }
+
+    #[test]
+    fn fresh_gz_with_in_progress_plain_head_match_resumes_from_plain_offset() {
+        // D6: gz at a fresh path/inode; in-progress (not completed) plain record with the
+        // same uncompressed head exists in the DB.
+        // Before fix: head_match_state only looked up by compressed head for gz files,
+        // so the plain record was never found → skip_decoded_prefix_bytes stayed 0.
+        // After fix: falls back to uncompressed-head lookup → finds the plain record → resumes.
+
+        let gz_file = write_gz(&["line one", "line two", "line three"]);
+        let gz_path = gz_file.path().to_str().unwrap().to_string();
+
+        let gz_head_fp = crate::fingerprint::compute_decompressed_head_fingerprint(
+            &gz_path,
+            crate::compression::CompressionType::Gz,
+        )
+        .unwrap()
+        .unwrap();
+
+        let partial_offset = 20u64;
+        let db = crate::database::Database::open(":memory:").unwrap();
+        db.set_parse_state(&crate::database::ParseState {
+            filepath: "/old/access.log".into(),
+            inode: 0xdead_beef_0000_0002, // different inode — no inode-based match
+            compressed_size: 0,
+            uncompressed_size: partial_offset,
+            compressed_head_fingerprint: None, // plain file — no compressed head
+            uncompressed_head_fingerprint: Some(gz_head_fp),
+            compressed_offset: 0,
+            uncompressed_offset: partial_offset,
+            mtime_ns: 0,
+            completed: false, // in-progress: find_completed_by_uncompressed_head_only won't find this
+            earliest_ts: None,
+            latest_ts: None,
+            skip_before_ts: None,
+        })
+        .unwrap();
+
+        let mut processor = make_test_processor(db);
+        let outcome = processor.resolve_resume_plan(&gz_path).unwrap();
+
+        let plan = outcome
+            .plan
+            .expect("gz should produce a resume plan");
+        assert_eq!(
+            plan.skip_decoded_prefix_bytes, partial_offset,
+            "must resume from the in-progress plain file's offset, not reprocess from 0",
+        );
     }
 
     #[test]
