@@ -281,6 +281,7 @@ impl Processor {
         let relation = classify_relation(
             primary,
             head_match_state.as_ref(),
+            filepath,
             current_inode,
             stat_size,
             mtime_ns,
@@ -651,6 +652,7 @@ fn collect_retired_states(
 fn classify_relation(
     primary: Option<&ParseState>,
     head_match: Option<&ParseState>,
+    filepath: &str,
     current_inode: u64,
     stat_size: u64,
     mtime_ns: i64,
@@ -673,7 +675,7 @@ fn classify_relation(
             && state.uncompressed_head_fingerprint == fps.uncompressed_head
             && (state.mtime_ns == 0 || state.mtime_ns == mtime_ns)
         {
-            return if state.filepath == "<current>" {
+            return if state.filepath == filepath {
                 FileRelation::Identical
             } else {
                 FileRelation::AliasPath
@@ -1064,6 +1066,7 @@ mod tests {
         let relation = classify_relation(
             Some(&state),
             None,
+            "/log/a",
             1,   // same inode
             200, // grew
             0,
@@ -1086,6 +1089,7 @@ mod tests {
         let relation = classify_relation(
             Some(&state),
             None,
+            "/log/access.log-20240101.gz",
             5,
             999, // gz is larger
             0,
@@ -1109,6 +1113,7 @@ mod tests {
         let relation = classify_relation(
             Some(&state),
             None,
+            "/log/a",
             1,
             100, // shrank
             0,
@@ -1335,18 +1340,59 @@ mod tests {
 
     // ── invariant: Identical / AliasPath always → Skip ────────────────────────
 
-    #[test]
-    fn identical_relation_always_skips() {
-        let state = blank_state("/log/a", 1);
-        let point = derive_resume_point(&FileRelation::Identical, Some(&state), None, 100, false);
-        assert_eq!(point, ResumePoint::Skip);
+    fn completed_plain_state(filepath: &str, inode: u64, size: u64, head: u64) -> ParseState {
+        let mut s = blank_state(filepath, inode);
+        s.completed = true;
+        s.uncompressed_size = size;
+        s.uncompressed_offset = size;
+        s.uncompressed_head_fingerprint = Some(head);
+        s
     }
 
     #[test]
-    fn alias_path_relation_always_skips() {
-        let state = blank_state("/log/a", 1);
-        let point = derive_resume_point(&FileRelation::AliasPath, Some(&state), None, 100, false);
-        assert_eq!(point, ResumePoint::Skip);
+    fn same_filepath_completed_plain_classifies_as_identical() {
+        // When the stored state path equals the current filepath, classify_relation
+        // must return Identical (not AliasPath).
+        let state = completed_plain_state("/log/a", 1, 100, 0xabcd);
+        let relation = classify_relation(
+            Some(&state),
+            None,
+            "/log/a", // same path
+            1,
+            100,
+            0,
+            false,
+            false,
+            &fps(Some(0xabcd)),
+        );
+        assert_eq!(relation, FileRelation::Identical);
+        assert_eq!(
+            derive_resume_point(&relation, Some(&state), None, 100, false),
+            ResumePoint::Skip
+        );
+    }
+
+    #[test]
+    fn different_filepath_completed_plain_classifies_as_alias_path() {
+        // When the stored state path differs from the current filepath (e.g. symlink
+        // or hardlink), classify_relation must return AliasPath, not Identical.
+        let state = completed_plain_state("/log/old-name", 1, 100, 0xabcd);
+        let relation = classify_relation(
+            Some(&state),
+            None,
+            "/log/new-name", // different path, same content
+            1,
+            100,
+            0,
+            false,
+            false,
+            &fps(Some(0xabcd)),
+        );
+        assert_eq!(relation, FileRelation::AliasPath);
+        assert_eq!(
+            derive_resume_point(&relation, Some(&state), None, 100, false),
+            ResumePoint::Skip
+        );
     }
 
     // ── invariant: extended relations never return FromZero ───────────────────
@@ -1465,6 +1511,7 @@ mod tests {
         let relation = classify_relation(
             Some(&state),
             None,
+            "/log/a",
             1,
             100, // shrank to 100
             0,
@@ -1487,6 +1534,7 @@ mod tests {
         let relation = classify_relation(
             Some(&state),
             None,
+            "/log/a",
             1,
             200, // compressed size shrank
             0,
@@ -1515,6 +1563,7 @@ mod tests {
         let relation = classify_relation(
             Some(&state),
             None,
+            "/log/a",
             1,   // same inode
             200, // same size as stored — file didn't grow
             0,
