@@ -1153,4 +1153,79 @@ mod tests {
             "second rollback+re-ingest: hit count must be stable (no alternating bug)"
         );
     }
+
+    #[test]
+    fn rollback_does_not_zero_prior_month_unique_visitor_count() {
+        // Regression: rolling back to month M and re-ingesting must not zero out
+        // unique_visitor_counts for M-1 ("Sites" in the UI).
+        //
+        // Root cause: rollback previously set current_month=prev_month in meta.
+        // On re-ingest, run_acc.current_month was initialised from that value, so
+        // the first M entry triggered finalize_month(prev_month). Because
+        // daily_unique_ips for prev_month had already been consumed by the original
+        // finalize_month, the re-finalization computed count=0 and overwrote the
+        // unique_visitor_counts row, zeroing out Sites for prev_month.
+
+        let temp = TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("webstat.db");
+        let log_path = temp.path().join("access.log");
+
+        // March: 3 distinct IPs; April: 2 distinct IPs.
+        let lines = vec![
+            r#"10.0.0.1 - - [15/Mar/2026:10:00:00 +0000] "GET /mar-a HTTP/1.1" 200 100 "-" "Mozilla/5.0""#.to_string(),
+            r#"10.0.0.2 - - [15/Mar/2026:11:00:00 +0000] "GET /mar-b HTTP/1.1" 200 100 "-" "Mozilla/5.0""#.to_string(),
+            r#"10.0.0.3 - - [15/Mar/2026:12:00:00 +0000] "GET /mar-c HTTP/1.1" 200 100 "-" "Mozilla/5.0""#.to_string(),
+            r#"10.0.1.1 - - [15/Apr/2026:10:00:00 +0000] "GET /apr-a HTTP/1.1" 200 100 "-" "Mozilla/5.0""#.to_string(),
+            r#"10.0.1.2 - - [15/Apr/2026:11:00:00 +0000] "GET /apr-b HTTP/1.1" 200 100 "-" "Mozilla/5.0""#.to_string(),
+        ];
+        write_plain_file(&log_path, &lines);
+
+        // Initial ingest: crossing the March→April boundary triggers
+        // finalize_month("2026-03"), which stores count=3 in unique_visitor_counts
+        // and deletes daily_unique_ips for 2026-03.
+        let mut processor = new_processor(&db_path);
+        let processed = processor
+            .process_globs(log_path.to_str().unwrap())
+            .expect("initial ingest");
+        assert_eq!(processed, 5);
+
+        {
+            let conn = Connection::open(&db_path).expect("open db");
+            let march_count: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(count, 0) FROM unique_visitor_counts WHERE period = '2026-03'",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("march count after initial ingest");
+            assert_eq!(march_count, 3, "March should have 3 unique visitors after initial ingest");
+        }
+
+        // Rollback to 2026-04: wipes April data, resets parse state.
+        {
+            let mut db = crate::database::Database::open(db_path.to_str().unwrap()).expect("open db");
+            crate::rollback::rollback(&mut db, "2026-04", false).expect("rollback to April");
+        }
+
+        // Re-ingest. With the bug, finalize_month("2026-03") was called here
+        // (because current_month was set to "2026-03" by rollback), found no
+        // daily_unique_ips, and wrote 0 to unique_visitor_counts for "2026-03".
+        let mut processor2 = new_processor(&db_path);
+        processor2
+            .process_globs(log_path.to_str().unwrap())
+            .expect("re-ingest after rollback");
+
+        let conn = Connection::open(&db_path).expect("open db after reingest");
+        let march_count: i64 = conn
+            .query_row(
+                "SELECT COALESCE(count, 0) FROM unique_visitor_counts WHERE period = '2026-03'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("march count after rollback+reingest");
+        assert_eq!(
+            march_count, 3,
+            "rolling back to 2026-04 must not zero out the March unique visitor count"
+        );
+    }
 }

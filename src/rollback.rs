@@ -147,12 +147,14 @@ pub fn rollback(db: &mut Database, target_month: &str, dry_run: bool) -> Result<
            AND substr(key, 7, 7) >= ?1",
         params![target_month],
     )?;
-    // Reset current_month to the month before the target.
-    let prev_month = prev_month(target_month);
+    // Reset current_month to the target month so that re-ingestion starts
+    // accumulating into target_month directly. Setting it to prev_month would
+    // cause finalize_month to be called for the already-finalized prev_month
+    // during the next process run, which zeroes out its unique_visitor_counts.
     tx.execute(
         "INSERT INTO meta (key, value) VALUES ('current_month', ?1) \
          ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-        params![prev_month],
+        params![target_month],
     )?;
     // Reset last_log_ts to one second before the rollback boundary.
     tx.execute(
@@ -202,16 +204,6 @@ fn month_start_unix(month: &str) -> Result<i64> {
         .with_context(|| format!("parse month from {month}"))?;
     let days = crate::parser::days_from_civil(year, mon, 1);
     Ok(days * 86400)
-}
-
-fn prev_month(month: &str) -> String {
-    let year: i32 = month[..4].parse().unwrap_or(2000);
-    let mon: u32 = month[5..7].parse().unwrap_or(1);
-    if mon == 1 {
-        format!("{:04}-12", year - 1)
-    } else {
-        format!("{year:04}-{:02}", mon - 1)
-    }
 }
 
 /// Recompute and store the yearly unique-visitor count from surviving monthly
