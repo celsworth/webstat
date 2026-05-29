@@ -119,9 +119,10 @@ impl Database {
             .map(|v| v as u64))
     }
 
-    /// Find a completed plain-file entry by uncompressed head fingerprint.
-    /// Only matches entries where `compressed_head_fingerprint IS NULL` (plain files),
-    /// so gzip files with a shared uncompressed prefix are not false-positively skipped.
+    /// Find a completed plain-file entry by uncompressed head fingerprint alone (no size check).
+    /// Only matches entries where `compressed_head_fingerprint IS NULL` (plain files).
+    /// Returns the stored `uncompressed_size`, which callers use as a resume offset rather
+    /// than as a definitive "already done" signal — the compressed file may have grown past it.
     pub fn find_completed_by_uncompressed_head_only(
         &self,
         head_fingerprint: u64,

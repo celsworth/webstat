@@ -514,25 +514,16 @@ impl Processor {
                         });
                     }
                 }
-                // Also check uncompressed identity for cross-format dedup (plain→compressed same content)
+                // Check uncompressed identity for cross-format dedup (plain→compressed same content).
+                // Resume from the matched offset rather than skipping entirely: the gz may have
+                // grown past what was in the completed plain file, and a full skip would silently
+                // drop those appended lines.
                 if let Some(head_fp) = uncompressed_head_fingerprint {
                     if let Some(matched_size) =
                         self.db.find_completed_by_uncompressed_head_only(head_fp)?
                     {
-                        return Ok(ResolutionOutcome {
-                            plan: None,
-                            skipped_parse_state: Some(self.completed_parse_state_update(
-                                filepath,
-                                current_inode,
-                                compression,
-                                stat_size,
-                                matched_size,
-                                compressed_head_fingerprint,
-                                uncompressed_head_fingerprint,
-                                mtime_ns,
-                            )),
-                            retired_parse_states,
-                        });
+                        skip_decoded_prefix_bytes =
+                            skip_decoded_prefix_bytes.max(matched_size);
                     }
                 }
             } else if let Some(head_fp) = uncompressed_head_fingerprint {
@@ -691,6 +682,62 @@ mod tests {
                 rule_set: None,
             },
         )
+    }
+
+    #[test]
+    fn fresh_gz_with_completed_plain_head_match_resumes_not_skips() {
+        // Regression for find_completed_by_uncompressed_head_only returning a full skip.
+        // When a fresh gz file (no inode or path state) shares its uncompressed head with a
+        // completed plain-file record, it must resume from the matched offset — not be skipped.
+        // The gz may have grown past what was in the plain file, and a full skip would
+        // silently drop those appended lines.
+        //
+        // Before fix: returned plan=None (skip).
+        // After fix: returns plan with skip_decoded_prefix_bytes = plain_completed_offset.
+
+        let gz_file = write_gz(&["line one", "line two", "line three"]);
+        let gz_path = gz_file.path().to_str().unwrap().to_string();
+
+        // Compute the fingerprint that resolve_resume_plan will derive for this gz file.
+        let gz_head_fp = crate::fingerprint::compute_decompressed_head_fingerprint(
+            &gz_path,
+            crate::compression::CompressionType::Gz,
+        )
+        .unwrap()
+        .unwrap();
+
+        // Seed a completed plain-file record with the same uncompressed head but a
+        // completely different inode and path — simulating a prior plain-file run on a
+        // different host or before inode tracking was in place.
+        let plain_completed_offset = 20u64;
+        let db = crate::database::Database::open(":memory:").unwrap();
+        db.set_parse_state(&crate::database::ParseState {
+            filepath: "/old/access.log".into(),
+            inode: 0xdead_beef_0000_0001, // not the gz file's inode
+            compressed_size: 0,
+            uncompressed_size: plain_completed_offset,
+            compressed_head_fingerprint: None, // plain file
+            uncompressed_head_fingerprint: Some(gz_head_fp),
+            compressed_offset: 0,
+            uncompressed_offset: plain_completed_offset,
+            mtime_ns: 0,
+            completed: true,
+            earliest_ts: None,
+            latest_ts: None,
+            skip_before_ts: None,
+        })
+        .unwrap();
+
+        let mut processor = make_test_processor(db);
+        let outcome = processor.resolve_resume_plan(&gz_path).unwrap();
+
+        let plan = outcome.plan.expect(
+            "gz with same head as completed plain file must produce a resume plan, not be skipped",
+        );
+        assert_eq!(
+            plan.skip_decoded_prefix_bytes, plain_completed_offset,
+            "must resume from the plain file's completed offset to avoid losing appended lines",
+        );
     }
 
     #[test]
