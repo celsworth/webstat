@@ -340,7 +340,7 @@ impl Processor {
 
         match resume_point {
             ResumePoint::Skip => {
-                let skipped = alias_update_full(
+                let skipped = alias_update_with_fps(
                     primary.unwrap(),
                     filepath,
                     current_inode,
@@ -881,28 +881,6 @@ fn alias_update_with_fps(
             latest_ts: state.latest_ts,
         }
     })
-}
-
-/// Alias update used after the full fingerprint computation path (for the
-/// plain-file exact-match case reached via `classify_relation`).
-fn alias_update_full(
-    state: &ParseState,
-    filepath: &str,
-    current_inode: u64,
-    mtime_ns: i64,
-    compression: CompressionType,
-    stat_size: u64,
-    fps: &Fingerprints,
-) -> Option<ParseStateUpdate> {
-    alias_update_with_fps(
-        state,
-        filepath,
-        current_inode,
-        mtime_ns,
-        compression,
-        stat_size,
-        fps,
-    )
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
