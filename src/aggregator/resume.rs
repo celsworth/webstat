@@ -49,12 +49,9 @@ enum FileRelation {
     /// content prefix (logrotate rename + gzip, same or different inode).
     RotatedPlainToGz,
 
-    /// No direct inode/path match, but a completed state with the same head
-    /// fingerprint exists.  The `u64` is the completed offset to resume from.
-    HeadMatchComplete(u64),
-
-    /// Same as above but the matched state was still in-progress.
-    HeadMatchPartial(u64),
+    /// No direct inode/path match, but the same head fingerprint exists in a
+    /// prior state.  The `u64` is the offset to resume from.
+    HeadMatch(u64),
 
     /// No usable prior state.  Start from byte zero.
     Unrelated,
@@ -759,18 +756,9 @@ fn classify_relation(
     head_match_relation(head_match, is_compressed)
 }
 
-fn head_match_relation(head_match: Option<&ParseState>, is_compressed: bool) -> FileRelation {
+fn head_match_relation(head_match: Option<&ParseState>, _is_compressed: bool) -> FileRelation {
     match head_match {
-        Some(s) if is_compressed && s.uncompressed_offset > 0 => {
-            FileRelation::HeadMatchPartial(s.uncompressed_offset)
-        }
-        Some(s) if !is_compressed && s.uncompressed_offset > 0 => {
-            if s.completed {
-                FileRelation::HeadMatchComplete(s.uncompressed_offset)
-            } else {
-                FileRelation::HeadMatchPartial(s.uncompressed_offset)
-            }
-        }
+        Some(s) if s.uncompressed_offset > 0 => FileRelation::HeadMatch(s.uncompressed_offset),
         _ => FileRelation::Unrelated,
     }
 }
@@ -804,15 +792,7 @@ fn derive_resume_point(
             ResumePoint::DecodedOffset(prefix)
         }
 
-        FileRelation::HeadMatchComplete(offset) => {
-            if is_compressed {
-                ResumePoint::DecodedOffset(*offset)
-            } else {
-                ResumePoint::PlainOffset((*offset).min(stat_size))
-            }
-        }
-
-        FileRelation::HeadMatchPartial(offset) => {
+        FileRelation::HeadMatch(offset) => {
             if is_compressed {
                 ResumePoint::DecodedOffset(*offset)
             } else {
@@ -1458,22 +1438,12 @@ mod tests {
     }
 
     #[test]
-    fn head_match_complete_compressed_never_plain_offset() {
+    fn head_match_compressed_never_plain_offset() {
         let point =
-            derive_resume_point(&FileRelation::HeadMatchComplete(100), None, None, 999, true);
+            derive_resume_point(&FileRelation::HeadMatch(100), None, None, 999, true);
         assert!(
             !matches!(point, ResumePoint::PlainOffset(_)),
-            "HeadMatchComplete on a compressed file must never yield PlainOffset"
-        );
-    }
-
-    #[test]
-    fn head_match_partial_compressed_never_plain_offset() {
-        let point =
-            derive_resume_point(&FileRelation::HeadMatchPartial(50), None, None, 999, true);
-        assert!(
-            !matches!(point, ResumePoint::PlainOffset(_)),
-            "HeadMatchPartial on a compressed file must never yield PlainOffset"
+            "HeadMatch on a compressed file must never yield PlainOffset"
         );
     }
 
@@ -1557,31 +1527,15 @@ mod tests {
     // ── invariant: HeadMatch routes offset correctly by compression ───────────
 
     #[test]
-    fn head_match_complete_plain_yields_plain_offset() {
-        let point =
-            derive_resume_point(&FileRelation::HeadMatchComplete(80), None, None, 200, false);
+    fn head_match_plain_yields_plain_offset() {
+        let point = derive_resume_point(&FileRelation::HeadMatch(80), None, None, 200, false);
         assert_eq!(point, ResumePoint::PlainOffset(80));
     }
 
     #[test]
-    fn head_match_complete_compressed_yields_decoded_offset() {
-        let point =
-            derive_resume_point(&FileRelation::HeadMatchComplete(80), None, None, 999, true);
+    fn head_match_compressed_yields_decoded_offset() {
+        let point = derive_resume_point(&FileRelation::HeadMatch(80), None, None, 999, true);
         assert_eq!(point, ResumePoint::DecodedOffset(80));
-    }
-
-    #[test]
-    fn head_match_partial_plain_yields_plain_offset() {
-        let point =
-            derive_resume_point(&FileRelation::HeadMatchPartial(30), None, None, 200, false);
-        assert_eq!(point, ResumePoint::PlainOffset(30));
-    }
-
-    #[test]
-    fn head_match_partial_compressed_yields_decoded_offset() {
-        let point =
-            derive_resume_point(&FileRelation::HeadMatchPartial(30), None, None, 999, true);
-        assert_eq!(point, ResumePoint::DecodedOffset(30));
     }
 
     // ── invariant: plain offset is clamped to stat_size ──────────────────────
@@ -1596,9 +1550,8 @@ mod tests {
     }
 
     #[test]
-    fn head_match_complete_plain_clamps_offset_to_stat_size() {
-        let point =
-            derive_resume_point(&FileRelation::HeadMatchComplete(500), None, None, 100, false);
+    fn head_match_plain_clamps_offset_to_stat_size() {
+        let point = derive_resume_point(&FileRelation::HeadMatch(500), None, None, 100, false);
         assert_eq!(point, ResumePoint::PlainOffset(100));
     }
 }
