@@ -212,8 +212,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("hits after shrink");
-        // After shrink, file is reprocessed from start: 40 new hits, old 120 archived
-        assert!(after_hits > 40, "should have new hits plus archived");
+        // After shrink the stored offset exceeds the new file size, so the file is
+        // reprocessed from zero (40 new hits).  The 120 hits from the original run
+        // remain in hourly_stats (the old parse state is archived, not deleted).
+        assert_eq!(after_hits, 160, "120 archived hits + 40 new hits");
     }
 
     #[test]
@@ -609,7 +611,7 @@ mod tests {
         let conn = Connection::open(&db_path).expect("open db");
         let visitors: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM daily_unique_ips WHERE date = '2026-05-08'",
+                "SELECT COALESCE(SUM(count), 0) FROM daily_unique_ips WHERE date = '2026-05-08'",
                 [],
                 |row| row.get(0),
             )

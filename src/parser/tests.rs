@@ -162,10 +162,8 @@ mod tests {
     #[test]
     fn dash_byte_count_treated_as_zero() {
         let line = r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 - "-" "-""#;
-        let entry = parse_line(line);
-        // Parser uses unwrap_or(0) for invalid bytes, so this should parse with 0 bytes
-        // Actually, this will fail because "-" cannot be parsed as u64
-        assert!(entry.is_none() || entry.map(|e| e.bytes) == Some(0));
+        let entry = parse_line(line).expect("should parse: bytes field uses unwrap_or(0)");
+        assert_eq!(entry.bytes, 0);
     }
 
     // ── Missing optional fields (referer, user-agent) ────────────────────────
@@ -464,16 +462,14 @@ mod tests {
     }
 
     #[test]
-    fn consecutive_status_and_bytes_without_proper_spacing() {
-        // Parser expects: "STATUS BYTES" but if spacing is wrong like "STATUSBYTES",
-        // the parser takes 3 digits for status, then expects a space, then parses from after that.
-        // This results in undefined behavior due to fixed-width field parsing.
-        // Valid nginx logs always have proper spacing, so we don't need to handle this edge case.
+    fn missing_space_between_status_and_bytes_returns_none() {
+        // "200100" as a single token: parse_u16_3 reads "200" as status, then i skips
+        // what it expects to be a space but is actually '1', leaving subsequent field
+        // boundaries desynchronised.  The parse must fail cleanly rather than produce
+        // silently-wrong values.
         let line =
-            r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200 100 "-" "-""#;
-        let entry = parse_line(line).expect("should parse with proper spacing");
-        assert_eq!(entry.status, 200);
-        assert_eq!(entry.bytes, 100);
+            r#"1.2.3.4 - user [08/May/2026:14:23:01 +0000] "GET / HTTP/1.1" 200100 "-" "-""#;
+        assert!(parse_line(line).is_none());
     }
 
     #[test]
