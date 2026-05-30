@@ -485,6 +485,287 @@ mod tests {
         assert!(state.completed);
     }
 
+    // ── parse state lookup helpers ────────────────────────────────────────────
+
+    fn bare_parse_state(filepath: &str, inode: u64) -> ParseState {
+        ParseState {
+            filepath: filepath.into(),
+            inode,
+            compressed_size: 0,
+            uncompressed_size: 0,
+            compressed_head_fingerprint: None,
+            uncompressed_head_fingerprint: None,
+            compressed_offset: 0,
+            uncompressed_offset: 0,
+            mtime_ns: 0,
+            completed: false,
+            earliest_ts: None,
+            latest_ts: None,
+            skip_before_ts: None,
+        }
+    }
+
+    fn insert_archive(db: &Database, state: &ParseState) {
+        db.conn.execute(
+            "INSERT INTO parse_state_archive \
+             (filepath, inode, compressed_size, uncompressed_size, \
+              compressed_head_fingerprint, uncompressed_head_fingerprint, \
+              compressed_offset, uncompressed_offset, mtime_ns, completed, \
+              earliest_ts, latest_ts, skip_before_ts) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+            rusqlite::params![
+                state.filepath,
+                state.inode as i64,
+                state.compressed_size as i64,
+                state.uncompressed_size as i64,
+                state.compressed_head_fingerprint.map(|f| f as i64),
+                state.uncompressed_head_fingerprint.map(|f| f as i64),
+                state.compressed_offset as i64,
+                state.uncompressed_offset as i64,
+                state.mtime_ns,
+                state.completed as i64,
+                state.earliest_ts,
+                state.latest_ts,
+                state.skip_before_ts,
+            ],
+        )
+        .unwrap();
+    }
+
+    // ── get_parse_state_by_inode ──────────────────────────────────────────────
+
+    #[test]
+    fn get_parse_state_by_inode_finds_active_entry() {
+        let db = open_test_db();
+        db.set_parse_state(&bare_parse_state("a.log", 99)).unwrap();
+        let s = db.get_parse_state_by_inode(99).unwrap().expect("should find");
+        assert_eq!(s.filepath, "a.log");
+        assert_eq!(s.inode, 99);
+    }
+
+    #[test]
+    fn get_parse_state_by_inode_falls_back_to_archive() {
+        let db = open_test_db();
+        insert_archive(&db, &bare_parse_state("arch.log", 77));
+        let s = db.get_parse_state_by_inode(77).unwrap().expect("should find in archive");
+        assert_eq!(s.filepath, "arch.log");
+    }
+
+    #[test]
+    fn get_parse_state_by_inode_returns_none_when_absent() {
+        let db = open_test_db();
+        assert!(db.get_parse_state_by_inode(999).unwrap().is_none());
+    }
+
+    #[test]
+    fn get_parse_state_by_inode_prefers_active_over_archive() {
+        let db = open_test_db();
+        db.set_parse_state(&bare_parse_state("active.log", 55)).unwrap();
+        insert_archive(&db, &bare_parse_state("archive.log", 55));
+        let s = db.get_parse_state_by_inode(55).unwrap().expect("should find");
+        assert_eq!(s.filepath, "active.log", "active entry should take priority");
+    }
+
+    // ── find_completed_by_uncompressed_identity ───────────────────────────────
+
+    #[test]
+    fn find_completed_by_uncompressed_identity_true_on_match() {
+        let db = open_test_db();
+        db.set_parse_state(&ParseState {
+            uncompressed_head_fingerprint: Some(0xABCD),
+            uncompressed_size: 1024,
+            completed: true,
+            ..bare_parse_state("plain.log", 1)
+        })
+        .unwrap();
+        assert!(db.find_completed_by_uncompressed_identity(0xABCD, 1024).unwrap());
+    }
+
+    #[test]
+    fn find_completed_by_uncompressed_identity_false_when_incomplete() {
+        let db = open_test_db();
+        db.set_parse_state(&ParseState {
+            uncompressed_head_fingerprint: Some(0xABCD),
+            uncompressed_size: 1024,
+            completed: false,
+            ..bare_parse_state("plain.log", 1)
+        })
+        .unwrap();
+        assert!(!db.find_completed_by_uncompressed_identity(0xABCD, 1024).unwrap());
+    }
+
+    #[test]
+    fn find_completed_by_uncompressed_identity_false_wrong_size() {
+        let db = open_test_db();
+        db.set_parse_state(&ParseState {
+            uncompressed_head_fingerprint: Some(0xABCD),
+            uncompressed_size: 1024,
+            completed: true,
+            ..bare_parse_state("plain.log", 1)
+        })
+        .unwrap();
+        assert!(!db.find_completed_by_uncompressed_identity(0xABCD, 2048).unwrap());
+    }
+
+    #[test]
+    fn find_completed_by_uncompressed_identity_searches_archive() {
+        let db = open_test_db();
+        insert_archive(&db, &ParseState {
+            uncompressed_head_fingerprint: Some(0xDEAD),
+            uncompressed_size: 512,
+            completed: true,
+            ..bare_parse_state("old.log", 2)
+        });
+        assert!(db.find_completed_by_uncompressed_identity(0xDEAD, 512).unwrap());
+    }
+
+    // ── find_completed_by_compressed_identity ────────────────────────────────
+
+    #[test]
+    fn find_completed_by_compressed_identity_returns_uncompressed_size_on_match() {
+        let db = open_test_db();
+        db.set_parse_state(&ParseState {
+            compressed_head_fingerprint: Some(0x1234),
+            compressed_size: 300,
+            uncompressed_size: 900,
+            completed: true,
+            ..bare_parse_state("file.log.gz", 3)
+        })
+        .unwrap();
+        assert_eq!(
+            db.find_completed_by_compressed_identity(0x1234, 300).unwrap(),
+            Some(900)
+        );
+    }
+
+    #[test]
+    fn find_completed_by_compressed_identity_none_when_incomplete() {
+        let db = open_test_db();
+        db.set_parse_state(&ParseState {
+            compressed_head_fingerprint: Some(0x1234),
+            compressed_size: 300,
+            uncompressed_size: 900,
+            completed: false,
+            ..bare_parse_state("file.log.gz", 3)
+        })
+        .unwrap();
+        assert!(db.find_completed_by_compressed_identity(0x1234, 300).unwrap().is_none());
+    }
+
+    #[test]
+    fn find_completed_by_compressed_identity_none_wrong_size() {
+        let db = open_test_db();
+        db.set_parse_state(&ParseState {
+            compressed_head_fingerprint: Some(0x1234),
+            compressed_size: 300,
+            uncompressed_size: 900,
+            completed: true,
+            ..bare_parse_state("file.log.gz", 3)
+        })
+        .unwrap();
+        assert!(db.find_completed_by_compressed_identity(0x1234, 999).unwrap().is_none());
+    }
+
+    #[test]
+    fn find_completed_by_compressed_identity_searches_archive() {
+        let db = open_test_db();
+        insert_archive(&db, &ParseState {
+            compressed_head_fingerprint: Some(0xBEEF),
+            compressed_size: 200,
+            uncompressed_size: 600,
+            completed: true,
+            ..bare_parse_state("old.log.gz", 4)
+        });
+        assert_eq!(
+            db.find_completed_by_compressed_identity(0xBEEF, 200).unwrap(),
+            Some(600)
+        );
+    }
+
+    // ── find_parse_state_by_uncompressed_head_fingerprint ────────────────────
+
+    #[test]
+    fn find_by_uncompressed_head_prefers_completed_over_incomplete() {
+        let db = open_test_db();
+        db.set_parse_state(&ParseState {
+            uncompressed_head_fingerprint: Some(0xCAFE),
+            uncompressed_offset: 100,
+            completed: false,
+            ..bare_parse_state("in-progress.log", 10)
+        })
+        .unwrap();
+        insert_archive(&db, &ParseState {
+            uncompressed_head_fingerprint: Some(0xCAFE),
+            uncompressed_offset: 50,
+            completed: true,
+            ..bare_parse_state("done.log", 11)
+        });
+        let s = db.find_parse_state_by_uncompressed_head_fingerprint(0xCAFE).unwrap().expect("found");
+        assert_eq!(s.filepath, "done.log", "completed entry should be preferred");
+    }
+
+    #[test]
+    fn find_by_uncompressed_head_prefers_higher_offset_among_incomplete() {
+        let db = open_test_db();
+        db.set_parse_state(&ParseState {
+            uncompressed_head_fingerprint: Some(0xCAFE),
+            uncompressed_offset: 200,
+            completed: false,
+            ..bare_parse_state("bigger.log", 12)
+        })
+        .unwrap();
+        insert_archive(&db, &ParseState {
+            uncompressed_head_fingerprint: Some(0xCAFE),
+            uncompressed_offset: 50,
+            completed: false,
+            ..bare_parse_state("smaller.log", 13)
+        });
+        let s = db.find_parse_state_by_uncompressed_head_fingerprint(0xCAFE).unwrap().expect("found");
+        assert_eq!(s.filepath, "bigger.log", "higher offset should win");
+    }
+
+    // ── find_parse_state_by_compressed_head_fingerprint ──────────────────────
+
+    #[test]
+    fn find_by_compressed_head_prefers_completed_over_incomplete() {
+        let db = open_test_db();
+        db.set_parse_state(&ParseState {
+            compressed_head_fingerprint: Some(0xF00D),
+            compressed_offset: 100,
+            completed: false,
+            ..bare_parse_state("in-progress.log.gz", 20)
+        })
+        .unwrap();
+        insert_archive(&db, &ParseState {
+            compressed_head_fingerprint: Some(0xF00D),
+            compressed_offset: 50,
+            completed: true,
+            ..bare_parse_state("done.log.gz", 21)
+        });
+        let s = db.find_parse_state_by_compressed_head_fingerprint(0xF00D).unwrap().expect("found");
+        assert_eq!(s.filepath, "done.log.gz", "completed entry should be preferred");
+    }
+
+    #[test]
+    fn find_by_compressed_head_prefers_higher_offset_among_incomplete() {
+        let db = open_test_db();
+        db.set_parse_state(&ParseState {
+            compressed_head_fingerprint: Some(0xF00D),
+            compressed_offset: 300,
+            completed: false,
+            ..bare_parse_state("big.log.gz", 22)
+        })
+        .unwrap();
+        insert_archive(&db, &ParseState {
+            compressed_head_fingerprint: Some(0xF00D),
+            compressed_offset: 100,
+            completed: false,
+            ..bare_parse_state("small.log.gz", 23)
+        });
+        let s = db.find_parse_state_by_compressed_head_fingerprint(0xF00D).unwrap().expect("found");
+        assert_eq!(s.filepath, "big.log.gz", "higher offset should win");
+    }
+
     #[test]
     fn meta_get_set_roundtrip() {
         let mut db = open_test_db();
