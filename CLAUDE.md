@@ -13,7 +13,8 @@ cargo test
 
 - **`src/main.rs`** — CLI entry point (clap), subcommands, config loading
 - **`src/config.rs`** — YAML config parsing and path resolution
-- **`src/parser/mod.rs`** — combined-log-format line parser → `LogEntry`; plus timestamp arithmetic; no pipeline, UA, or rule dependencies
+- **`src/parser/mod.rs`** — `LogEntry` type and string-slice accessors; `LogFormat` enum and dispatch; timestamp arithmetic (`days_from_civil`, `parse_unix_timestamp`); no pipeline, UA, or rule dependencies
+- **`src/parser/combined.rs`** — combined-log-format line parser: converts a raw nginx/Apache line into a `LogEntry`; also parses extended `us=` upstream-response-time fields
 - **`src/parser/stage.rs`** — parser pipeline thread: receives raw lines from the loader, parses them, applies UA classification, bot filtering, and rules, then forwards batches to the aggregator
 - **`src/loader.rs`** — reads raw bytes, decompresses if needed, emits `LoaderMsg::Lines` batches
 - **`src/aggregator/mod.rs`** — `Processor` struct: top-level orchestration — file discovery, resume planning, progress thread, checkpoint scheduling, and the public `process_globs` entry point
@@ -39,6 +40,9 @@ cargo test
 - **`src/rules.rs`** — YAML-configured per-entry filtering rules (`ignore`, `hide`, `sample` actions); compiled from `RawRule` in config and evaluated in the parser thread
 - **`src/logging.rs`** — verbosity control: atomic log-level flag and helpers that interleave safely with the progress line
 - **`src/method_proto.rs`** — HTTP method/protocol index arrays
+- **`src/response_time.rs`** — `ResponseTimeHistogram`: 1 ms-bucket histogram (0–60,000 ms); supports `record`, `merge`, `percentile`, `avg`, and binary serialize/deserialize for SQLite storage
+- **`src/update.rs`** — `update` subcommand: fetches the latest GitHub release via `self_update`, shows current vs. latest version, prompts interactively before replacing the binary
+- **`src/rollback.rs`** — `rollback` subcommand: deletes all aggregated data from a given month boundary onward across every table, resets parse state so the next `process` run re-ingests affected files
 - **`src/reports.rs`** — HTML report generation via Tera templates
 - **`src/reports/aggregator.rs`** — report-specific SQL summarisation
 - **`src/reports/charts.rs`** — Chart.js dataset assembly

@@ -19,6 +19,11 @@ webstat generate     # generate HTML from SQLite
 webstat all          # parse then generate
 webstat              # same as `all`
 
+webstat rollback --month 2026-03          # roll back all data to the start of a month
+webstat rollback --month 2026-03 --dry-run  # preview what would be removed
+webstat update                            # update to the latest GitHub release
+webstat update --check                    # check for a new version without installing
+
 # Most config can be passed on the command line
 webstat \
   --log-glob /var/log/nginx/access.log,/dump/logs/access* \
@@ -42,13 +47,11 @@ webstat \
 | `--checkpoint-minutes <N>` | `0` disables periodic checkpoints |
 | `--anonymise-ips <true\|false>` | |
 | `--top-n <N>` | |
-| `--vacuum-after-prune <true\|false>` | |
 | `--enable-top-urls <true\|false>` | |
 | `--enable-top-sites <true\|false>` | |
 | `--enable-top-refs <true\|false>` | |
-| `--enable-all-time-unique-sites <true\|false>` | |
+| `--enable-top-agents <true\|false>` | |
 | `--bot-filter <true\|false>` | |
-| `--site-host <HOST>` | |
 
 ## Configuration
 
