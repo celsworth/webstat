@@ -1137,11 +1137,7 @@ mod tests {
     // logrotate renamed+gzipped the file to access.log-YYYYMMDD.gz (same inode,
     // larger uncompressed content).
     //
-    // Bug 1 (global-dedup false positive): find_completed_by_uncompressed_head_only
-    //   matched the old plain-file record (same uncompressed head fingerprint,
-    //   compressed_head IS NULL) and returned plan=None, silently skipping the gz.
-    //
-    // Bug 2 (missing skip prefix): even if the global dedup were suppressed, the
+    // Bug: even after suppressing a prior global-dedup false positive, the
     //   skip_decoded_prefix_bytes was not set for the plain→compressed case
     //   (previous_size=compressed_size=0, so the else-if branch was dead).
 

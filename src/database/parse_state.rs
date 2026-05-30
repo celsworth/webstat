@@ -119,30 +119,6 @@ impl Database {
             .map(|v| v as u64))
     }
 
-    /// Find a completed plain-file entry by uncompressed head fingerprint alone (no size check).
-    /// Only matches entries where `compressed_head_fingerprint IS NULL` (plain files).
-    /// Returns the stored `uncompressed_size`, which callers use as a resume offset rather
-    /// than as a definitive "already done" signal — the compressed file may have grown past it.
-    pub fn find_completed_by_uncompressed_head_only(
-        &self,
-        head_fingerprint: u64,
-    ) -> Result<Option<u64>> {
-        let sql = format!(
-            "SELECT uncompressed_size FROM ({PARSE_STATE_UNION}) \
-             WHERE uncompressed_head_fingerprint = ? \
-               AND completed = 1 \
-               AND compressed_head_fingerprint IS NULL \
-             LIMIT 1"
-        );
-        let mut st = self.conn.prepare_cached(&sql)?;
-        Ok(st
-            .query_row(params![head_fingerprint as i64], |row| {
-                row.get::<_, i64>(0)
-            })
-            .optional()?
-            .map(|v| v as u64))
-    }
-
     pub fn find_parse_state_by_uncompressed_head_fingerprint(
         &self,
         head_fingerprint: u64,
