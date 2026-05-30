@@ -975,10 +975,28 @@ mod tests {
 
     #[test]
     fn stops_at_twenty_line_limit() {
-        let garbage: Vec<String> = (0..21).map(|i| format!("garbage line {i}")).collect();
-        let refs: Vec<&str> = garbage.iter().map(String::as_str).collect();
+        // Valid line at position 20 (0-indexed) is within the 20-line window → found.
+        let valid = log_line("01/Jan/1970:00:00:42 +0000");
+        let mut lines_within: Vec<String> = (0..19).map(|i| format!("garbage line {i}")).collect();
+        lines_within.push(valid.clone());
+        let refs: Vec<&str> = lines_within.iter().map(String::as_str).collect();
         let f = write_plain(&refs);
-        assert_eq!(read_first_line_ts(f.path().to_str().unwrap()), None);
+        assert_eq!(
+            read_first_line_ts(f.path().to_str().unwrap()),
+            Some(42),
+            "valid line at position 19 (within 20-line window) must be found"
+        );
+
+        // Valid line at position 20 is the 21st line — beyond the window → not found.
+        let mut lines_beyond: Vec<String> = (0..20).map(|i| format!("garbage line {i}")).collect();
+        lines_beyond.push(valid);
+        let refs2: Vec<&str> = lines_beyond.iter().map(String::as_str).collect();
+        let f2 = write_plain(&refs2);
+        assert_eq!(
+            read_first_line_ts(f2.path().to_str().unwrap()),
+            None,
+            "valid line at position 20 (beyond 20-line window) must not be found"
+        );
     }
 
     // ── choose_primary_state ──────────────────────────────────────────────────

@@ -91,7 +91,7 @@ mod tests {
     }
 
     #[test]
-    fn is_compressed_gz_and_bz2_are_true() {
+    fn is_compressed_gz_bz2_and_br_are_true() {
         assert!(CompressionType::Gz.is_compressed());
         assert!(CompressionType::Bz2.is_compressed());
         assert!(CompressionType::Br.is_compressed());

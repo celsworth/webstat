@@ -204,8 +204,8 @@ mod tests {
 
     #[test]
     fn hits_bw_drops_entry_low_on_both() {
-        // d is bottom by both hits and bw; all others are top-2 by one criterion
-        // hits top-2: a(100), b(90); bw top-2: a(100), b(90); d(1,1) dropped
+        // hits top-2: a(100), b(90); bw top-2: a(100), b(90)
+        // Both c(5,5) and d(1,1) fall outside the top-2 on every metric → both dropped.
         let mut map = make_hits_bw(&[("a", 100, 100), ("b", 90, 90), ("c", 5, 5), ("d", 1, 1)]);
         pretrim_hits_bw_map(&mut map, 2);
         assert_eq!(sorted_keys(&map), ["a", "b"]);

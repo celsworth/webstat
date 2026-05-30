@@ -861,35 +861,35 @@ mod tests {
     #[test]
     fn len_gt() {
         let rs = single("url", "len_gt", num(10));
-        assert!(is_ignored(&rs, &make_entry(A))); // 15 > 10
+        assert!(is_ignored(&rs, &make_entry(A))); // 14 > 10
         assert!(!is_ignored(&rs, &make_entry(B))); // 9 not > 10
     }
 
     #[test]
     fn len_lt() {
         let rs = single("url", "len_lt", num(10));
-        assert!(!is_ignored(&rs, &make_entry(A))); // 15 not < 10
+        assert!(!is_ignored(&rs, &make_entry(A))); // 14 not < 10
         assert!(is_ignored(&rs, &make_entry(B))); // 9 < 10
     }
 
     #[test]
     fn len_gte_boundary() {
         let rs = single("url", "len_gte", num(9));
-        assert!(is_ignored(&rs, &make_entry(A))); // 15 >= 9
+        assert!(is_ignored(&rs, &make_entry(A))); // 14 >= 9
         assert!(is_ignored(&rs, &make_entry(B))); // 9 == 9
     }
 
     #[test]
     fn len_lte_boundary() {
         let rs = single("url", "len_lte", num(9));
-        assert!(!is_ignored(&rs, &make_entry(A))); // 15 > 9
+        assert!(!is_ignored(&rs, &make_entry(A))); // 14 > 9
         assert!(is_ignored(&rs, &make_entry(B))); // 9 == 9
     }
 
     #[test]
     fn len_eq() {
         let rs = single("url", "len_eq", num(9));
-        assert!(!is_ignored(&rs, &make_entry(A))); // 15
+        assert!(!is_ignored(&rs, &make_entry(A))); // 14
         assert!(is_ignored(&rs, &make_entry(B))); // 9
     }
 
