@@ -272,6 +272,80 @@ main.container {
     height: 100% !important;
 }
 
+/* ---- Weekday × hour heatmap ---- */
+/* Header bar matches table headings: muted text on the alt surface, uppercase. */
+.heatmap-title {
+    margin: 0;
+    padding: 0.6rem 0.9rem;
+    background: var(--surface-alt);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+
+.heatmap-body {
+    padding: 1.25rem;
+}
+
+.heatmap-scroll {
+    overflow-x: auto;
+}
+
+.heatmap {
+    border-collapse: separate;
+    border-spacing: 2px;
+    width: 100%;
+    table-layout: fixed;
+}
+
+.heatmap__corner {
+    width: 2.5rem;
+}
+
+.heatmap__hour {
+    font-weight: 400;
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 0 0 0.25rem;
+}
+
+.heatmap__day {
+    font-weight: 600;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-align: right;
+    padding-right: 0.4rem;
+    white-space: nowrap;
+}
+
+.heatmap__cell {
+    height: 1.5rem;
+    border-radius: 3px;
+    /* Blend the accent colour over the surface by the cell's relative intensity. */
+    background: color-mix(in srgb, var(--accent) calc(var(--heat) * 100%), var(--surface-alt));
+}
+
+.heatmap-legend {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.35rem;
+    margin: 0.6rem 0 0;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.heatmap-legend__swatch {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--accent) calc(var(--heat) * 100%), var(--surface-alt));
+}
+
 /* ---- New vertical chart layouts ---- */
 /* Full-width stacked charts */
 .charts-col {

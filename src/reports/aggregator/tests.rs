@@ -223,6 +223,41 @@ mod tests {
         let totals = overall_totals(&conn, false).expect("overall totals");
         assert_eq!(totals.visitors, 2);
     }
+
+    #[test]
+    fn weekday_hour_grid_buckets_by_weekday_and_hour() {
+        let conn = setup_conn();
+        // In 2026, May 1 is a Friday, so May 4 = Mon, May 10 = Sun, May 11 = Mon.
+        insert_hourly(&conn, "2026-05-04", 9, 100, 0); // Mon 09:00
+        insert_hourly(&conn, "2026-05-11", 9, 40, 0); // Mon 09:00 (same cell → 140)
+        insert_hourly(&conn, "2026-05-05", 14, 50, 0); // Tue 14:00
+        insert_hourly(&conn, "2026-05-10", 23, 10, 0); // Sun 23:00
+
+        let grid = weekday_hour_grid(&conn, "2026-05-%", false).unwrap();
+
+        assert_eq!(grid.len(), 7);
+        assert_eq!(grid[0].label, "Mon");
+        assert_eq!(grid[6].label, "Sun");
+
+        // Monday 09:00 accumulates both rows; it is the busiest cell.
+        assert_eq!(grid[0].cells[9].hits, 140);
+        assert_eq!(grid[0].cells[9].intensity, 1.0);
+        // Tuesday 14:00.
+        assert_eq!(grid[1].cells[14].hits, 50);
+        assert!((grid[1].cells[14].intensity - 50.0 / 140.0).abs() < 1e-9);
+        // Sunday 23:00.
+        assert_eq!(grid[6].cells[23].hits, 10);
+        // Empty cell stays zero.
+        assert_eq!(grid[0].cells[0].hits, 0);
+        assert_eq!(grid[0].cells[0].intensity, 0.0);
+    }
+
+    #[test]
+    fn weekday_hour_grid_empty_when_no_traffic() {
+        let conn = setup_conn();
+        let grid = weekday_hour_grid(&conn, "2026-05-%", false).unwrap();
+        assert!(grid.is_empty());
+    }
 }
 
 /// Percentage regression tests.

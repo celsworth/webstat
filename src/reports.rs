@@ -121,6 +121,22 @@ pub(crate) struct HourlyRow {
     bandwidth_fmt: String,
 }
 
+/// One cell of the weekday×hour traffic heatmap.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct HeatCell {
+    hits: u64,
+    hits_fmt: String,
+    /// Colour intensity in 0.0–1.0, relative to the busiest cell in the grid.
+    intensity: f64,
+}
+
+/// One weekday row (Mon–Sun) of the heatmap, holding 24 hourly cells.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct WeekdayRow {
+    label: String,
+    cells: Vec<HeatCell>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct MonthRow {
     period: String,
@@ -346,6 +362,7 @@ struct MonthlySummary {
     daily_rt_stats: Vec<DailyRtStat>,
     rt_distribution_buckets: Vec<(String, u64)>,
     buckets: Vec<BucketIndexRow>,
+    weekday_hour: Vec<WeekdayRow>,
 }
 
 #[derive(Debug, Clone)]
@@ -368,6 +385,7 @@ struct YearlySummary {
     monthly_rt_stats: Vec<MonthlyRtStat>,
     top_slow_urls: Vec<TopUrlRow>,
     buckets: Vec<BucketIndexRow>,
+    weekday_hour: Vec<WeekdayRow>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -724,6 +742,10 @@ fn render_year_page(
         page_ctx.insert("buckets", &summary.buckets);
     }
 
+    if !summary.weekday_hour.is_empty() {
+        page_ctx.insert("weekday_hour", &summary.weekday_hour);
+    }
+
     let page = tera.render("year.html.tera", &page_ctx)?;
     let html = render_layout(tera, cfg, "../assets", "../index.html", page)?;
 
@@ -820,6 +842,10 @@ fn render_month_page(
 
     if !summary.buckets.is_empty() {
         page_ctx.insert("buckets", &summary.buckets);
+    }
+
+    if !summary.weekday_hour.is_empty() {
+        page_ctx.insert("weekday_hour", &summary.weekday_hour);
     }
 
     let page = tera.render("month.html.tera", &page_ctx)?;

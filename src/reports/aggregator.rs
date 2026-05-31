@@ -14,9 +14,9 @@ use crate::response_time::ResponseTimeHistogram;
 use super::{
     count_fmt, flag_emoji, format_bytes, format_ms, format_totals, month_name, percent_str,
     status_label, BucketIndexRow, BucketPageData, DailyAvgMax, DailyRow, DailyRtStat,
-    HourlyAvgMax, HourlyRow, MethodRow, MonthRow, MonthlyRtStat, MonthlySummary, OverallSummary,
-    PeriodMonth, ProtoRow, StatusRow, TopAgentRow, TopCountryRow, TopHostRow, TopRefRow,
-    TopUrlRow, TotalsView, YearAggregateRow, YearlySummary,
+    HeatCell, HourlyAvgMax, HourlyRow, MethodRow, MonthRow, MonthlyRtStat, MonthlySummary,
+    OverallSummary, PeriodMonth, ProtoRow, StatusRow, TopAgentRow, TopCountryRow, TopHostRow,
+    TopRefRow, TopUrlRow, TotalsView, WeekdayRow, YearAggregateRow, YearlySummary,
 };
 
 // Returns ("= ?1", period) for monthly (7-char) periods, ("LIKE ?1", "YYYY-%") for yearly.
@@ -176,6 +176,7 @@ pub(super) fn monthly_summary(
     let daily_rt_stats = daily_rt_stats_for_month(conn, year, month)?;
     let rt_distribution_buckets = monthly_rt_histogram_buckets(conn, &period)?;
     let buckets = bucket_index_rows(conn, &period, compact_counts)?;
+    let weekday_hour = weekday_hour_grid(conn, &format!("{period}-%"), compact_counts)?;
 
     Ok(MonthlySummary {
         period,
@@ -202,6 +203,7 @@ pub(super) fn monthly_summary(
         daily_rt_stats,
         rt_distribution_buckets,
         buckets,
+        weekday_hour,
     })
 }
 
@@ -236,6 +238,7 @@ pub(super) fn yearly_summary(
     let monthly_rt_stats = monthly_rt_stats_for_year(conn, year)?;
     let top_slow_urls = top_urls_avg_rt(conn, &period, top_n, compact_counts)?;
     let buckets = bucket_index_rows(conn, &period, compact_counts)?;
+    let weekday_hour = weekday_hour_grid(conn, &format!("{period}-%"), compact_counts)?;
 
     Ok(YearlySummary {
         year,
@@ -256,6 +259,7 @@ pub(super) fn yearly_summary(
         monthly_rt_stats,
         top_slow_urls,
         buckets,
+        weekday_hour,
     })
 }
 
@@ -414,6 +418,73 @@ fn hourly_distribution(
         });
     }
 
+    Ok(out)
+}
+
+/// Build a weekday (Mon–Sun) × hour (0–23) heatmap of hits for a period.
+///
+/// `date_like` is a `LIKE` pattern over `hourly_stats.date` (e.g. `"2026-05-%"`
+/// for a month or `"2026-%"` for a year). Each cell's `intensity` is its hit
+/// count divided by the busiest cell, giving a 0.0–1.0 colour scale. Returns an
+/// empty vec when the period has no traffic, so the template can hide the panel.
+fn weekday_hour_grid(
+    conn: &Connection,
+    date_like: &str,
+    compact_counts: bool,
+) -> Result<Vec<WeekdayRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT date, hour, SUM(hits)
+         FROM hourly_stats
+         WHERE date LIKE ?1
+         GROUP BY date, hour",
+    )?;
+    let rows = stmt.query_map(params![date_like], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)? as usize,
+            row.get::<_, i64>(2)? as u64,
+        ))
+    })?;
+
+    // grid[weekday 0=Mon..6=Sun][hour 0..23]
+    let mut grid = [[0u64; 24]; 7];
+    let mut max_hits = 0u64;
+    for row in rows {
+        let (date, hour, hits) = row?;
+        if hour >= 24 {
+            continue;
+        }
+        let Ok(d) = NaiveDate::parse_from_str(&date, "%Y-%m-%d") else {
+            continue;
+        };
+        let wd = d.weekday().num_days_from_monday() as usize;
+        grid[wd][hour] += hits;
+        max_hits = max_hits.max(grid[wd][hour]);
+    }
+
+    if max_hits == 0 {
+        return Ok(Vec::new());
+    }
+
+    const LABELS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    let out = grid
+        .iter()
+        .enumerate()
+        .map(|(wd, hours)| {
+            let cells = hours
+                .iter()
+                .map(|&hits| HeatCell {
+                    hits,
+                    hits_fmt: count_fmt(hits, compact_counts),
+                    intensity: hits as f64 / max_hits as f64,
+                })
+                .collect();
+            WeekdayRow {
+                label: LABELS[wd].to_string(),
+                cells,
+            }
+        })
+        .collect();
     Ok(out)
 }
 

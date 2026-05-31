@@ -40,7 +40,7 @@ cargo test
 - **`src/response_time.rs`** — `ResponseTimeHistogram`: 1 ms-bucket histogram (0–60,000 ms); supports `record`, `merge`, `percentile`, `avg`, and binary serialize/deserialize for SQLite storage
 - **`src/rollback.rs`** — `rollback` subcommand: deletes all aggregated data from a given month boundary onward, resets parse state so the next `process` run re-ingests affected files
 - **`src/reports.rs`** — HTML report generation via Tera templates
-- **`src/reports/aggregator.rs`** — report-specific SQL summarisation
+- **`src/reports/aggregator.rs`** — report-specific SQL summarisation; includes `weekday_hour_grid` (Mon–Sun × 0–23h hits heatmap, derived from `hourly_stats` at report time — no stored table)
 - **`src/reports/charts.rs`** — Chart.js dataset assembly
 - **`src/tests/mod.rs`** — integration test suite root; unit tests stay co-located with their modules
 - **`src/tests/pipeline.rs`** — integration tests: file resume, gzip fingerprinting, month boundaries, rules, rollback + re-ingest cycles

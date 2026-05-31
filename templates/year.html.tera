@@ -99,6 +99,8 @@
 </div>
 </section>
 
+{% include "templates/partials/_heatmap.html.tera" %}
+
 <section class="stats-group">
   <div class="stats-panel">
     {% include "templates/partials/_status_codes_table.html.tera" %}

@@ -1,0 +1,41 @@
+{% if weekday_hour is defined and weekday_hour | length > 0 %}
+<section class="stats-group">
+  <div class="stats-panel heatmap-panel">
+    <h3 class="heatmap-title">Traffic by Day &amp; Hour</h3>
+    <div class="heatmap-body">
+    <div class="heatmap-scroll">
+      <table class="heatmap">
+        <thead>
+          <tr>
+            <th class="heatmap__corner"></th>
+            {% for h in range(end=24) %}
+            <th class="heatmap__hour">{{ h }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in weekday_hour %}
+          <tr>
+            <th class="heatmap__day">{{ row.label }}</th>
+            {% for cell in row.cells %}
+            <td class="heatmap__cell" style="--heat: {{ cell.intensity }}"
+                title="{{ row.label }} {{ loop.index0 }}:00 — {{ cell.hits_fmt }} hits"></td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="heatmap-legend">
+      <span class="heatmap-legend__label">Less</span>
+      <span class="heatmap-legend__swatch" style="--heat: 0"></span>
+      <span class="heatmap-legend__swatch" style="--heat: 0.25"></span>
+      <span class="heatmap-legend__swatch" style="--heat: 0.5"></span>
+      <span class="heatmap-legend__swatch" style="--heat: 0.75"></span>
+      <span class="heatmap-legend__swatch" style="--heat: 1"></span>
+      <span class="heatmap-legend__label">More</span>
+    </p>
+    </div>
+  </div>
+</section>
+{% endif %}

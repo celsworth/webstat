@@ -52,6 +52,8 @@
   <canvas id="hourlyChart"></canvas>
 </div>
 
+{% include "templates/partials/_heatmap.html.tera" %}
+
 {% if status_codes | length > 0
    or top_agents_hits | length > 0
    or top_agents_bandwidth | length > 0

@@ -198,6 +198,37 @@ fn report_generation_e2e_multi_year_outputs_pages_and_filters_referrers() {
     assert!(!may_html.contains("mysite.test"));
     assert!(!may_html.contains("bot.html"));
 
+    // ── Weekday × hour heatmap ────────────────────────────────────────────────
+    // All May hits land on Sat 9 May 2026: two at 08:00, one at 09:00 (the
+    // Googlebot 09:10 hit is bot-filtered). The busiest cell (Sat 08:00) must
+    // render at full intensity, and the grid must carry all seven weekday rows.
+    assert!(may_html.contains("Traffic by Day &amp; Hour"));
+    assert!(may_html.contains(r#"class="heatmap""#));
+    for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] {
+        assert!(
+            may_html.contains(&format!(r#"heatmap__day">{day}"#)),
+            "heatmap missing weekday row {day}"
+        );
+    }
+    // 7 weekday rows × 24 hours = 168 cells.
+    assert_eq!(may_html.matches("heatmap__cell").count(), 168);
+    // Busiest cell (Sat 08:00) is rendered at intensity 1.
+    assert!(
+        may_html.contains(r#"--heat: 1""#),
+        "heatmap should have a full-intensity cell"
+    );
+    assert!(may_html.contains(r#"title="Sat 8:00 — 2 hits""#));
+    assert!(may_html.contains(r#"title="Sat 9:00 — 1 hits""#));
+
+    // The yearly page carries the same heatmap (aggregated across the year).
+    let year_html =
+        fs::read_to_string(output_dir.join("2026").join("index.html")).expect("read 2026");
+    assert!(year_html.contains("Traffic by Day &amp; Hour"));
+    assert_eq!(year_html.matches("heatmap__cell").count(), 168);
+
+    // The all-time overview page has no per-period heatmap.
+    assert!(!index_html.contains("heatmap__cell"));
+
     let conn = Connection::open(&cfg.database).expect("open db for checks");
     let total_hits: i64 = conn
         .query_row(
