@@ -1,0 +1,260 @@
+<div class="page-header">
+  <h2>Bucket: {{ bucket }}</h2>
+  <p class="page-subtitle"><a href="../../index.html">&larr; {{ period }}</a></p>
+</div>
+
+<section class="summary-bar">
+  <div class="stat-card stat-card--hits">
+    <span class="stat-value" title="{{ hits_exact_fmt }}">{{ hits_fmt }}</span>
+    <span class="stat-label">Total Hits</span>
+  </div>
+  <div class="stat-card stat-card--bandwidth">
+    <span class="stat-value">{{ bandwidth_fmt }}</span>
+    <span class="stat-label">Bandwidth</span>
+  </div>
+  {% if visitors_fmt %}
+  <div class="stat-card stat-card--sites">
+    <span class="stat-value" title="{{ visitors_exact_fmt }}">{{ visitors_fmt }}</span>
+    <span class="stat-label">Unique Sites</span>
+  </div>
+  {% endif %}
+  {% if avg_rt_ms %}
+  <div class="stat-card stat-card--rt">
+    <span class="stat-value">{{ avg_rt_ms }}</span>
+    {% if p95_rt_ms %}<span class="stat-sub">p95: {{ p95_rt_ms }}</span>{% endif %}
+    <span class="stat-label">Avg Response Time</span>
+  </div>
+  {% endif %}
+</section>
+
+<section class="charts-col">
+  {% if overview_chart is defined %}
+  <div class="charts-split">
+    <div class="chart-box chart-box--bar">
+      <canvas id="overviewChart"></canvas>
+    </div>
+    {% if rt_distribution_chart is defined %}
+    <div class="chart-box chart-box--bar">
+      <canvas id="rtDistributionChart"></canvas>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if rt_over_time_chart is defined or overview_sites_chart is defined %}
+  <div class="charts-split">
+    {% if rt_over_time_chart is defined %}
+    <div class="chart-box chart-box--bar">
+      <canvas id="rtOverTimeChart"></canvas>
+    </div>
+    {% endif %}
+    {% if overview_sites_chart is defined %}
+    <div class="chart-box chart-box--bar">
+      <canvas id="overviewSitesChart"></canvas>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+
+{% if status_codes | length > 0 or agents_hits | length > 0 or agents_bandwidth | length > 0 or countries_hits | length > 0 %}
+<section class="charts-col">
+  <div class="charts-triple">
+    {% if status_codes | length > 0 %}
+    <div class="chart-box">
+      <canvas id="statusChart"></canvas>
+    </div>
+    {% endif %}
+    {% if countries_hits | length > 0 %}
+    <div class="chart-box">
+      <canvas id="countries_hitsChart"></canvas>
+    </div>
+    {% endif %}
+    {% if agents_hits | length > 0 or agents_bandwidth | length > 0 %}
+    <div class="chart-box">
+      <canvas id="agentsChart"></canvas>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% if monthly_rows | length > 0 %}
+<section class="stats-group">
+<div class="stats-panel">
+  <table class="data-table stats-panel__table">
+    <thead>
+      <tr><th colspan="5" class="stats-panel__heading">Monthly Breakdown</th></tr>
+      <tr>
+        <th>Month</th>
+        <th class="num-col metric-hits">Hits</th>
+        <th class="num-col metric-sites">Sites</th>
+        <th class="num-col metric-bandwidth">Bandwidth</th>
+        <th>Detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in monthly_rows %}
+      <tr>
+        <td>{{ row.month_name }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+        <td class="num-col" data-value="{{ row.visitors }}" title="{{ row.visitors_exact_fmt }}">{{ row.visitors_fmt }}</td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+        <td><a href="../../../{{ row.period }}/buckets/{{ slug }}/index.html" class="btn-link">View &rarr;</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+</section>
+{% endif %}
+
+<section class="stats-group">
+  <div class="stats-panel">
+    {% include "templates/partials/_status_codes_table.html.tera" %}
+  </div>
+  {% include "templates/partials/_proto_method_tables.html.tera" %}
+</section>
+
+{% if agents_hits | length > 0 or agents_bandwidth | length > 0 %}
+<div class="stats-panel" data-tabs>
+  <div class="tab-group-header">
+    <span class="tab-group-title" data-tabs-title></span>
+    <div data-tabs-nav>
+      {% if agents_hits | length > 0 %}
+      <button class="tab-btn" data-tabs-target="bucket-agents-hits" data-tabs-label="Browser Families by Hits">Hits</button>
+      {% endif %}
+      {% if agents_bandwidth | length > 0 %}
+      <button class="tab-btn" data-tabs-target="bucket-agents-bandwidth" data-tabs-label="Browser Families by Bandwidth">Bandwidth</button>
+      {% endif %}
+    </div>
+  </div>
+  {% if agents_hits | length > 0 %}
+  <div id="bucket-agents-hits" data-tabs-panel>
+    <table class="data-table stats-panel__table">
+      <thead><tr><th>#</th><th>Browser Family</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr></thead>
+      <tbody>
+        {% for row in agents_hits %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ row.agent }}</td>
+          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
+            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
+          </td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">
+            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if agents_bandwidth | length > 0 %}
+  <div id="bucket-agents-bandwidth" data-tabs-panel>
+    <table class="data-table stats-panel__table">
+      <thead><tr><th>#</th><th>Browser Family</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr></thead>
+      <tbody>
+        {% for row in agents_bandwidth %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ row.agent }}</td>
+          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
+            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
+          </td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">
+            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if countries_hits | length > 0 or countries_bandwidth | length > 0 %}
+<div class="stats-panel" data-tabs>
+  <div class="tab-group-header">
+    <span class="tab-group-title" data-tabs-title></span>
+    <div data-tabs-nav>
+      {% if countries_hits | length > 0 %}
+      <button class="tab-btn" data-tabs-target="bucket-countries_hits-hits" data-tabs-label="Top Countries by Hits">Hits</button>
+      {% endif %}
+      {% if countries_bandwidth | length > 0 %}
+      <button class="tab-btn" data-tabs-target="bucket-countries_hits-bandwidth" data-tabs-label="Top Countries by Bandwidth">Bandwidth</button>
+      {% endif %}
+    </div>
+  </div>
+  {% if countries_hits | length > 0 %}
+  <div id="bucket-countries_hits-hits" data-tabs-panel>
+    <table class="data-table stats-panel__table">
+      <thead><tr><th>#</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr></thead>
+      <tbody>
+        {% for row in countries_hits %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ row.country_flag }} {{ row.country_name }}</td>
+          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
+            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
+          </td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">
+            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if countries_bandwidth | length > 0 %}
+  <div id="bucket-countries_hits-bandwidth" data-tabs-panel>
+    <table class="data-table stats-panel__table">
+      <thead><tr><th>#</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr></thead>
+      <tbody>
+        {% for row in countries_bandwidth %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ row.country_flag }} {{ row.country_name }}</td>
+          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
+            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
+          </td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">
+            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% set tab_prefix = "bucket" %}
+{% include "templates/partials/_top_urls_panel.html.tera" %}
+
+<script>
+(function() {
+  {% if overview_chart is defined %}
+  new Chart(document.getElementById('overviewChart'), {{ overview_chart | safe }});
+  {% endif %}
+  {% if overview_sites_chart is defined %}
+  new Chart(document.getElementById('overviewSitesChart'), {{ overview_sites_chart | safe }});
+  {% endif %}
+  var statusCanvas = document.getElementById('statusChart');
+  if (statusCanvas) { new Chart(statusCanvas, {{ status_chart | safe }}); }
+  var countries_hitsCanvas = document.getElementById('countries_hitsChart');
+  if (countries_hitsCanvas) { new Chart(countries_hitsCanvas, {{ country_chart | safe }}); }
+  var agentsCanvas = document.getElementById('agentsChart');
+  if (agentsCanvas) { new Chart(agentsCanvas, {{ agents_chart | safe }}); }
+  {% if rt_over_time_chart is defined %}
+  var rtCanvas = document.getElementById('rtOverTimeChart');
+  if (rtCanvas) { new Chart(rtCanvas, {{ rt_over_time_chart | safe }}); }
+  {% endif %}
+  {% if rt_distribution_chart is defined %}
+  var rtDistCanvas = document.getElementById('rtDistributionChart');
+  if (rtDistCanvas) { new Chart(rtDistCanvas, {{ rt_distribution_chart | safe }}); }
+  {% endif %}
+})();
+</script>

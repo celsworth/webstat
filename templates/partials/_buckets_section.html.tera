@@ -1,0 +1,19 @@
+{% if buckets is defined and buckets | length > 0 %}
+<section class="table-section">
+  <h3>Buckets</h3>
+  <table class="data-table">
+    <thead><tr><th>Bucket</th><th>Hits</th><th>Bandwidth</th><th>Avg RT</th><th>Unique Sites</th></tr></thead>
+    <tbody>
+      {% for b in buckets %}
+      <tr>
+        <td><a href="buckets/{{ b.slug }}/index.html">{{ b.bucket }}</a></td>
+        <td title="{{ b.hits_exact_fmt }}">{{ b.hits_fmt }}</td>
+        <td>{{ b.bandwidth_fmt }}</td>
+        <td>{{ b.avg_rt_ms | default(value="—") }}</td>
+        <td>{{ b.unique_sites_fmt | default(value="—") }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}

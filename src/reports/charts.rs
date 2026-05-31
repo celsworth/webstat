@@ -102,6 +102,56 @@ pub(super) fn hourly_chart(hourly: &[HourlyRow], style: &StyleConfig) -> Result<
     .context("Failed to build hourly chart JSON")
 }
 
+pub(super) fn bucket_monthly_sites_chart(monthly: &[MonthRow], style: &StyleConfig) -> Result<String> {
+    let bar_sites = style.bar_sites.as_deref().unwrap_or(PALETTE[3]);
+
+    let labels: Vec<String> = monthly
+        .iter()
+        .map(|m| m.month_name.chars().take(3).collect::<String>())
+        .collect();
+    let visitors: Vec<u64> = monthly.iter().map(|m| m.visitors).collect();
+
+    serde_json::to_string(&json!({
+      "type": "bar",
+      "data": {
+        "labels": labels,
+        "datasets": [
+          { "label": "Unique Sites", "data": visitors, "backgroundColor": bar_sites,
+            "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
+        ]
+      },
+      "options": simple_bar_options("Unique Sites")
+    }))
+    .context("Failed to build bucket monthly sites chart JSON")
+}
+
+pub(super) fn bucket_daily_sites_chart(daily: &[DailyRow], style: &StyleConfig) -> Result<String> {
+    let bar_sites = style.bar_sites.as_deref().unwrap_or(PALETTE[3]);
+    let bar_sites_weekend = style.bar_sites_weekend.as_deref().unwrap_or("#d4b288");
+
+    let labels: Vec<String> = daily
+        .iter()
+        .map(|d| d.date.split('-').next_back().unwrap_or("").to_string())
+        .collect();
+    let visitors: Vec<u64> = daily.iter().map(|d| d.visitors).collect();
+    let visitors_colors: Vec<&str> = daily
+        .iter()
+        .map(|d| if d.is_weekend { bar_sites_weekend } else { bar_sites })
+        .collect();
+
+    serde_json::to_string(&json!({
+      "type": "bar",
+      "data": {
+        "labels": labels,
+        "datasets": [
+          { "label": "Unique Sites", "data": visitors, "backgroundColor": visitors_colors, "borderColor": "#999", "borderWidth": 1, "borderRadius": 2 }
+        ]
+      },
+      "options": simple_bar_options("Unique Sites")
+    }))
+    .context("Failed to build bucket daily sites chart JSON")
+}
+
 pub(super) fn monthly_overview_chart(monthly: &[MonthRow], style: &StyleConfig) -> Result<String> {
     let bar_hits = style.bar_hits.as_deref().unwrap_or(PALETTE[0]);
     let bar_bandwidth = style.line_bandwidth.as_deref().unwrap_or(PALETTE[2]);

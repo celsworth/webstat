@@ -1,0 +1,23 @@
+{% if top_refs | length > 0 %}
+<section class="stats-group">
+  <div class="stats-panel">
+    <table class="data-table stats-panel__table">
+      <thead>
+        <tr><th colspan="3" class="stats-panel__heading">Top Referrers</th></tr>
+        <tr><th>#</th><th>Referrer</th><th class="num-col">Hits</th></tr>
+      </thead>
+      <tbody>
+        {% for row in top_refs %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td class="url-cell">
+            <a href="{{ row.referrer }}" rel="noopener noreferrer" target="_blank">{{ row.referrer }}</a>
+          </td>
+          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">{{ row.hits_fmt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}

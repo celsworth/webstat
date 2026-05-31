@@ -356,6 +356,9 @@ impl Processor {
             if stats.hidden > 0 {
                 logging::log(&format!("  {} lines hidden by rule {name}", stats.hidden));
             }
+            if stats.bucketed > 0 {
+                logging::log(&format!("  {} lines bucketed by rule {name}", stats.bucketed));
+            }
         }
 
         logging::log_debug_at(2, "Vacuuming database");

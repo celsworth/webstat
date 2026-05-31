@@ -150,6 +150,112 @@ CREATE TABLE IF NOT EXISTS protocol_counts (
     hits   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, proto)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bucket_period_stats (
+    period    TEXT NOT NULL,
+    bucket    TEXT NOT NULL,
+    hits      INTEGER NOT NULL DEFAULT 0,
+    bandwidth INTEGER NOT NULL DEFAULT 0,
+    rt_sum    INTEGER NOT NULL DEFAULT 0,
+    rt_count  INTEGER NOT NULL DEFAULT 0,
+    rt_max    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (period, bucket)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bucket_urls (
+    period    TEXT NOT NULL,
+    bucket    TEXT NOT NULL,
+    url       TEXT NOT NULL,
+    hits      INTEGER NOT NULL DEFAULT 0,
+    bandwidth INTEGER NOT NULL DEFAULT 0,
+    rt_sum    INTEGER NOT NULL DEFAULT 0,
+    rt_count  INTEGER NOT NULL DEFAULT 0,
+    rt_max    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (period, bucket, url)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bucket_status_codes (
+    period TEXT    NOT NULL,
+    bucket TEXT    NOT NULL,
+    status INTEGER NOT NULL,
+    hits   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (period, bucket, status)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bucket_agents (
+    period       TEXT NOT NULL,
+    bucket       TEXT NOT NULL,
+    agent_family TEXT NOT NULL,
+    hits         INTEGER NOT NULL DEFAULT 0,
+    bandwidth    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (period, bucket, agent_family)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bucket_countries (
+    period       TEXT NOT NULL,
+    bucket       TEXT NOT NULL,
+    country_code TEXT NOT NULL,
+    hits         INTEGER NOT NULL DEFAULT 0,
+    bandwidth    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (period, bucket, country_code)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bucket_method_counts (
+    period TEXT NOT NULL,
+    bucket TEXT NOT NULL,
+    method TEXT NOT NULL,
+    hits   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (period, bucket, method)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bucket_protocol_counts (
+    period TEXT NOT NULL,
+    bucket TEXT NOT NULL,
+    proto  TEXT NOT NULL,
+    hits   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (period, bucket, proto)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bucket_response_time_histograms (
+    period TEXT NOT NULL,
+    bucket TEXT NOT NULL,
+    data   BLOB NOT NULL,
+    PRIMARY KEY (period, bucket)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bucket_daily_unique_ips (
+    bucket  TEXT    NOT NULL,
+    date    TEXT    NOT NULL,
+    ip_kind INTEGER NOT NULL,
+    ip_hi   INTEGER NOT NULL,
+    count   INTEGER NOT NULL DEFAULT 0,
+    bitmap  BLOB    NOT NULL,
+    PRIMARY KEY (bucket, date, ip_kind, ip_hi)
+);
+CREATE TABLE IF NOT EXISTS bucket_daily_visitor_counts (
+    bucket TEXT NOT NULL,
+    date   TEXT NOT NULL,
+    count  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (bucket, date)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bucket_unique_visitor_counts (
+    bucket TEXT NOT NULL,
+    period TEXT NOT NULL,
+    count  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (bucket, period)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bucket_hourly_stats (
+    bucket    TEXT    NOT NULL,
+    date      TEXT    NOT NULL,
+    hour      INTEGER NOT NULL,
+    hits      INTEGER NOT NULL DEFAULT 0,
+    bandwidth INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (bucket, date, hour)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bucket_daily_response_time_histograms (
+    bucket TEXT NOT NULL,
+    date   TEXT NOT NULL,
+    data   BLOB NOT NULL,
+    PRIMARY KEY (bucket, date)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bucket_daily_response_time_stats (
+    bucket TEXT NOT NULL,
+    date   TEXT NOT NULL,
+    avg_ms REAL NOT NULL,
+    p95_ms INTEGER NOT NULL,
+    PRIMARY KEY (bucket, date)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS daily_unique_ips (
     date    TEXT    NOT NULL,
     ip_kind INTEGER NOT NULL,
@@ -164,6 +270,14 @@ CREATE TABLE IF NOT EXISTS monthly_unique_ips (
     ip_hi   INTEGER NOT NULL DEFAULT 0,
     bitmap  BLOB    NOT NULL,
     PRIMARY KEY (period, ip_kind, ip_hi)
+);
+CREATE TABLE IF NOT EXISTS bucket_monthly_unique_ips (
+    bucket  TEXT    NOT NULL,
+    period  TEXT    NOT NULL,
+    ip_kind INTEGER NOT NULL,
+    ip_hi   INTEGER NOT NULL DEFAULT 0,
+    bitmap  BLOB    NOT NULL,
+    PRIMARY KEY (bucket, period, ip_kind, ip_hi)
 );
 CREATE TABLE IF NOT EXISTS unique_visitor_counts (
     period TEXT PRIMARY KEY,

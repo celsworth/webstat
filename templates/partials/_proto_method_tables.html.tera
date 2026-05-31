@@ -1,0 +1,35 @@
+<div class="stats-panel">
+  {% if proto_codes | length > 0 %}
+  <table class="data-table stats-panel__table">
+    <thead>
+      <tr><th colspan="2" class="stats-panel__heading">Hits by Protocol</th></tr>
+    </thead>
+    <tbody>
+      {% for p in proto_codes %}
+      <tr>
+        <td>{{ p.proto }}</td>
+        <td class="num-col" title="{{ p.hits_exact_fmt }}"><span class="pct-value">({{ p.pct_fmt }})</span> {{ p.hits_fmt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="stats-panel">
+  {% if method_codes | length > 0 %}
+  <table class="data-table stats-panel__table">
+    <thead>
+      <tr><th colspan="2" class="stats-panel__heading">Hits by Method</th></tr>
+    </thead>
+    <tbody>
+      {% for m in method_codes %}
+      <tr>
+        <td>{{ m.method }}</td>
+        <td class="num-col" title="{{ m.hits_exact_fmt }}"><span class="pct-value">({{ m.pct_fmt }})</span> {{ m.hits_fmt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

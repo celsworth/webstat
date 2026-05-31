@@ -12,7 +12,7 @@ use crate::accumulators::HourlyMap;
 use crate::ip::IpBitmaps;
 use crate::method_proto::{METHOD_NAMES, PROTO_NAMES};
 use crate::response_time::ResponseTimeHistogram;
-use crate::run_accumulators::UrlStats;
+use crate::run_accumulators::{BucketAcc, UrlStats};
 
 pub struct FlushData<'a> {
     pub period: &'a str,
@@ -28,6 +28,7 @@ pub struct FlushData<'a> {
     pub method_counts: &'a [u64],
     pub protocol_counts: &'a [u64],
     pub daily_hists: &'a AHashMap<Arc<str>, ResponseTimeHistogram>,
+    pub bucket_stats: &'a AHashMap<Arc<str>, BucketAcc>,
     pub parse_states: &'a [ParseStateUpdate],
     pub retired_parse_states: &'a [ParseStateUpdate],
     pub visit_states: &'a [VisitStateUpdate],
@@ -345,6 +346,195 @@ impl Database {
             }
         }
 
+        // bucket_period_stats + per-bucket sub-tables
+        if !data.bucket_stats.is_empty() {
+            let bps_sql = "INSERT INTO bucket_period_stats \
+                           (period,bucket,hits,bandwidth,rt_sum,rt_count,rt_max) \
+                           VALUES (?1,?2,?3,?4,?5,?6,?7) \
+                           ON CONFLICT (period,bucket) DO UPDATE SET \
+                             hits=hits+excluded.hits, \
+                             bandwidth=bandwidth+excluded.bandwidth, \
+                             rt_sum=rt_sum+excluded.rt_sum, \
+                             rt_count=rt_count+excluded.rt_count, \
+                             rt_max=MAX(rt_max,excluded.rt_max)";
+            let bu_sql = "INSERT INTO bucket_urls \
+                          (period,bucket,url,hits,bandwidth,rt_sum,rt_count,rt_max) \
+                          VALUES (?1,?2,?3,?4,?5,?6,?7,?8) \
+                          ON CONFLICT (period,bucket,url) DO UPDATE SET \
+                            hits=hits+excluded.hits, \
+                            bandwidth=bandwidth+excluded.bandwidth, \
+                            rt_sum=rt_sum+excluded.rt_sum, \
+                            rt_count=rt_count+excluded.rt_count, \
+                            rt_max=MAX(rt_max,excluded.rt_max)";
+            let bsc_sql = "INSERT INTO bucket_status_codes (period,bucket,status,hits) \
+                           VALUES (?1,?2,?3,?4) \
+                           ON CONFLICT (period,bucket,status) DO UPDATE SET hits=hits+excluded.hits";
+            let ba_sql = "INSERT INTO bucket_agents \
+                          (period,bucket,agent_family,hits,bandwidth) \
+                          VALUES (?1,?2,?3,?4,?5) \
+                          ON CONFLICT (period,bucket,agent_family) DO UPDATE SET \
+                            hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth";
+            let bc_sql = "INSERT INTO bucket_countries \
+                          (period,bucket,country_code,hits,bandwidth) \
+                          VALUES (?1,?2,?3,?4,?5) \
+                          ON CONFLICT (period,bucket,country_code) DO UPDATE SET \
+                            hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth";
+            let bm_sql = "INSERT INTO bucket_method_counts (period,bucket,method,hits) \
+                          VALUES (?1,?2,?3,?4) \
+                          ON CONFLICT (period,bucket,method) DO UPDATE SET hits=hits+excluded.hits";
+            let bp_sql = "INSERT INTO bucket_protocol_counts (period,bucket,proto,hits) \
+                          VALUES (?1,?2,?3,?4) \
+                          ON CONFLICT (period,bucket,proto) DO UPDATE SET hits=hits+excluded.hits";
+
+            let mut bps_stmt = tx.prepare_cached(bps_sql)?;
+            let mut bu_stmt = tx.prepare_cached(bu_sql)?;
+            let mut bsc_stmt = tx.prepare_cached(bsc_sql)?;
+            let mut ba_stmt = tx.prepare_cached(ba_sql)?;
+            let mut bc_stmt = tx.prepare_cached(bc_sql)?;
+            let mut bm_stmt = tx.prepare_cached(bm_sql)?;
+            let mut bp_stmt = tx.prepare_cached(bp_sql)?;
+
+            let mut brth_stmt = tx.prepare_cached(
+                "SELECT data FROM bucket_response_time_histograms WHERE period=?1 AND bucket=?2",
+            )?;
+            let mut brth_upsert = tx.prepare_cached(
+                "INSERT OR REPLACE INTO bucket_response_time_histograms (period,bucket,data) \
+                 VALUES (?1,?2,?3)",
+            )?;
+
+            for (bucket_name, acc) in data.bucket_stats {
+                let bn = bucket_name.as_ref();
+                bps_stmt.execute(params![
+                    data.period, bn,
+                    acc.hits as i64, acc.bandwidth as i64,
+                    acc.rt_sum as i64, acc.rt_count as i64, acc.rt_max as i64,
+                ])?;
+
+                if let Some(hist) = &acc.rt_histogram {
+                    let existing: Option<Vec<u8>> = brth_stmt
+                        .query_row(params![data.period, bn], |r| r.get(0))
+                        .optional()?;
+                    let mut merged = match existing {
+                        Some(blob) => ResponseTimeHistogram::deserialize(&blob)
+                            .context("deserialize bucket rt histogram")?,
+                        None => ResponseTimeHistogram::new(),
+                    };
+                    merged.merge(hist);
+                    brth_upsert.execute(params![data.period, bn, merged.serialize()])?;
+                }
+                for (url, s) in &acc.url_stats {
+                    bu_stmt.execute(params![
+                        data.period, bn, url,
+                        s.hits as i64, s.bandwidth as i64,
+                        s.rt_sum as i64, s.rt_count as i64, s.rt_max as i64,
+                    ])?;
+                }
+                for (status, hits) in &acc.status_codes {
+                    bsc_stmt.execute(params![data.period, bn, *status as i64, *hits as i64])?;
+                }
+                for (agent, (hits, bw)) in &acc.agents {
+                    ba_stmt.execute(params![data.period, bn, agent.as_ref(), *hits as i64, *bw as i64])?;
+                }
+                for (cc, (hits, bw)) in &acc.countries {
+                    bc_stmt.execute(params![data.period, bn, cc.as_ref(), *hits as i64, *bw as i64])?;
+                }
+                for (i, &hits) in acc.method_counts.iter().enumerate() {
+                    if hits > 0 {
+                        bm_stmt.execute(params![data.period, bn, METHOD_NAMES[i], hits as i64])?;
+                    }
+                }
+                for (i, &hits) in acc.protocol_counts.iter().enumerate() {
+                    if hits > 0 {
+                        bp_stmt.execute(params![data.period, bn, PROTO_NAMES[i], hits as i64])?;
+                    }
+                }
+
+                // bucket_hourly_stats
+                for (date, hours) in &acc.hourly {
+                    for (&hour, &(hits, bw)) in hours {
+                        tx.execute(
+                            "INSERT INTO bucket_hourly_stats (bucket,date,hour,hits,bandwidth) \
+                             VALUES (?1,?2,?3,?4,?5) \
+                             ON CONFLICT (bucket,date,hour) DO UPDATE SET \
+                               hits=hits+excluded.hits, bandwidth=bandwidth+excluded.bandwidth",
+                            params![bn, date.as_ref(), hour as i64, hits as i64, bw as i64],
+                        )?;
+                    }
+                }
+
+                // bucket_daily_unique_ips (read-modify-write per bucket+date+ip group)
+                for (date, bitmaps) in &acc.daily_ips {
+                    if !bitmaps.v4.is_empty() {
+                        let existing: Option<Vec<u8>> = tx
+                            .query_row(
+                                "SELECT bitmap FROM bucket_daily_unique_ips \
+                                 WHERE bucket=?1 AND date=?2 AND ip_kind=1 AND ip_hi=0",
+                                params![bn, date.as_ref()],
+                                |r| r.get(0),
+                            )
+                            .optional()?;
+                        let mut bm = match existing {
+                            Some(blob) => deserialize_v4(&blob)?,
+                            None => RoaringBitmap::new(),
+                        };
+                        bm |= &bitmaps.v4;
+                        let count = bm.len() as i64;
+                        tx.execute(
+                            "INSERT OR REPLACE INTO bucket_daily_unique_ips \
+                             (bucket,date,ip_kind,ip_hi,count,bitmap) VALUES (?1,?2,1,0,?3,?4)",
+                            params![bn, date.as_ref(), count, serialize_v4(&bm)?],
+                        )?;
+                    }
+                    for (hi, treemap) in &bitmaps.v6 {
+                        if treemap.is_empty() { continue; }
+                        let hi_i = *hi as i64;
+                        let existing: Option<Vec<u8>> = tx
+                            .query_row(
+                                "SELECT bitmap FROM bucket_daily_unique_ips \
+                                 WHERE bucket=?1 AND date=?2 AND ip_kind=2 AND ip_hi=?3",
+                                params![bn, date.as_ref(), hi_i],
+                                |r| r.get(0),
+                            )
+                            .optional()?;
+                        let mut tm = match existing {
+                            Some(blob) => deserialize_v6(&blob)?,
+                            None => RoaringTreemap::new(),
+                        };
+                        tm |= treemap;
+                        let count = tm.len() as i64;
+                        tx.execute(
+                            "INSERT OR REPLACE INTO bucket_daily_unique_ips \
+                             (bucket,date,ip_kind,ip_hi,count,bitmap) VALUES (?1,?2,2,?3,?4,?5)",
+                            params![bn, date.as_ref(), hi_i, count, serialize_v6(&tm)?],
+                        )?;
+                    }
+                }
+
+                // bucket_daily_response_time_histograms (read-modify-write per date)
+                for (date, hist) in &acc.daily_hists {
+                    let existing: Option<Vec<u8>> = tx
+                        .query_row(
+                            "SELECT data FROM bucket_daily_response_time_histograms \
+                             WHERE bucket=?1 AND date=?2",
+                            params![bn, date.as_ref()],
+                            |r| r.get(0),
+                        )
+                        .optional()?;
+                    let mut merged = match existing {
+                        Some(blob) => ResponseTimeHistogram::deserialize(&blob)
+                            .context("deserialize bucket daily rt histogram")?,
+                        None => ResponseTimeHistogram::new(),
+                    };
+                    merged.merge(hist);
+                    tx.execute(
+                        "INSERT OR REPLACE INTO bucket_daily_response_time_histograms \
+                         (bucket,date,data) VALUES (?1,?2,?3)",
+                        params![bn, date.as_ref(), merged.serialize()],
+                    )?;
+                }
+            }
+        }
+
         // retired parse_states → archive
         if !data.retired_parse_states.is_empty() {
             let mut archive_stmt = tx.prepare_cached(
@@ -558,6 +748,103 @@ impl Database {
             params![like_pattern],
         )?;
 
+        // ── Per-bucket unique IP finalization ─────────────────────────────────
+        {
+            let bucket_names: Vec<String> = {
+                let mut stmt = tx.prepare(
+                    "SELECT DISTINCT bucket FROM bucket_daily_unique_ips WHERE date LIKE ?1",
+                )?;
+                let rows = stmt
+                    .query_map(params![like_pattern], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                rows
+            };
+            for bn in &bucket_names {
+                let daily_ip_rows: Vec<(u8, u64, Vec<u8>)> = {
+                    let mut stmt = tx.prepare(
+                        "SELECT ip_kind, ip_hi, bitmap FROM bucket_daily_unique_ips \
+                         WHERE bucket=?1 AND date LIKE ?2",
+                    )?;
+                    let rows = stmt
+                        .query_map(params![bn, like_pattern], |r| {
+                            Ok((
+                                r.get::<_, i64>(0)? as u8,
+                                r.get::<_, i64>(1)? as u64,
+                                r.get::<_, Vec<u8>>(2)?,
+                            ))
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    rows
+                };
+                let mut monthly_v4 = RoaringBitmap::new();
+                let mut monthly_v6: AHashMap<u64, RoaringTreemap> = AHashMap::new();
+                or_bitmap_rows(daily_ip_rows, &mut monthly_v4, &mut monthly_v6)?;
+                let monthly_count = bitmap_cardinality(&monthly_v4, &monthly_v6);
+                tx.execute(
+                    "INSERT OR REPLACE INTO bucket_unique_visitor_counts \
+                     (bucket,period,count) VALUES (?1,?2,?3)",
+                    params![bn, period, monthly_count as i64],
+                )?;
+                // Save monthly bitmap snapshot so yearly counts can be computed correctly.
+                if !monthly_v4.is_empty() {
+                    tx.execute(
+                        "INSERT OR REPLACE INTO bucket_monthly_unique_ips \
+                         (bucket,period,ip_kind,ip_hi,bitmap) VALUES (?1,?2,1,0,?3)",
+                        params![bn, period, serialize_v4(&monthly_v4)?],
+                    )?;
+                }
+                for (hi, tm) in &monthly_v6 {
+                    if tm.is_empty() {
+                        continue;
+                    }
+                    tx.execute(
+                        "INSERT OR REPLACE INTO bucket_monthly_unique_ips \
+                         (bucket,period,ip_kind,ip_hi,bitmap) VALUES (?1,?2,2,?3,?4)",
+                        params![bn, period, *hi as i64, serialize_v6(tm)?],
+                    )?;
+                }
+                // Recompute yearly count by ORing all surviving monthly snapshots.
+                {
+                    let year_rows: Vec<(u8, u64, Vec<u8>)> = {
+                        let mut stmt = tx.prepare(
+                            "SELECT ip_kind, ip_hi, bitmap FROM bucket_monthly_unique_ips \
+                             WHERE bucket=?1 AND period LIKE ?2",
+                        )?;
+                        let rows = stmt.query_map(params![bn, format!("{year}-%")], |r| {
+                            Ok((
+                                r.get::<_, i64>(0)? as u8,
+                                r.get::<_, i64>(1)? as u64,
+                                r.get::<_, Vec<u8>>(2)?,
+                            ))
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                        rows
+                    };
+                    let mut yearly_v4 = RoaringBitmap::new();
+                    let mut yearly_v6: AHashMap<u64, RoaringTreemap> = AHashMap::new();
+                    or_bitmap_rows(year_rows, &mut yearly_v4, &mut yearly_v6)?;
+                    let yearly_count = bitmap_cardinality(&yearly_v4, &yearly_v6);
+                    tx.execute(
+                        "INSERT OR REPLACE INTO bucket_unique_visitor_counts \
+                         (bucket,period,count) VALUES (?1,?2,?3)",
+                        params![bn, year, yearly_count as i64],
+                    )?;
+                }
+                tx.execute(
+                    "INSERT OR REPLACE INTO bucket_daily_visitor_counts (bucket,date,count) \
+                     SELECT bucket, date, SUM(count) \
+                     FROM bucket_daily_unique_ips \
+                     WHERE bucket=?1 AND date LIKE ?2 \
+                     GROUP BY date",
+                    params![bn, like_pattern],
+                )?;
+                tx.execute(
+                    "DELETE FROM bucket_daily_unique_ips WHERE bucket=?1 AND date LIKE ?2",
+                    params![bn, like_pattern],
+                )?;
+            }
+        }
+
         // ── Response time histograms: compute daily stats, build monthly, delete daily ──
         {
             let daily_rt_rows: Vec<(String, Vec<u8>)> = {
@@ -638,6 +925,77 @@ impl Database {
                  AND agent_family NOT IN (SELECT agent_family FROM top_agents WHERE period=?1 ORDER BY bandwidth DESC LIMIT ?2)",
                 params![period, top_n as i64],
             )?;
+        }
+
+        // ── Bucket daily RT: compute stats, delete daily histograms ──────────────
+        {
+            let buckets_with_daily_rt: Vec<String> = {
+                let mut stmt = tx.prepare(
+                    "SELECT DISTINCT bucket FROM bucket_daily_response_time_histograms \
+                     WHERE date LIKE ?1",
+                )?;
+                let rows = stmt
+                    .query_map(params![like_pattern], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                rows
+            };
+            for bn in &buckets_with_daily_rt {
+                let daily_rows: Vec<(String, Vec<u8>)> = {
+                    let mut stmt = tx.prepare(
+                        "SELECT date, data FROM bucket_daily_response_time_histograms \
+                         WHERE bucket=?1 AND date LIKE ?2 ORDER BY date",
+                    )?;
+                    let rows = stmt
+                        .query_map(params![bn, like_pattern], |r| {
+                            Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    rows
+                };
+                for (date, blob) in &daily_rows {
+                    let hist = ResponseTimeHistogram::deserialize(blob)
+                        .context("deserialize bucket daily rt histogram in finalize_month")?;
+                    if hist.count > 0 {
+                        let avg_ms = hist.sum_ms as f64 / hist.count as f64;
+                        let p95_ms = hist.percentile(95.0);
+                        tx.execute(
+                            "INSERT OR REPLACE INTO bucket_daily_response_time_stats \
+                             (bucket,date,avg_ms,p95_ms) VALUES (?1,?2,?3,?4)",
+                            params![bn, date, avg_ms, p95_ms as i64],
+                        )?;
+                    }
+                }
+                tx.execute(
+                    "DELETE FROM bucket_daily_response_time_histograms \
+                     WHERE bucket=?1 AND date LIKE ?2",
+                    params![bn, like_pattern],
+                )?;
+            }
+        }
+
+        // Prune bucket_urls per (period, bucket) to top_n.
+        if top_n > 0 {
+            let bucket_names: Vec<String> = {
+                let mut stmt = tx.prepare(
+                    "SELECT DISTINCT bucket FROM bucket_period_stats WHERE period=?1",
+                )?;
+                let rows = stmt.query_map(params![period], |r| r.get::<_, String>(0))?;
+                let mut names = Vec::new();
+                for r in rows {
+                    names.push(r?);
+                }
+                names
+            };
+            for bn in &bucket_names {
+                tx.execute(
+                    "DELETE FROM bucket_urls \
+                     WHERE period=?1 AND bucket=?2 \
+                     AND url NOT IN (SELECT url FROM bucket_urls WHERE period=?1 AND bucket=?2 ORDER BY hits DESC LIMIT ?3) \
+                     AND url NOT IN (SELECT url FROM bucket_urls WHERE period=?1 AND bucket=?2 ORDER BY bandwidth DESC LIMIT ?3) \
+                     AND url NOT IN (SELECT url FROM bucket_urls WHERE period=?1 AND bucket=?2 AND rt_count>0 ORDER BY rt_sum*1.0/rt_count DESC LIMIT ?3)",
+                    params![period, bn, top_n as i64],
+                )?;
+            }
         }
 
         tx.execute(
@@ -818,6 +1176,69 @@ impl Database {
                     "DELETE FROM top_agents WHERE period=?1 AND hits < ?2 AND bandwidth < ?3",
                     params![period, hits_nth / CULL_FRACTION, bw_nth / CULL_FRACTION],
                 )?;
+            }
+        }
+
+        // ── bucket_urls (per bucket) ──────────────────────────────────────────
+        {
+            let bucket_names: Vec<String> = {
+                let mut stmt = tx.prepare(
+                    "SELECT DISTINCT bucket FROM bucket_period_stats WHERE period=?1",
+                )?;
+                let rows = stmt.query_map(params![period], |r| r.get::<_, String>(0))?;
+                let mut names = Vec::new();
+                for r in rows { names.push(r?); }
+                names
+            };
+            for bn in &bucket_names {
+                let count: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM bucket_urls WHERE period=?1 AND bucket=?2",
+                    params![period, bn],
+                    |r| r.get(0),
+                )?;
+                if count > threshold {
+                    let hits_nth: i64 = tx
+                        .query_row(
+                            "SELECT hits FROM bucket_urls WHERE period=?1 AND bucket=?2 \
+                             ORDER BY hits DESC LIMIT 1 OFFSET ?3",
+                            params![period, bn, offset],
+                            |r| r.get(0),
+                        )
+                        .optional()?
+                        .unwrap_or(0);
+                    let bw_nth: i64 = tx
+                        .query_row(
+                            "SELECT bandwidth FROM bucket_urls WHERE period=?1 AND bucket=?2 \
+                             ORDER BY bandwidth DESC LIMIT 1 OFFSET ?3",
+                            params![period, bn, offset],
+                            |r| r.get(0),
+                        )
+                        .optional()?
+                        .unwrap_or(0);
+                    let rt_nth: Option<f64> = tx
+                        .query_row(
+                            "SELECT rt_sum * 1.0 / rt_count FROM bucket_urls \
+                             WHERE period=?1 AND bucket=?2 AND rt_count > 0 \
+                             ORDER BY rt_sum * 1.0 / rt_count DESC LIMIT 1 OFFSET ?3",
+                            params![period, bn, offset],
+                            |r| r.get(0),
+                        )
+                        .optional()?
+                        .flatten();
+                    let rt_filter = rt_nth.map(|n| n / CULL_FRACTION as f64).unwrap_or(0.0);
+                    tx.execute(
+                        "DELETE FROM bucket_urls \
+                         WHERE period=?1 AND bucket=?2 \
+                         AND hits < ?3 AND bandwidth < ?4 \
+                         AND (rt_count = 0 OR rt_sum * 1.0 / rt_count < ?5)",
+                        params![
+                            period, bn,
+                            hits_nth / CULL_FRACTION,
+                            bw_nth / CULL_FRACTION,
+                            rt_filter,
+                        ],
+                    )?;
+                }
             }
         }
 

@@ -6,6 +6,8 @@ use super::*;
 mod tests {
     use std::sync::Arc;
 
+    use rusqlite::OptionalExtension;
+
     use super::*;
     use crate::ip::{Ip, IpBitmaps};
     use crate::method_proto::{
@@ -27,6 +29,7 @@ mod tests {
         let empty_hists = ahash::AHashMap::new();
         let empty_countries = ahash::AHashMap::new();
         let empty_status = ahash::AHashMap::new();
+        let empty_buckets = ahash::AHashMap::new();
         db.flush(crate::database::writer::FlushData {
             period,
             hourly: &empty_hourly,
@@ -41,6 +44,7 @@ mod tests {
             status_codes: &empty_status,
             method_counts,
             protocol_counts,
+            bucket_stats: &empty_buckets,
             parse_states: &[],
             retired_parse_states: &[],
             visit_states: &[],
@@ -248,6 +252,7 @@ mod tests {
                 status_codes: &empty_status,
                 method_counts: &[0u64; METHOD_COUNT],
                 protocol_counts: &[0u64; PROTO_COUNT],
+                bucket_stats: &ahash::AHashMap::new(),
                 parse_states: &[],
                 retired_parse_states: &[],
                 visit_states: &[],
@@ -289,6 +294,7 @@ mod tests {
             status_codes: &ahash::AHashMap::new(),
             method_counts: &[0u64; METHOD_COUNT],
             protocol_counts: &[0u64; PROTO_COUNT],
+            bucket_stats: &ahash::AHashMap::new(),
             parse_states: &[],
             retired_parse_states: &[],
             visit_states: &[],
@@ -341,6 +347,7 @@ mod tests {
             status_codes: &ahash::AHashMap::new(),
             method_counts: &[0u64; METHOD_COUNT],
             protocol_counts: &[0u64; PROTO_COUNT],
+            bucket_stats: &ahash::AHashMap::new(),
             parse_states: &[],
             retired_parse_states: &[],
             visit_states: &[],
@@ -1003,5 +1010,1053 @@ mod tests {
         db.cull_period("2026-05", 1).unwrap();
         assert_eq!(count_table(&db, "top_urls", "2026-06"), 51, "2026-06 must be untouched");
         assert_eq!(count_table(&db, "top_urls", "2026-05"), 1, "2026-05 junk must be culled");
+    }
+
+    // ── Bucket flush helpers ──────────────────────────────────────────────────
+
+    use crate::response_time::ResponseTimeHistogram;
+    use crate::run_accumulators::{BucketAcc, UrlStats};
+
+    fn flush_with_buckets(
+        db: &mut Database,
+        period: &str,
+        buckets: ahash::AHashMap<Arc<str>, BucketAcc>,
+    ) {
+        db.flush(crate::database::writer::FlushData {
+            period,
+            hourly: &ahash::AHashMap::new(),
+            url_stats: &ahash::AHashMap::new(),
+            hosts: &ahash::AHashMap::new(),
+            host_geo: &ahash::AHashMap::new(),
+            refs: &ahash::AHashMap::new(),
+            agents: &ahash::AHashMap::new(),
+            daily_ips: &ahash::AHashMap::new(),
+            daily_hists: &ahash::AHashMap::new(),
+            countries: &ahash::AHashMap::new(),
+            status_codes: &ahash::AHashMap::new(),
+            method_counts: &[0u64; METHOD_COUNT],
+            protocol_counts: &[0u64; PROTO_COUNT],
+            bucket_stats: &buckets,
+            parse_states: &[],
+            retired_parse_states: &[],
+            visit_states: &[],
+            visit_state_prune_before_ts: None,
+        })
+        .expect("flush");
+    }
+
+    fn single_bucket(
+        db: &mut Database,
+        period: &str,
+        bucket: &str,
+        acc: BucketAcc,
+    ) {
+        let mut buckets = ahash::AHashMap::new();
+        buckets.insert(Arc::from(bucket), acc);
+        flush_with_buckets(db, period, buckets);
+    }
+
+    fn bucket_period_row(db: &Database, period: &str, bucket: &str) -> (i64, i64, i64, i64, i64) {
+        db.conn
+            .query_row(
+                "SELECT hits, bandwidth, rt_sum, rt_count, rt_max \
+                 FROM bucket_period_stats WHERE period=?1 AND bucket=?2",
+                rusqlite::params![period, bucket],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .expect("bucket_period_stats row")
+    }
+
+    // ── bucket_period_stats ───────────────────────────────────────────────────
+
+    #[test]
+    fn bucket_period_stats_stored_on_flush() {
+        let mut db = open_test_db();
+        let acc = BucketAcc {
+            hits: 42,
+            bandwidth: 12345,
+            rt_sum: 5000,
+            rt_count: 10,
+            rt_max: 800,
+            ..Default::default()
+        };
+        single_bucket(&mut db, "2026-05", "api", acc);
+        let (hits, bw, rt_sum, rt_count, rt_max) = bucket_period_row(&db, "2026-05", "api");
+        assert_eq!(hits, 42);
+        assert_eq!(bw, 12345);
+        assert_eq!(rt_sum, 5000);
+        assert_eq!(rt_count, 10);
+        assert_eq!(rt_max, 800);
+    }
+
+    #[test]
+    fn bucket_period_stats_accumulate_across_flushes() {
+        let mut db = open_test_db();
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 100, bandwidth: 1000, ..Default::default() },
+        );
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 50, bandwidth: 500, ..Default::default() },
+        );
+        let (hits, bw, ..) = bucket_period_row(&db, "2026-05", "api");
+        assert_eq!(hits, 150);
+        assert_eq!(bw, 1500);
+    }
+
+    #[test]
+    fn bucket_period_stats_rt_max_uses_max_across_flushes() {
+        let mut db = open_test_db();
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 1, rt_max: 300, ..Default::default() },
+        );
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 1, rt_max: 800, ..Default::default() },
+        );
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 1, rt_max: 100, ..Default::default() },
+        );
+        let (.., rt_max) = bucket_period_row(&db, "2026-05", "api");
+        assert_eq!(rt_max, 800, "rt_max must be the overall maximum");
+    }
+
+    #[test]
+    fn bucket_period_stats_separate_per_bucket() {
+        let mut db = open_test_db();
+        let mut buckets = ahash::AHashMap::new();
+        buckets.insert(Arc::from("api"), BucketAcc { hits: 10, ..Default::default() });
+        buckets.insert(Arc::from("static"), BucketAcc { hits: 20, ..Default::default() });
+        flush_with_buckets(&mut db, "2026-05", buckets);
+
+        let (api_hits, ..) = bucket_period_row(&db, "2026-05", "api");
+        let (static_hits, ..) = bucket_period_row(&db, "2026-05", "static");
+        assert_eq!(api_hits, 10);
+        assert_eq!(static_hits, 20);
+    }
+
+    // ── bucket_urls ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn bucket_urls_stored_on_flush() {
+        let mut db = open_test_db();
+        let mut url_stats = ahash::AHashMap::new();
+        url_stats.insert(
+            "/api/users".to_string(),
+            UrlStats { hits: 50, bandwidth: 5000, ..Default::default() },
+        );
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 50, url_stats, ..Default::default() },
+        );
+        let hits: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_urls \
+                 WHERE period='2026-05' AND bucket='api' AND url='/api/users'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("bucket_urls row");
+        assert_eq!(hits, 50);
+    }
+
+    #[test]
+    fn bucket_urls_accumulate_across_flushes() {
+        let mut db = open_test_db();
+        for _ in 0..3 {
+            let mut url_stats = ahash::AHashMap::new();
+            url_stats.insert(
+                "/api/v1".to_string(),
+                UrlStats { hits: 10, bandwidth: 1000, ..Default::default() },
+            );
+            single_bucket(
+                &mut db,
+                "2026-05",
+                "api",
+                BucketAcc { hits: 10, url_stats, ..Default::default() },
+            );
+        }
+        let hits: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_urls \
+                 WHERE period='2026-05' AND bucket='api' AND url='/api/v1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("bucket_urls row");
+        assert_eq!(hits, 30);
+    }
+
+    // ── bucket_status_codes ───────────────────────────────────────────────────
+
+    #[test]
+    fn bucket_status_codes_stored_on_flush() {
+        let mut db = open_test_db();
+        let mut status_codes = ahash::AHashMap::new();
+        status_codes.insert(200u16, 80u64);
+        status_codes.insert(404u16, 5u64);
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 85, status_codes, ..Default::default() },
+        );
+
+        let ok: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_status_codes \
+                 WHERE period='2026-05' AND bucket='api' AND status=200",
+                [],
+                |r| r.get(0),
+            )
+            .expect("200 row");
+        assert_eq!(ok, 80);
+
+        let not_found: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_status_codes \
+                 WHERE period='2026-05' AND bucket='api' AND status=404",
+                [],
+                |r| r.get(0),
+            )
+            .expect("404 row");
+        assert_eq!(not_found, 5);
+    }
+
+    #[test]
+    fn bucket_status_codes_accumulate_across_flushes() {
+        let mut db = open_test_db();
+        for _ in 0..2 {
+            let mut sc = ahash::AHashMap::new();
+            sc.insert(200u16, 10u64);
+            single_bucket(
+                &mut db,
+                "2026-05",
+                "api",
+                BucketAcc { hits: 10, status_codes: sc, ..Default::default() },
+            );
+        }
+        let hits: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_status_codes \
+                 WHERE period='2026-05' AND bucket='api' AND status=200",
+                [],
+                |r| r.get(0),
+            )
+            .expect("200 row");
+        assert_eq!(hits, 20);
+    }
+
+    // ── bucket_agents ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn bucket_agents_stored_on_flush() {
+        let mut db = open_test_db();
+        let mut agents = ahash::AHashMap::new();
+        agents.insert(Arc::from("Firefox"), (30u64, 3000u64));
+        agents.insert(Arc::from("Chrome"), (70u64, 7000u64));
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 100, agents, ..Default::default() },
+        );
+
+        let ff_hits: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_agents \
+                 WHERE period='2026-05' AND bucket='api' AND agent_family='Firefox'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("Firefox row");
+        assert_eq!(ff_hits, 30);
+    }
+
+    #[test]
+    fn bucket_agents_accumulate_across_flushes() {
+        let mut db = open_test_db();
+        for _ in 0..3 {
+            let mut agents = ahash::AHashMap::new();
+            agents.insert(Arc::from("curl"), (5u64, 500u64));
+            single_bucket(
+                &mut db,
+                "2026-05",
+                "api",
+                BucketAcc { hits: 5, agents, ..Default::default() },
+            );
+        }
+        let hits: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_agents \
+                 WHERE period='2026-05' AND bucket='api' AND agent_family='curl'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("curl row");
+        assert_eq!(hits, 15);
+    }
+
+    // ── bucket_countries ──────────────────────────────────────────────────────
+
+    #[test]
+    fn bucket_countries_stored_on_flush() {
+        let mut db = open_test_db();
+        let mut countries = ahash::AHashMap::new();
+        countries.insert(Arc::from("US"), (100u64, 10_000u64));
+        countries.insert(Arc::from("GB"), (20u64, 2_000u64));
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 120, countries, ..Default::default() },
+        );
+
+        let us: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_countries \
+                 WHERE period='2026-05' AND bucket='api' AND country_code='US'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("US row");
+        assert_eq!(us, 100);
+    }
+
+    // ── bucket_method_counts ──────────────────────────────────────────────────
+
+    #[test]
+    fn bucket_method_counts_stored_on_flush() {
+        let mut db = open_test_db();
+        let mut method_counts = [0u64; METHOD_COUNT];
+        method_counts[METHOD_GET] = 90;
+        method_counts[METHOD_POST] = 10;
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 100, method_counts, ..Default::default() },
+        );
+
+        let get_hits: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_method_counts \
+                 WHERE period='2026-05' AND bucket='api' AND method='GET'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("GET row");
+        assert_eq!(get_hits, 90);
+
+        let post_hits: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_method_counts \
+                 WHERE period='2026-05' AND bucket='api' AND method='POST'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("POST row");
+        assert_eq!(post_hits, 10);
+    }
+
+    #[test]
+    fn bucket_method_counts_zero_slots_not_stored() {
+        let mut db = open_test_db();
+        let mut method_counts = [0u64; METHOD_COUNT];
+        method_counts[METHOD_GET] = 5;
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 5, method_counts, ..Default::default() },
+        );
+        let row_count: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM bucket_method_counts WHERE period='2026-05' AND bucket='api'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(row_count, 1, "only non-zero method slots should be stored");
+    }
+
+    // ── bucket_protocol_counts ────────────────────────────────────────────────
+
+    #[test]
+    fn bucket_protocol_counts_stored_on_flush() {
+        let mut db = open_test_db();
+        let mut protocol_counts = [0u64; PROTO_COUNT];
+        protocol_counts[PROTO_1_1] = 70;
+        protocol_counts[PROTO_2_0] = 30;
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 100, protocol_counts, ..Default::default() },
+        );
+
+        let h11: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_protocol_counts \
+                 WHERE period='2026-05' AND bucket='api' AND proto='1.1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("1.1 row");
+        assert_eq!(h11, 70);
+
+        let h2: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_protocol_counts \
+                 WHERE period='2026-05' AND bucket='api' AND proto='2.0'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("2.0 row");
+        assert_eq!(h2, 30);
+    }
+
+    #[test]
+    fn bucket_protocol_counts_accumulate_across_flushes() {
+        let mut db = open_test_db();
+        for _ in 0..2 {
+            let mut pc = [0u64; PROTO_COUNT];
+            pc[PROTO_1_1] = 50;
+            single_bucket(
+                &mut db,
+                "2026-05",
+                "api",
+                BucketAcc { hits: 50, protocol_counts: pc, ..Default::default() },
+            );
+        }
+        let hits: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_protocol_counts \
+                 WHERE period='2026-05' AND bucket='api' AND proto='1.1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("1.1 row");
+        assert_eq!(hits, 100);
+    }
+
+    // ── bucket_response_time_histograms ───────────────────────────────────────
+
+    #[test]
+    fn bucket_rt_histogram_stored_and_merged_across_flushes() {
+        let mut db = open_test_db();
+        for &ms in &[100u32, 200, 300] {
+            let mut hist = ResponseTimeHistogram::new();
+            hist.record(ms);
+            single_bucket(
+                &mut db,
+                "2026-05",
+                "api",
+                BucketAcc { hits: 1, rt_histogram: Some(hist), ..Default::default() },
+            );
+        }
+        let blob: Vec<u8> = db
+            .conn
+            .query_row(
+                "SELECT data FROM bucket_response_time_histograms \
+                 WHERE period='2026-05' AND bucket='api'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("histogram blob");
+        let hist = ResponseTimeHistogram::deserialize(&blob).expect("deserialize");
+        assert_eq!(hist.count, 3, "all three recordings should be merged");
+        assert_eq!(hist.sum_ms, 600, "sum should be 100+200+300");
+    }
+
+    // ── bucket_hourly_stats ───────────────────────────────────────────────────
+
+    #[test]
+    fn bucket_hourly_stats_stored_on_flush() {
+        let mut db = open_test_db();
+        let mut hourly: ahash::AHashMap<Arc<str>, ahash::AHashMap<u8, (u64, u64)>> =
+            ahash::AHashMap::new();
+        let mut hours = ahash::AHashMap::new();
+        hours.insert(12u8, (50u64, 5000u64));
+        hours.insert(13u8, (30u64, 3000u64));
+        hourly.insert(Arc::from("2026-05-01"), hours);
+
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 80, hourly, ..Default::default() },
+        );
+
+        let hits_12: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_hourly_stats \
+                 WHERE bucket='api' AND date='2026-05-01' AND hour=12",
+                [],
+                |r| r.get(0),
+            )
+            .expect("hour 12 row");
+        assert_eq!(hits_12, 50);
+
+        let hits_13: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_hourly_stats \
+                 WHERE bucket='api' AND date='2026-05-01' AND hour=13",
+                [],
+                |r| r.get(0),
+            )
+            .expect("hour 13 row");
+        assert_eq!(hits_13, 30);
+    }
+
+    #[test]
+    fn bucket_hourly_stats_accumulate_across_flushes() {
+        let mut db = open_test_db();
+        for _ in 0..2 {
+            let mut hourly: ahash::AHashMap<Arc<str>, ahash::AHashMap<u8, (u64, u64)>> =
+                ahash::AHashMap::new();
+            let mut hours = ahash::AHashMap::new();
+            hours.insert(10u8, (100u64, 1000u64));
+            hourly.insert(Arc::from("2026-05-15"), hours);
+            single_bucket(
+                &mut db,
+                "2026-05",
+                "api",
+                BucketAcc { hits: 100, hourly, ..Default::default() },
+            );
+        }
+        let hits: i64 = db
+            .conn
+            .query_row(
+                "SELECT hits FROM bucket_hourly_stats \
+                 WHERE bucket='api' AND date='2026-05-15' AND hour=10",
+                [],
+                |r| r.get(0),
+            )
+            .expect("hour 10 row");
+        assert_eq!(hits, 200);
+    }
+
+    // ── bucket_daily_unique_ips ───────────────────────────────────────────────
+
+    #[test]
+    fn bucket_daily_unique_ips_deduplicates_across_flushes() {
+        let mut db = open_test_db();
+
+        let ip1 = Ip::V4(0xC0A80001); // 192.168.0.1
+        let ip2 = Ip::V4(0xC0A80002); // 192.168.0.2
+
+        // Flush ip1 + ip2 on day 1.
+        let mut bm1 = IpBitmaps::default();
+        bm1.insert(ip1);
+        bm1.insert(ip2);
+        let mut daily_ips1: ahash::AHashMap<Arc<str>, IpBitmaps> = ahash::AHashMap::new();
+        daily_ips1.insert(Arc::from("2026-05-01"), bm1);
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 2, daily_ips: daily_ips1, ..Default::default() },
+        );
+
+        // Flush ip1 again on day 1 (duplicate).
+        let mut bm2 = IpBitmaps::default();
+        bm2.insert(ip1);
+        let mut daily_ips2: ahash::AHashMap<Arc<str>, IpBitmaps> = ahash::AHashMap::new();
+        daily_ips2.insert(Arc::from("2026-05-01"), bm2);
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 1, daily_ips: daily_ips2, ..Default::default() },
+        );
+
+        let count: i64 = db
+            .conn
+            .query_row(
+                "SELECT SUM(count) FROM bucket_daily_unique_ips \
+                 WHERE bucket='api' AND date='2026-05-01'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("ip count");
+        assert_eq!(count, 2, "duplicate IP must not inflate the count");
+    }
+
+    #[test]
+    fn bucket_daily_unique_ips_separate_per_bucket() {
+        let mut db = open_test_db();
+
+        let ip1 = Ip::V4(0x01010101);
+        let ip2 = Ip::V4(0x02020202);
+
+        let mut bm_api = IpBitmaps::default();
+        bm_api.insert(ip1);
+        let mut di_api: ahash::AHashMap<Arc<str>, IpBitmaps> = ahash::AHashMap::new();
+        di_api.insert(Arc::from("2026-05-01"), bm_api);
+
+        let mut bm_static = IpBitmaps::default();
+        bm_static.insert(ip1);
+        bm_static.insert(ip2);
+        let mut di_static: ahash::AHashMap<Arc<str>, IpBitmaps> = ahash::AHashMap::new();
+        di_static.insert(Arc::from("2026-05-01"), bm_static);
+
+        let mut buckets = ahash::AHashMap::new();
+        buckets.insert(
+            Arc::from("api"),
+            BucketAcc { hits: 1, daily_ips: di_api, ..Default::default() },
+        );
+        buckets.insert(
+            Arc::from("static"),
+            BucketAcc { hits: 2, daily_ips: di_static, ..Default::default() },
+        );
+        flush_with_buckets(&mut db, "2026-05", buckets);
+
+        let api_count: i64 = db
+            .conn
+            .query_row(
+                "SELECT SUM(count) FROM bucket_daily_unique_ips \
+                 WHERE bucket='api' AND date='2026-05-01'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("api count");
+        let static_count: i64 = db
+            .conn
+            .query_row(
+                "SELECT SUM(count) FROM bucket_daily_unique_ips \
+                 WHERE bucket='static' AND date='2026-05-01'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("static count");
+        assert_eq!(api_count, 1);
+        assert_eq!(static_count, 2);
+    }
+
+    // ── finalize_month with bucket data ───────────────────────────────────────
+
+    fn flush_bucket_with_ips(
+        db: &mut Database,
+        period: &str,
+        bucket: &str,
+        date: &str,
+        ips: Vec<Ip>,
+    ) {
+        let mut bm = IpBitmaps::default();
+        for ip in ips {
+            bm.insert(ip);
+        }
+        let mut daily_ips = ahash::AHashMap::new();
+        daily_ips.insert(Arc::from(date), bm);
+        single_bucket(
+            db,
+            period,
+            bucket,
+            BucketAcc { hits: 1, daily_ips, ..Default::default() },
+        );
+    }
+
+    #[test]
+    fn finalize_month_creates_bucket_unique_visitor_counts() {
+        let mut db = open_test_db();
+        let ip1 = Ip::V4(0x01020304);
+        let ip2 = Ip::V4(0x05060708);
+        flush_bucket_with_ips(&mut db, "2026-05", "api", "2026-05-01", vec![ip1]);
+        flush_bucket_with_ips(&mut db, "2026-05", "api", "2026-05-15", vec![ip2]);
+        db.finalize_month("2026-05", 10).expect("finalize");
+
+        let count: i64 = db
+            .conn
+            .query_row(
+                "SELECT count FROM bucket_unique_visitor_counts \
+                 WHERE bucket='api' AND period='2026-05'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("bucket unique visitor count");
+        assert_eq!(count, 2, "two distinct IPs across two days");
+    }
+
+    #[test]
+    fn finalize_month_deduplicates_bucket_ips_across_days() {
+        let mut db = open_test_db();
+        let ip1 = Ip::V4(0xAAAAAAAA);
+
+        // Same IP on two different days in the same month.
+        flush_bucket_with_ips(&mut db, "2026-05", "api", "2026-05-01", vec![ip1]);
+        flush_bucket_with_ips(&mut db, "2026-05", "api", "2026-05-02", vec![ip1]);
+        db.finalize_month("2026-05", 10).expect("finalize");
+
+        let count: i64 = db
+            .conn
+            .query_row(
+                "SELECT count FROM bucket_unique_visitor_counts \
+                 WHERE bucket='api' AND period='2026-05'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(count, 1, "same IP on two days should count as 1 unique visitor");
+    }
+
+    #[test]
+    fn finalize_month_creates_bucket_daily_visitor_counts() {
+        let mut db = open_test_db();
+        let ip1 = Ip::V4(0xDEADBEEF);
+        let ip2 = Ip::V4(0xCAFEBABE);
+        flush_bucket_with_ips(&mut db, "2026-05", "api", "2026-05-10", vec![ip1, ip2]);
+        db.finalize_month("2026-05", 10).expect("finalize");
+
+        let count: i64 = db
+            .conn
+            .query_row(
+                "SELECT count FROM bucket_daily_visitor_counts \
+                 WHERE bucket='api' AND date='2026-05-10'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("daily visitor count");
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn finalize_month_cleans_up_bucket_daily_unique_ips() {
+        let mut db = open_test_db();
+        let ip1 = Ip::V4(0x01010101);
+        flush_bucket_with_ips(&mut db, "2026-05", "api", "2026-05-01", vec![ip1]);
+        db.finalize_month("2026-05", 10).expect("finalize");
+
+        let remaining: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM bucket_daily_unique_ips \
+                 WHERE bucket='api' AND date LIKE '2026-05-%'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(remaining, 0, "bucket_daily_unique_ips must be cleaned up after finalize");
+    }
+
+    #[test]
+    fn finalize_month_prunes_bucket_urls_to_top_n() {
+        let mut db = open_test_db();
+        // Insert 30 URLs into the bucket, flush as single batch.
+        let mut url_stats = ahash::AHashMap::new();
+        for i in 0..30u64 {
+            url_stats.insert(
+                format!("/api/endpoint-{i}"),
+                UrlStats { hits: 100 - i, bandwidth: (100 - i) * 512, ..Default::default() },
+            );
+        }
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 30, url_stats, ..Default::default() },
+        );
+        db.finalize_month("2026-05", 10).expect("finalize");
+
+        let remaining: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM bucket_urls WHERE period='2026-05' AND bucket='api'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("url count");
+        assert_eq!(remaining, 10, "should be pruned to top_n=10");
+    }
+
+    #[test]
+    fn finalize_month_bucket_prune_keeps_top_hits() {
+        let mut db = open_test_db();
+        let mut url_stats = ahash::AHashMap::new();
+        for i in 1..=20u64 {
+            url_stats.insert(
+                format!("/api/r{i}"),
+                UrlStats { hits: i, bandwidth: i * 100, ..Default::default() },
+            );
+        }
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 20, url_stats, ..Default::default() },
+        );
+        db.finalize_month("2026-05", 5).expect("finalize");
+
+        // The top 5 by hits should be /api/r16 through /api/r20.
+        let top_hit: i64 = db
+            .conn
+            .query_row(
+                "SELECT MAX(hits) FROM bucket_urls WHERE period='2026-05' AND bucket='api'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("max hits");
+        let min_hit: i64 = db
+            .conn
+            .query_row(
+                "SELECT MIN(hits) FROM bucket_urls WHERE period='2026-05' AND bucket='api'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("min hits");
+        assert_eq!(top_hit, 20);
+        assert!(min_hit >= 16, "min hit in top 5 should be at least 16 (got {min_hit})");
+    }
+
+    // ── bucket_monthly_unique_ips snapshots and yearly counts ─────────────────
+
+    fn bucket_monthly_snapshot_count(db: &Database, period: &str, bucket: &str) -> i64 {
+        db.conn
+            .query_row(
+                "SELECT COUNT(*) FROM bucket_monthly_unique_ips WHERE period=?1 AND bucket=?2",
+                rusqlite::params![period, bucket],
+                |r| r.get(0),
+            )
+            .expect("snapshot count")
+    }
+
+    fn bucket_visitor_count_cached(db: &Database, period: &str, bucket: &str) -> Option<i64> {
+        db.conn
+            .query_row(
+                "SELECT count FROM bucket_unique_visitor_counts WHERE bucket=?1 AND period=?2",
+                rusqlite::params![bucket, period],
+                |r| r.get(0),
+            )
+            .optional()
+            .expect("visitor count query")
+    }
+
+    #[test]
+    fn finalize_month_writes_bucket_monthly_snapshot() {
+        let mut db = open_test_db();
+        let ip1 = Ip::V4(0x01010101);
+        flush_bucket_with_ips(&mut db, "2026-05", "api", "2026-05-01", vec![ip1]);
+        db.finalize_month("2026-05", 10).expect("finalize");
+
+        assert!(
+            bucket_monthly_snapshot_count(&db, "2026-05", "api") > 0,
+            "bucket_monthly_unique_ips must have a snapshot after finalize_month"
+        );
+    }
+
+    #[test]
+    fn finalize_month_writes_bucket_yearly_count() {
+        let mut db = open_test_db();
+        let ip1 = Ip::V4(0x01010101);
+        let ip2 = Ip::V4(0x02020202);
+        flush_bucket_with_ips(&mut db, "2026-05", "api", "2026-05-01", vec![ip1, ip2]);
+        db.finalize_month("2026-05", 10).expect("finalize");
+
+        let yearly = bucket_visitor_count_cached(&db, "2026", "api");
+        assert_eq!(yearly, Some(2), "yearly entry must be written by finalize_month");
+    }
+
+    #[test]
+    fn finalize_month_bucket_yearly_count_deduplicates_across_months() {
+        // Regression: before the fix, historical yearly rows showed no Unique Sites
+        // because daily bitmaps were deleted and no yearly snapshot was stored.
+        // This test verifies that an IP appearing in both Jan and Feb is counted once.
+        let mut db = open_test_db();
+        let ip_shared = Ip::V4(0xAAAAAAAA);
+        let ip_jan_only = Ip::V4(0xBBBBBBBB);
+        let ip_feb_only = Ip::V4(0xCCCCCCCC);
+
+        flush_bucket_with_ips(&mut db, "2026-01", "api", "2026-01-15", vec![ip_shared, ip_jan_only]);
+        db.finalize_month("2026-01", 10).expect("finalize jan");
+
+        flush_bucket_with_ips(&mut db, "2026-02", "api", "2026-02-10", vec![ip_shared, ip_feb_only]);
+        db.finalize_month("2026-02", 10).expect("finalize feb");
+
+        let yearly = bucket_visitor_count_cached(&db, "2026", "api");
+        assert_eq!(
+            yearly,
+            Some(3),
+            "yearly count must be 3 distinct IPs, not 4 (ip_shared must not be double-counted)"
+        );
+    }
+
+    #[test]
+    fn finalize_month_bucket_monthly_snapshots_survive_after_daily_rows_deleted() {
+        // Verifies the fix: monthly snapshots must persist so yearly counts can be
+        // queried from historical years after daily rows are gone.
+        let mut db = open_test_db();
+        let ip1 = Ip::V4(0x11111111);
+        flush_bucket_with_ips(&mut db, "2026-05", "api", "2026-05-01", vec![ip1]);
+        db.finalize_month("2026-05", 10).expect("finalize");
+
+        let daily_remaining: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM bucket_daily_unique_ips WHERE bucket='api'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("daily count");
+        assert_eq!(daily_remaining, 0, "daily rows must be deleted after finalize");
+
+        assert!(
+            bucket_monthly_snapshot_count(&db, "2026-05", "api") > 0,
+            "monthly snapshot must still exist after daily rows are gone"
+        );
+        assert_eq!(
+            bucket_visitor_count_cached(&db, "2026", "api"),
+            Some(1),
+            "yearly count must be queryable even after daily rows are deleted"
+        );
+    }
+
+    #[test]
+    fn finalize_month_bucket_yearly_count_updates_with_each_new_month() {
+        let mut db = open_test_db();
+        let ip1 = Ip::V4(0x01010101);
+        let ip2 = Ip::V4(0x02020202);
+        let ip3 = Ip::V4(0x03030303);
+
+        flush_bucket_with_ips(&mut db, "2026-01", "api", "2026-01-01", vec![ip1]);
+        db.finalize_month("2026-01", 10).expect("finalize jan");
+        assert_eq!(bucket_visitor_count_cached(&db, "2026", "api"), Some(1));
+
+        flush_bucket_with_ips(&mut db, "2026-02", "api", "2026-02-01", vec![ip2]);
+        db.finalize_month("2026-02", 10).expect("finalize feb");
+        assert_eq!(bucket_visitor_count_cached(&db, "2026", "api"), Some(2));
+
+        flush_bucket_with_ips(&mut db, "2026-03", "api", "2026-03-01", vec![ip3]);
+        db.finalize_month("2026-03", 10).expect("finalize mar");
+        assert_eq!(bucket_visitor_count_cached(&db, "2026", "api"), Some(3));
+    }
+
+    #[test]
+    fn finalize_month_bucket_yearly_count_independent_per_bucket() {
+        let mut db = open_test_db();
+        let ip1 = Ip::V4(0x01010101);
+        let ip2 = Ip::V4(0x02020202);
+        let ip3 = Ip::V4(0x03030303);
+
+        // "api" has ip1+ip2, "static" has ip3
+        flush_bucket_with_ips(&mut db, "2026-05", "api", "2026-05-01", vec![ip1, ip2]);
+        flush_bucket_with_ips(&mut db, "2026-05", "static", "2026-05-01", vec![ip3]);
+        db.finalize_month("2026-05", 10).expect("finalize");
+
+        assert_eq!(bucket_visitor_count_cached(&db, "2026", "api"), Some(2));
+        assert_eq!(bucket_visitor_count_cached(&db, "2026", "static"), Some(1));
+    }
+
+    // ── Multiple buckets do not interfere ─────────────────────────────────────
+
+    #[test]
+    fn multiple_buckets_in_same_period_are_independent() {
+        let mut db = open_test_db();
+
+        let mut api_sc = ahash::AHashMap::new();
+        api_sc.insert(200u16, 100u64);
+        let mut static_sc = ahash::AHashMap::new();
+        static_sc.insert(304u16, 50u64);
+
+        let mut buckets = ahash::AHashMap::new();
+        buckets.insert(
+            Arc::from("api"),
+            BucketAcc {
+                hits: 100,
+                bandwidth: 10_000,
+                status_codes: api_sc,
+                ..Default::default()
+            },
+        );
+        buckets.insert(
+            Arc::from("static"),
+            BucketAcc {
+                hits: 50,
+                bandwidth: 500,
+                status_codes: static_sc,
+                ..Default::default()
+            },
+        );
+        flush_with_buckets(&mut db, "2026-05", buckets);
+
+        let (api_hits, api_bw, ..) = bucket_period_row(&db, "2026-05", "api");
+        let (static_hits, static_bw, ..) = bucket_period_row(&db, "2026-05", "static");
+        assert_eq!(api_hits, 100);
+        assert_eq!(api_bw, 10_000);
+        assert_eq!(static_hits, 50);
+        assert_eq!(static_bw, 500);
+
+        let api_200: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM bucket_status_codes \
+                 WHERE period='2026-05' AND bucket='api' AND status=200",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let static_200: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM bucket_status_codes \
+                 WHERE period='2026-05' AND bucket='static' AND status=200",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(api_200, 1, "api has a 200 status code row");
+        assert_eq!(static_200, 0, "static has no 200 status code row");
+    }
+
+    #[test]
+    fn bucket_data_does_not_cross_periods() {
+        let mut db = open_test_db();
+        single_bucket(
+            &mut db,
+            "2026-05",
+            "api",
+            BucketAcc { hits: 100, ..Default::default() },
+        );
+        single_bucket(
+            &mut db,
+            "2026-06",
+            "api",
+            BucketAcc { hits: 200, ..Default::default() },
+        );
+
+        let (may_hits, ..) = bucket_period_row(&db, "2026-05", "api");
+        let (jun_hits, ..) = bucket_period_row(&db, "2026-06", "api");
+        assert_eq!(may_hits, 100);
+        assert_eq!(jun_hits, 200);
     }
 }

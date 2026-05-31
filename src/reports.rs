@@ -74,9 +74,8 @@ struct TotalsView {
     p95_rt_ms: Option<String>,
 }
 
-
 #[derive(Debug, Clone)]
-struct DailyRtStat {
+pub(crate) struct DailyRtStat {
     date: String,
     avg_ms: f64,
     p95_ms: u32,
@@ -90,7 +89,7 @@ struct MonthlyRtStat {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct DailyRow {
+pub(crate) struct DailyRow {
     date: String,
     is_weekend: bool,
     hits: u64,
@@ -107,7 +106,7 @@ struct DailyRow {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct HourlyRow {
+pub(crate) struct HourlyRow {
     hour: u8,
     label: String,
     hits: u64,
@@ -121,7 +120,7 @@ struct HourlyRow {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct MonthRow {
+pub(crate) struct MonthRow {
     period: String,
     month: u32,
     month_name: String,
@@ -139,7 +138,7 @@ struct MonthRow {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct TopUrlRow {
+pub(crate) struct TopUrlRow {
     url: String,
     hits: u64,
     bandwidth: u64,
@@ -176,7 +175,7 @@ struct TopRefRow {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct TopAgentRow {
+pub(crate) struct TopAgentRow {
     agent: String,
     hits: u64,
     bandwidth: u64,
@@ -188,7 +187,7 @@ struct TopAgentRow {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct TopCountryRow {
+pub(crate) struct TopCountryRow {
     country_code: String,
     country_name: String,
     country_flag: String,
@@ -202,7 +201,7 @@ struct TopCountryRow {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct StatusRow {
+pub(crate) struct StatusRow {
     status: u16,
     label: String,
     hits: u64,
@@ -212,7 +211,7 @@ struct StatusRow {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct ProtoRow {
+pub(crate) struct ProtoRow {
     proto: String,
     hits: u64,
     hits_fmt: String,
@@ -221,7 +220,7 @@ struct ProtoRow {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct MethodRow {
+pub(crate) struct MethodRow {
     method: String,
     hits: u64,
     hits_fmt: String,
@@ -271,6 +270,52 @@ struct HourlyAvgMax {
     max_visits_exact_fmt: String,
 }
 
+/// Summary row for the "Buckets" section on period pages.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct BucketIndexRow {
+    pub bucket: String,
+    pub slug: String,
+    pub hits: u64,
+    pub bandwidth: u64,
+    pub hits_fmt: String,
+    pub hits_exact_fmt: String,
+    pub bandwidth_fmt: String,
+    pub avg_rt_ms: Option<String>,
+    pub unique_sites: Option<u64>,
+    pub unique_sites_fmt: Option<String>,
+}
+
+/// Full data for a bucket sub-page.
+pub(crate) struct BucketPageData {
+    pub(crate) bucket: String,
+    pub(crate) slug: String,
+    pub(crate) period: String,
+    pub(crate) hits_fmt: String,
+    pub(crate) hits_exact_fmt: String,
+    pub(crate) bandwidth_fmt: String,
+    pub(crate) visitors_fmt: Option<String>,
+    pub(crate) visitors_exact_fmt: Option<String>,
+    pub(crate) avg_rt_ms: Option<String>,
+    pub(crate) p95_rt_ms: Option<String>,
+    /// Populated for monthly periods (YYYY-MM).
+    pub(crate) daily: Vec<DailyRow>,
+    pub(crate) hourly: Vec<HourlyRow>,
+    pub(crate) daily_rt_stats: Vec<DailyRtStat>,
+    /// Populated for yearly periods (YYYY) — one row per month.
+    pub(crate) monthly_rows: Vec<MonthRow>,
+    pub(crate) top_urls_hits: Vec<TopUrlRow>,
+    pub(crate) top_urls_bandwidth: Vec<TopUrlRow>,
+    pub(crate) top_slow_urls: Vec<TopUrlRow>,
+    pub(crate) status_codes: Vec<StatusRow>,
+    pub(crate) agents_hits: Vec<TopAgentRow>,
+    pub(crate) agents_bandwidth: Vec<TopAgentRow>,
+    pub(crate) countries_hits: Vec<TopCountryRow>,
+    pub(crate) countries_bandwidth: Vec<TopCountryRow>,
+    pub(crate) method_codes: Vec<MethodRow>,
+    pub(crate) proto_codes: Vec<ProtoRow>,
+    pub(crate) rt_distribution_buckets: Vec<(String, u64)>,
+}
+
 #[derive(Debug, Clone)]
 struct MonthlySummary {
     period: String,
@@ -296,6 +341,7 @@ struct MonthlySummary {
     top_slow_urls: Vec<TopUrlRow>,
     daily_rt_stats: Vec<DailyRtStat>,
     rt_distribution_buckets: Vec<(String, u64)>,
+    buckets: Vec<BucketIndexRow>,
 }
 
 #[derive(Debug, Clone)]
@@ -317,6 +363,7 @@ struct YearlySummary {
     totals: TotalsView,
     monthly_rt_stats: Vec<MonthlyRtStat>,
     top_slow_urls: Vec<TopUrlRow>,
+    buckets: Vec<BucketIndexRow>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -389,12 +436,37 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
                 cfg.anonymise_ips,
             )?;
             render_month_page(&tera, cfg, output_dir, &summary)?;
+            for b in &summary.buckets {
+                let data = aggregator::bucket_page_data(
+                    &conn,
+                    &summary.period,
+                    &b.bucket,
+                    cfg.top_n,
+                    compact_counts,
+                )?;
+                render_bucket_page(&tera, cfg, output_dir, &data)?;
+                logging::log_debug_at(
+                    2,
+                    &format!("  Wrote {}/buckets/{}/index.html", summary.period, b.slug),
+                );
+            }
             logging::log_debug_at(2, &format!("  Wrote {}/index.html", summary.period));
             month_count += 1;
         }
 
-        let yearly = aggregator::yearly_summary(&conn, *year, cfg.top_n, compact_counts, cfg.anonymise_ips)?;
+        let yearly =
+            aggregator::yearly_summary(&conn, *year, cfg.top_n, compact_counts, cfg.anonymise_ips)?;
         render_year_page(&tera, cfg, output_dir, &yearly)?;
+        for b in &yearly.buckets {
+            let data = aggregator::bucket_page_data(
+                &conn,
+                &year.to_string(),
+                &b.bucket,
+                cfg.top_n,
+                compact_counts,
+            )?;
+            render_bucket_page(&tera, cfg, output_dir, &data)?;
+        }
         logging::log_debug_at(
             1,
             &format!(
@@ -420,7 +492,7 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
 }
 
 fn load_templates() -> Result<Tera> {
-    let mut tera = Tera::default();
+    let mut tera = Tera::new("**/*.tera")?;
     tera.add_raw_template(
         "layout.html.tera",
         include_str!(concat!(
@@ -447,6 +519,20 @@ fn load_templates() -> Result<Tera> {
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/templates/month.html.tera"
+        )),
+    )?;
+    tera.add_raw_template(
+        "bucket_month.html.tera",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/templates/bucket_month.html.tera"
+        )),
+    )?;
+    tera.add_raw_template(
+        "bucket_year.html.tera",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/templates/bucket_year.html.tera"
         )),
     )?;
     Ok(tera)
@@ -488,7 +574,10 @@ fn render_index_page(
         "country_chart",
         &charts::countries_chart(&overall.top_countries_hits)?,
     );
-    page_ctx.insert("agents_chart", &charts::agents_chart(&overall.top_agents_hits)?);
+    page_ctx.insert(
+        "agents_chart",
+        &charts::agents_chart(&overall.top_agents_hits)?,
+    );
 
     let page = tera.render("index.html.tera", &page_ctx)?;
     let html = render_layout(tera, cfg, "assets", "index.html", page)?;
@@ -536,15 +625,26 @@ fn render_year_page(
         "country_chart",
         &charts::countries_chart(&summary.top_countries_hits)?,
     );
-    page_ctx.insert("agents_chart", &charts::agents_chart(&summary.top_agents_hits)?);
+    page_ctx.insert(
+        "agents_chart",
+        &charts::agents_chart(&summary.top_agents_hits)?,
+    );
     if !summary.monthly_rt_stats.is_empty() {
-        let labels: Vec<&str> = summary.monthly_rt_stats.iter().map(|r| r.label.as_str()).collect();
+        let labels: Vec<&str> = summary
+            .monthly_rt_stats
+            .iter()
+            .map(|r| r.label.as_str())
+            .collect();
         let avgs: Vec<f64> = summary.monthly_rt_stats.iter().map(|r| r.avg_ms).collect();
         let p95s: Vec<u32> = summary.monthly_rt_stats.iter().map(|r| r.p95_ms).collect();
         page_ctx.insert(
             "rt_over_time_chart",
             &charts::response_time_over_time_chart(&labels, &avgs, &p95s)?,
         );
+    }
+
+    if !summary.buckets.is_empty() {
+        page_ctx.insert("buckets", &summary.buckets);
     }
 
     let page = tera.render("year.html.tera", &page_ctx)?;
@@ -587,7 +687,11 @@ fn render_month_page(
     page_ctx.insert("top_slow_urls", &summary.top_slow_urls);
 
     if !summary.daily_rt_stats.is_empty() {
-        let labels: Vec<&str> = summary.daily_rt_stats.iter().map(|r| r.date.as_str()).collect();
+        let labels: Vec<&str> = summary
+            .daily_rt_stats
+            .iter()
+            .map(|r| r.date.as_str())
+            .collect();
         let avgs: Vec<f64> = summary.daily_rt_stats.iter().map(|r| r.avg_ms).collect();
         let p95s: Vec<u32> = summary.daily_rt_stats.iter().map(|r| r.p95_ms).collect();
         page_ctx.insert(
@@ -601,19 +705,29 @@ fn render_month_page(
             .iter()
             .map(|(l, _)| l.as_str())
             .collect();
-        let counts: Vec<u64> = summary.rt_distribution_buckets.iter().map(|(_, c)| *c).collect();
+        let counts: Vec<u64> = summary
+            .rt_distribution_buckets
+            .iter()
+            .map(|(_, c)| *c)
+            .collect();
         page_ctx.insert(
             "rt_distribution_chart",
             &charts::response_time_distribution_chart(&labels, &counts)?,
         );
     }
 
-    page_ctx.insert("daily_chart", &charts::daily_chart(&summary.daily, &cfg.style)?);
+    page_ctx.insert(
+        "daily_chart",
+        &charts::daily_chart(&summary.daily, &cfg.style)?,
+    );
     page_ctx.insert(
         "daily_visits_chart",
         &charts::daily_visits_chart(&summary.daily, &cfg.style)?,
     );
-    page_ctx.insert("hourly_chart", &charts::hourly_chart(&summary.hourly, &cfg.style)?);
+    page_ctx.insert(
+        "hourly_chart",
+        &charts::hourly_chart(&summary.hourly, &cfg.style)?,
+    );
     page_ctx.insert(
         "status_chart",
         &charts::status_chart(&summary.status_codes, &cfg.style)?,
@@ -622,7 +736,14 @@ fn render_month_page(
         "country_chart",
         &charts::countries_chart(&summary.top_countries_hits)?,
     );
-    page_ctx.insert("agents_chart", &charts::agents_chart(&summary.top_agents_hits)?);
+    page_ctx.insert(
+        "agents_chart",
+        &charts::agents_chart(&summary.top_agents_hits)?,
+    );
+
+    if !summary.buckets.is_empty() {
+        page_ctx.insert("buckets", &summary.buckets);
+    }
 
     let page = tera.render("month.html.tera", &page_ctx)?;
     let html = render_layout(tera, cfg, "../assets", "../index.html", page)?;
@@ -630,6 +751,111 @@ fn render_month_page(
     let month_dir = output_dir.join(&summary.period);
     fs::create_dir_all(&month_dir)?;
     fs::write(month_dir.join("index.html"), html)?;
+    Ok(())
+}
+
+fn render_bucket_page(
+    tera: &Tera,
+    cfg: &Config,
+    output_dir: &Path,
+    data: &BucketPageData,
+) -> Result<()> {
+    let mut ctx = TeraContext::new();
+    ctx.insert("bucket", &data.bucket);
+    ctx.insert("slug", &data.slug);
+    ctx.insert("period", &data.period);
+    ctx.insert("hits_fmt", &data.hits_fmt);
+    ctx.insert("hits_exact_fmt", &data.hits_exact_fmt);
+    ctx.insert("bandwidth_fmt", &data.bandwidth_fmt);
+    ctx.insert("visitors_fmt", &data.visitors_fmt);
+    ctx.insert("visitors_exact_fmt", &data.visitors_exact_fmt);
+    ctx.insert("avg_rt_ms", &data.avg_rt_ms);
+    ctx.insert("p95_rt_ms", &data.p95_rt_ms);
+    ctx.insert("top_urls_hits", &data.top_urls_hits);
+    ctx.insert("top_urls_bandwidth", &data.top_urls_bandwidth);
+    ctx.insert("top_slow_urls", &data.top_slow_urls);
+    ctx.insert("status_codes", &data.status_codes);
+    ctx.insert("agents_hits", &data.agents_hits);
+    ctx.insert("agents_bandwidth", &data.agents_bandwidth);
+    ctx.insert("countries_hits", &data.countries_hits);
+    ctx.insert("countries_bandwidth", &data.countries_bandwidth);
+    ctx.insert("method_codes", &data.method_codes);
+    ctx.insert("proto_codes", &data.proto_codes);
+
+    if !data.status_codes.is_empty() {
+        ctx.insert(
+            "status_chart",
+            &charts::status_chart(&data.status_codes, &cfg.style)?,
+        );
+    }
+    if !data.agents_hits.is_empty() {
+        ctx.insert("agents_chart", &charts::agents_chart(&data.agents_hits)?);
+    }
+    if !data.countries_hits.is_empty() {
+        ctx.insert("country_chart", &charts::countries_chart(&data.countries_hits)?);
+    }
+    if !data.rt_distribution_buckets.is_empty() {
+        let labels: Vec<&str> = data
+            .rt_distribution_buckets
+            .iter()
+            .map(|(l, _)| l.as_str())
+            .collect();
+        let counts: Vec<u64> = data
+            .rt_distribution_buckets
+            .iter()
+            .map(|(_, c)| *c)
+            .collect();
+        ctx.insert(
+            "rt_distribution_chart",
+            &charts::response_time_distribution_chart(&labels, &counts)?,
+        );
+    }
+    let is_yearly = data.period.len() == 4;
+
+    if is_yearly {
+        ctx.insert("monthly_rows", &data.monthly_rows);
+        if !data.monthly_rows.is_empty() {
+            ctx.insert("overview_chart", &charts::monthly_overview_chart(&data.monthly_rows, &cfg.style)?);
+            if data.monthly_rows.iter().any(|r| r.visitors > 0) {
+                ctx.insert("overview_sites_chart", &charts::bucket_monthly_sites_chart(&data.monthly_rows, &cfg.style)?);
+            }
+        }
+        if !data.daily_rt_stats.is_empty() {
+            let labels: Vec<&str> = data.daily_rt_stats.iter().map(|r| r.date.as_str()).collect();
+            let avgs: Vec<f64> = data.daily_rt_stats.iter().map(|r| r.avg_ms).collect();
+            let p95s: Vec<u32> = data.daily_rt_stats.iter().map(|r| r.p95_ms).collect();
+            ctx.insert("rt_over_time_chart", &charts::response_time_over_time_chart(&labels, &avgs, &p95s)?);
+        }
+    } else {
+        if !data.daily.is_empty() {
+            ctx.insert("daily_chart", &charts::daily_chart(&data.daily, &cfg.style)?);
+            if data.daily.iter().any(|r| r.visitors > 0) {
+                ctx.insert("daily_sites_chart", &charts::bucket_daily_sites_chart(&data.daily, &cfg.style)?);
+            }
+        }
+        if !data.hourly.is_empty() {
+            ctx.insert("hourly_chart", &charts::hourly_chart(&data.hourly, &cfg.style)?);
+        }
+        if !data.daily_rt_stats.is_empty() {
+            let labels: Vec<&str> = data.daily_rt_stats.iter().map(|r| r.date.as_str()).collect();
+            let avgs: Vec<f64> = data.daily_rt_stats.iter().map(|r| r.avg_ms).collect();
+            let p95s: Vec<u32> = data.daily_rt_stats.iter().map(|r| r.p95_ms).collect();
+            ctx.insert("rt_over_time_chart", &charts::response_time_over_time_chart(&labels, &avgs, &p95s)?);
+        }
+    }
+
+    let template = if is_yearly { "bucket_year.html.tera" } else { "bucket_month.html.tera" };
+    let page = tera.render(template, &ctx)?;
+    // Bucket pages live at {output}/{period}/buckets/{slug}/index.html
+    // → assets at ../../../assets, overview at ../../../index.html
+    let html = render_layout(tera, cfg, "../../../assets", "../../../index.html", page)?;
+
+    let bucket_dir = output_dir
+        .join(&data.period)
+        .join("buckets")
+        .join(&data.slug);
+    fs::create_dir_all(&bucket_dir)?;
+    fs::write(bucket_dir.join("index.html"), html)?;
     Ok(())
 }
 
@@ -704,8 +930,22 @@ fn copy_assets(output_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn format_totals(hits: u64, visits: u64, visitors: u64, bandwidth: u64, compact_counts: bool) -> TotalsView {
-    format_totals_with_rt(hits, visits, visitors, bandwidth, compact_counts, None, None)
+fn format_totals(
+    hits: u64,
+    visits: u64,
+    visitors: u64,
+    bandwidth: u64,
+    compact_counts: bool,
+) -> TotalsView {
+    format_totals_with_rt(
+        hits,
+        visits,
+        visitors,
+        bandwidth,
+        compact_counts,
+        None,
+        None,
+    )
 }
 
 fn format_totals_with_rt(

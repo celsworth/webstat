@@ -20,6 +20,29 @@ pub(crate) struct UrlStats {
     pub(crate) rt_max: u32,
 }
 
+/// Per-bucket accumulator: mirrors a subset of RunAccumulators for a single named bucket.
+#[derive(Default)]
+pub(crate) struct BucketAcc {
+    pub(crate) hits: u64,
+    pub(crate) bandwidth: u64,
+    pub(crate) rt_sum: u64,
+    pub(crate) rt_count: u64,
+    pub(crate) rt_max: u32,
+    pub(crate) url_stats: AHashMap<String, UrlStats>,
+    pub(crate) status_codes: AHashMap<u16, u64>,
+    pub(crate) agents: AHashMap<Arc<str>, (u64, u64)>,
+    pub(crate) countries: AHashMap<Arc<str>, (u64, u64)>,
+    pub(crate) method_counts: [u64; METHOD_COUNT],
+    pub(crate) protocol_counts: [u64; PROTO_COUNT],
+    pub(crate) rt_histogram: Option<ResponseTimeHistogram>,
+    /// date → hour → (hits, bandwidth)
+    pub(crate) hourly: AHashMap<Arc<str>, AHashMap<u8, (u64, u64)>>,
+    /// date → daily RT histogram
+    pub(crate) daily_hists: AHashMap<Arc<str>, ResponseTimeHistogram>,
+    /// date → unique IPs bitmap
+    pub(crate) daily_ips: AHashMap<Arc<str>, IpBitmaps>,
+}
+
 pub(crate) struct RunAccumulators {
     pub(crate) current_month: String,
     pub(crate) hourly: HourlyMap,
@@ -33,6 +56,8 @@ pub(crate) struct RunAccumulators {
     pub(crate) status_codes: AHashMap<u16, u64>,
     pub(crate) method_counts: [u64; METHOD_COUNT],
     pub(crate) protocol_counts: [u64; PROTO_COUNT],
+    /// Per-bucket stats; keyed by the same Arc<str> used in Action::Bucket.
+    pub(crate) bucket_stats: AHashMap<Arc<str>, BucketAcc>,
 }
 
 impl RunAccumulators {
@@ -50,6 +75,7 @@ impl RunAccumulators {
             status_codes: AHashMap::with_capacity(32),
             method_counts: [0; METHOD_COUNT],
             protocol_counts: [0; PROTO_COUNT],
+            bucket_stats: AHashMap::with_capacity(32),
         }
     }
 
@@ -63,6 +89,7 @@ impl RunAccumulators {
             && self.status_codes.is_empty()
             && self.method_counts.iter().all(|&c| c == 0)
             && self.protocol_counts.iter().all(|&c| c == 0)
+            && self.bucket_stats.is_empty()
     }
 
     pub(crate) fn clear_for_new_month(&mut self, new_month: String) {
@@ -170,5 +197,28 @@ mod tests {
             .insert(crate::ip::Ip::V4(0x01020304_u32));
         // daily_ips does not affect is_empty (it's just a write buffer)
         assert!(acc.is_empty());
+    }
+
+    #[test]
+    fn bucket_stats_populated_makes_non_empty() {
+        let mut acc = RunAccumulators::new("2026-05".to_string());
+        acc.bucket_stats
+            .insert(Arc::from("api"), BucketAcc { hits: 1, ..Default::default() });
+        assert!(!acc.is_empty());
+    }
+
+    #[test]
+    fn clear_for_new_month_clears_bucket_stats() {
+        let mut acc = RunAccumulators::new("2026-05".to_string());
+        acc.bucket_stats
+            .insert(Arc::from("api"), BucketAcc { hits: 100, ..Default::default() });
+        acc.url_stats.insert(
+            "/index.html".to_string(),
+            UrlStats { hits: 5, bandwidth: 1024, ..Default::default() },
+        );
+        assert!(!acc.is_empty());
+        acc.clear_for_new_month("2026-06".to_string());
+        assert!(acc.is_empty(), "bucket_stats must be cleared");
+        assert_eq!(acc.current_month, "2026-06");
     }
 }

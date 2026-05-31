@@ -130,10 +130,12 @@ impl Processor {
     }
 
     pub(super) fn aggregate_entry(&mut self, parsed: ParsedEntry, run_acc: &mut RunAccumulators) {
+        let bucket = parsed.bucket.clone(); // clone Arc pointer before destructuring
         let ParsedEntry {
             entry,
             ua_family: agent,
             hidden: hide,
+            bucket: _,
         } = parsed;
 
         let (date, hour, _month_period, request_ts) = {
@@ -275,9 +277,67 @@ impl Processor {
             }
         }
 
+        let method_idx = method_index(entry.method());
+        let proto_idx = proto_index(entry.proto());
         *run_acc.status_codes.entry(status).or_insert(0) += 1;
-        run_acc.method_counts[method_index(entry.method())] += 1;
-        run_acc.protocol_counts[proto_index(entry.proto())] += 1;
+        run_acc.method_counts[method_idx] += 1;
+        run_acc.protocol_counts[proto_idx] += 1;
+
+        // ── Bucket stats ───────────────────────────────────────────────────────
+        if let Some(bucket_name) = &bucket {
+            let acc = run_acc.bucket_stats.entry(Arc::clone(bucket_name)).or_default();
+            acc.hits += 1;
+            acc.bandwidth += bytes;
+            if !hide.contains(HideMask::TIMING) {
+                if let Some(ms) = entry.upstream_response_time_ms {
+                    acc.rt_sum += ms as u64;
+                    acc.rt_count += 1;
+                    acc.rt_max = acc.rt_max.max(ms);
+                    acc.rt_histogram
+                        .get_or_insert_with(ResponseTimeHistogram::new)
+                        .record(ms);
+                    acc.daily_hists
+                        .entry(Arc::clone(&date))
+                        .or_insert_with(ResponseTimeHistogram::new)
+                        .record(ms);
+                }
+            }
+            // hourly hits + bandwidth
+            {
+                let h = acc.hourly.entry(Arc::clone(&date)).or_default().entry(hour).or_insert((0, 0));
+                h.0 += 1;
+                h.1 += bytes;
+            }
+            // daily unique IPs
+            if let Some(ip) = parsed_ip {
+                acc.daily_ips.entry(Arc::clone(&date)).or_default().insert(ip);
+            }
+            if self.enable_top_urls && !hide.contains(HideMask::TOP_URLS) {
+                let e = acc.url_stats.entry(clean_path.to_string()).or_default();
+                e.hits += 1;
+                e.bandwidth += bytes;
+                if !hide.contains(HideMask::TIMING) {
+                    if let Some(ms) = entry.upstream_response_time_ms {
+                        e.rt_sum += ms as u64;
+                        e.rt_count += 1;
+                        e.rt_max = e.rt_max.max(ms);
+                    }
+                }
+            }
+            *acc.status_codes.entry(status).or_insert(0) += 1;
+            {
+                let e = acc.agents.entry(Arc::clone(&agent)).or_insert((0, 0));
+                e.0 += 1;
+                e.1 += bytes;
+            }
+            {
+                let e = acc.countries.entry(Arc::clone(&country_code)).or_insert((0, 0));
+                e.0 += 1;
+                e.1 += bytes;
+            }
+            acc.method_counts[method_idx] += 1;
+            acc.protocol_counts[proto_idx] += 1;
+        }
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────

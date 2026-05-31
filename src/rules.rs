@@ -1,9 +1,11 @@
 // Request rules: YAML-configured include/exclude/rewrite rules applied to log entries during parsing.
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
+use rand::Rng as _;
 use regex::Regex;
 use serde::Deserialize;
 
@@ -51,6 +53,8 @@ pub enum RawAction {
     Hide(Vec<String>),
     /// Keep only this fraction of matching entries (0.0 = drop all, 1.0 = keep all).
     Sample(f64),
+    /// Assign a named bucket to the entry for per-bucket stats tracking.
+    Bucket(String),
 }
 
 impl<'de> serde::Deserialize<'de> for RawAction {
@@ -61,12 +65,12 @@ impl<'de> serde::Deserialize<'de> for RawAction {
         impl<'de> Visitor<'de> for V {
             type Value = RawAction;
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(f, r#""ignore" or {{hide: [tables]}}"#)
+                write!(f, r#""ignore" or {{hide: [tables]}} or {{sample: 0.x}} or {{bucket: name}}"#)
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<RawAction, E> {
                 match v {
                     "ignore" => Ok(RawAction::Ignore),
-                    other => Err(E::unknown_variant(other, &["ignore", "hide", "sample"])),
+                    other => Err(E::unknown_variant(other, &["ignore", "hide", "sample", "bucket"])),
                 }
             }
             fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<RawAction, M::Error> {
@@ -76,7 +80,8 @@ impl<'de> serde::Deserialize<'de> for RawAction {
                 match key.as_str() {
                     "hide" => Ok(RawAction::Hide(map.next_value()?)),
                     "sample" => Ok(RawAction::Sample(map.next_value()?)),
-                    other => Err(de::Error::unknown_field(other, &["hide", "sample"])),
+                    "bucket" => Ok(RawAction::Bucket(map.next_value()?)),
+                    other => Err(de::Error::unknown_field(other, &["hide", "sample", "bucket"])),
                 }
             }
         }
@@ -97,6 +102,9 @@ pub enum Field {
     Status,
     Bytes,
     ResponseTime,
+    /// The bucket name assigned by a preceding rule in the same pass.
+    /// Valid ops: eq, neq, in, not_in only.
+    Bucket,
 }
 
 #[derive(Debug)]
@@ -134,7 +142,7 @@ pub enum Condition {
         field: Field,
         values: HashSet<String>,
     },
-    // Length ops (string fields only)
+    // Length ops (string fields only, not Bucket)
     LenGt {
         field: Field,
         value: usize,
@@ -227,6 +235,12 @@ impl HideMask {
     }
 }
 
+impl std::ops::BitOrAssign for HideMask {
+    fn bitor_assign(&mut self, other: HideMask) {
+        self.0 |= other.0;
+    }
+}
+
 #[derive(Debug)]
 pub enum Action {
     Ignore,
@@ -234,6 +248,8 @@ pub enum Action {
     Hide(HideMask),
     /// Probabilistically drop matching entries; keep fraction is 0.0–1.0.
     Sample(f64),
+    /// Assign a named bucket to the entry for per-bucket stats tracking.
+    Bucket(Arc<str>),
 }
 
 pub struct Rule {
@@ -241,10 +257,55 @@ pub struct Rule {
     pub mode: MatchMode,
     pub conditions: Vec<Condition>,
     pub action: Action,
+    /// Fires a warning log line the first time a Bucket action is skipped
+    /// because the entry is already bucketed.  AtomicBool gives warn-once
+    /// semantics without a mutex.
+    bucket_shadow_warned: AtomicBool,
+}
+
+/// The per-rule effect recorded when apply() processes a matched rule.
+pub enum MatchEffect {
+    /// Rule dropped the entry (Ignore action or Sample that dropped).
+    Ignored,
+    /// Rule applied a Hide mask.
+    Hidden,
+    /// Rule assigned a bucket to the entry.
+    Bucketed,
+}
+
+/// Accumulated result of evaluating all rules against a single log entry.
+pub struct MatchedRules<'a> {
+    /// The bucket assigned by the first matching Bucket action, if any.
+    pub bucket: Option<&'a Arc<str>>,
+    /// Combined HideMask from all matching Hide actions.
+    pub hide: HideMask,
+    /// True if any Ignore action fired — entry should be dropped.
+    pub ignored: bool,
+    /// True if a Sample action dropped the entry — entry should be dropped.
+    pub sampled: bool,
+    /// Per-rule effects for updating RuleStats counters.
+    pub effects: Vec<(&'a Arc<str>, MatchEffect)>,
 }
 
 /// An opaque black box: put a log entry in, get an optional action back.
 pub struct RuleSet(Vec<Rule>);
+
+// ── Slug helpers ───────────────────────────────────────────────────────────
+
+/// Derive a filesystem-safe slug from a bucket name.
+/// Lowercases, replaces non-alphanumeric chars with `-`, collapses runs.
+pub(crate) fn make_slug(name: &str) -> String {
+    let lowered: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    lowered
+        .split('-')
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
 
 // ── Compilation ────────────────────────────────────────────────────────────
 
@@ -265,6 +326,7 @@ fn parse_field(s: &str) -> Result<Field> {
         "status" => Ok(Field::Status),
         "bytes" => Ok(Field::Bytes),
         "response_time" => Ok(Field::ResponseTime),
+        "bucket" => Ok(Field::Bucket),
         other => bail!("unknown field '{other}'"),
     }
 }
@@ -312,6 +374,31 @@ fn compile_condition(raw: &RawCondition, rule_name: &str) -> Result<Condition> {
     );
     let field = parse_field(&raw.field).with_context(|| ctx.clone())?;
     let op = raw.op.as_str();
+
+    // Bucket field: only eq/neq/in/not_in are valid.
+    if field == Field::Bucket {
+        return match op {
+            "eq" => Ok(Condition::Eq {
+                field,
+                value: yaml_as_str(&raw.value, &ctx)?,
+            }),
+            "neq" => Ok(Condition::Neq {
+                field,
+                value: yaml_as_str(&raw.value, &ctx)?,
+            }),
+            "in" => Ok(Condition::In {
+                field,
+                values: yaml_as_str_list(&raw.value, &ctx)?,
+            }),
+            "not_in" => Ok(Condition::NotIn {
+                field,
+                values: yaml_as_str_list(&raw.value, &ctx)?,
+            }),
+            other => bail!(
+                "{ctx}: field 'bucket' only supports eq/neq/in/not_in, got '{other}'"
+            ),
+        };
+    }
 
     // Numeric-only ops
     if field.is_numeric() {
@@ -449,6 +536,16 @@ fn parse_hide_mask(tables: &[String], rule_name: &str) -> Result<HideMask> {
     Ok(mask)
 }
 
+fn validate_bucket_name(name: &str, rule_name: &str) -> Result<()> {
+    if name.is_empty() {
+        bail!("rule '{rule_name}': bucket name must not be empty");
+    }
+    if name.contains('/') || name.contains('\\') {
+        bail!("rule '{rule_name}': bucket name must not contain '/' or '\\'");
+    }
+    Ok(())
+}
+
 fn compile_rule(raw: &RawRule) -> Result<Rule> {
     let (mode, raw_conditions) = match &raw.when {
         RawWhen::List(c) | RawWhen::All { all: c } => (MatchMode::All, c),
@@ -480,6 +577,10 @@ fn compile_rule(raw: &RawRule) -> Result<Rule> {
             }
             Action::Sample(*rate)
         }
+        RawAction::Bucket(name) => {
+            validate_bucket_name(name, &raw.name)?;
+            Action::Bucket(name.as_str().into())
+        }
     };
 
     Ok(Rule {
@@ -487,6 +588,7 @@ fn compile_rule(raw: &RawRule) -> Result<Rule> {
         mode,
         conditions,
         action,
+        bucket_shadow_warned: AtomicBool::new(false),
     })
 }
 
@@ -497,15 +599,93 @@ impl RuleSet {
             .filter(|r| r.enabled)
             .map(compile_rule)
             .collect::<Result<Vec<_>>>()?;
+
+        // Validate bucket slug uniqueness across all bucket actions.
+        let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for rule in &rules {
+            if let Action::Bucket(name) = &rule.action {
+                let slug = make_slug(name);
+                if slug.is_empty() {
+                    bail!(
+                        "rule '{}': bucket name '{}' produces an empty slug after sanitisation",
+                        rule.name,
+                        name
+                    );
+                }
+                if let Some(other) = seen.get(&slug) {
+                    bail!(
+                        "buckets '{}' and '{}' both produce the slug '{}' — rename one",
+                        name,
+                        other,
+                        slug
+                    );
+                }
+                seen.insert(slug, name.as_ref().to_string());
+            }
+        }
+
         Ok(Self(rules))
     }
 
-    /// Returns the (name, action) from the first matching rule, or `None`.
-    pub fn apply(&self, entry: &LogEntry) -> Option<(&Arc<str>, &Action)> {
-        self.0
-            .iter()
-            .find(|rule| rule.matches(entry))
-            .map(|rule| (&rule.name, &rule.action))
+    /// Evaluate all rules against `entry` with fall-through semantics.
+    /// All matching rules apply in order; `Ignore` and dropped `Sample` short-circuit.
+    /// Returns `None` if no rule matched.
+    pub fn apply(&self, entry: &LogEntry) -> Option<MatchedRules<'_>> {
+        let mut result = MatchedRules {
+            bucket: None,
+            hide: HideMask::NONE,
+            ignored: false,
+            sampled: false,
+            effects: Vec::new(),
+        };
+        let mut current_bucket: Option<&Arc<str>> = None;
+        let mut any_match = false;
+
+        for rule in &self.0 {
+            if rule.matches(entry, current_bucket.map(|b| b.as_ref())) {
+                any_match = true;
+                match &rule.action {
+                    Action::Ignore => {
+                        result.effects.push((&rule.name, MatchEffect::Ignored));
+                        result.ignored = true;
+                        break;
+                    }
+                    Action::Hide(mask) => {
+                        result.effects.push((&rule.name, MatchEffect::Hidden));
+                        result.hide |= *mask;
+                    }
+                    Action::Bucket(name) => {
+                        if current_bucket.is_none() {
+                            current_bucket = Some(name);
+                            result.bucket = Some(name);
+                            result.effects.push((&rule.name, MatchEffect::Bucketed));
+                        } else {
+                            // Warn once per rule per run when a bucket is shadowed.
+                            if !rule.bucket_shadow_warned.swap(true, Ordering::Relaxed) {
+                                crate::logging::log(&format!(
+                                    "warning: rule '{}' bucket '{}' was skipped because \
+                                     entry was already bucketed as '{}' — use \
+                                     'field: bucket, op: neq' to prevent this",
+                                    rule.name,
+                                    name,
+                                    current_bucket.unwrap().as_ref(),
+                                ));
+                            }
+                        }
+                    }
+                    Action::Sample(rate) => {
+                        if rand::thread_rng().gen::<f64>() >= *rate {
+                            result.effects.push((&rule.name, MatchEffect::Ignored));
+                            result.sampled = true;
+                            break;
+                        }
+                        // Kept by sample — no visible effect, continue evaluating.
+                    }
+                }
+            }
+        }
+
+        if any_match { Some(result) } else { None }
     }
 }
 
@@ -521,7 +701,7 @@ impl LogEntry {
             Field::Referer => self.referer(),
             Field::UserAgent => self.user_agent(),
             Field::Proto => self.proto(),
-            Field::Status | Field::Bytes | Field::ResponseTime => "",
+            Field::Status | Field::Bytes | Field::ResponseTime | Field::Bucket => "",
         }
     }
 
@@ -536,24 +716,45 @@ impl LogEntry {
     }
 }
 
+/// Return the string value for a field, taking `current_bucket` for `Field::Bucket`.
+#[inline]
+fn field_str<'e>(entry: &'e LogEntry, field: Field, current_bucket: Option<&'e str>) -> &'e str {
+    if field == Field::Bucket {
+        current_bucket.unwrap_or("")
+    } else {
+        entry.rule_str(field)
+    }
+}
+
 impl Condition {
     #[inline]
-    pub fn matches(&self, entry: &LogEntry) -> bool {
+    pub fn matches(&self, entry: &LogEntry, current_bucket: Option<&str>) -> bool {
         match self {
-            Condition::Eq { field, value } => entry.rule_str(*field) == value.as_str(),
-            Condition::Neq { field, value } => entry.rule_str(*field) != value.as_str(),
+            Condition::Eq { field, value } => {
+                field_str(entry, *field, current_bucket) == value.as_str()
+            }
+            Condition::Neq { field, value } => {
+                field_str(entry, *field, current_bucket) != value.as_str()
+            }
             Condition::StartsWith { field, prefix } => {
-                entry.rule_str(*field).starts_with(prefix.as_str())
+                field_str(entry, *field, current_bucket).starts_with(prefix.as_str())
             }
             Condition::EndsWith { field, suffix } => {
-                entry.rule_str(*field).ends_with(suffix.as_str())
+                field_str(entry, *field, current_bucket).ends_with(suffix.as_str())
             }
             Condition::Contains { field, needle } => {
-                entry.rule_str(*field).contains(needle.as_str())
+                field_str(entry, *field, current_bucket).contains(needle.as_str())
             }
-            Condition::Matches { field, pattern } => pattern.is_match(entry.rule_str(*field)),
-            Condition::In { field, values } => values.contains(entry.rule_str(*field)),
-            Condition::NotIn { field, values } => !values.contains(entry.rule_str(*field)),
+            Condition::Matches { field, pattern } => {
+                pattern.is_match(field_str(entry, *field, current_bucket))
+            }
+            Condition::In { field, values } => {
+                values.contains(field_str(entry, *field, current_bucket))
+            }
+            Condition::NotIn { field, values } => {
+                !values.contains(field_str(entry, *field, current_bucket))
+            }
+            // Length ops are not valid for Field::Bucket (enforced at compile time).
             Condition::LenGt { field, value } => entry.rule_str(*field).len() > *value,
             Condition::LenLt { field, value } => entry.rule_str(*field).len() < *value,
             Condition::LenGte { field, value } => entry.rule_str(*field).len() >= *value,
@@ -596,10 +797,10 @@ impl Condition {
 
 impl Rule {
     #[inline]
-    pub fn matches(&self, entry: &LogEntry) -> bool {
+    pub fn matches(&self, entry: &LogEntry, current_bucket: Option<&str>) -> bool {
         match self.mode {
-            MatchMode::All => self.conditions.iter().all(|c| c.matches(entry)),
-            MatchMode::Any => self.conditions.iter().any(|c| c.matches(entry)),
+            MatchMode::All => self.conditions.iter().all(|c| c.matches(entry, current_bucket)),
+            MatchMode::Any => self.conditions.iter().any(|c| c.matches(entry, current_bucket)),
         }
     }
 }
@@ -648,7 +849,16 @@ mod tests {
     }
 
     fn is_ignored(rs: &RuleSet, entry: &LogEntry) -> bool {
-        matches!(rs.apply(entry), Some((_, Action::Ignore)))
+        rs.apply(entry).map_or(false, |m| m.ignored || m.sampled)
+    }
+
+    fn applied_hide(rs: &RuleSet, entry: &LogEntry) -> Option<HideMask> {
+        rs.apply(entry).map(|m| m.hide)
+    }
+
+    fn applied_bucket(rs: &RuleSet, entry: &LogEntry) -> Option<String> {
+        rs.apply(entry)
+            .and_then(|m| m.bucket.map(|b| b.as_ref().to_string()))
     }
 
     // Log lines covering several field combinations
@@ -922,6 +1132,21 @@ mod tests {
         assert!(err.is_err());
     }
 
+    #[test]
+    fn len_op_on_bucket_field_is_error() {
+        let err = RuleSet::compile(&[RawRule {
+            name: "t".into(),
+            enabled: true,
+            when: RawWhen::List(vec![RawCondition {
+                field: "bucket".into(),
+                op: "len_gt".into(),
+                value: num(5),
+            }]),
+            action: RawAction::Ignore,
+        }]);
+        assert!(err.is_err());
+    }
+
     // ── Match modes ───────────────────────────────────────────────────────────
 
     #[test]
@@ -954,7 +1179,6 @@ mod tests {
 
     #[test]
     fn all_mode_short_circuits_on_first_false() {
-        // First condition false → rule does not match even though second would
         let rs = RuleSet::compile(&[RawRule {
             name: "t".into(),
             enabled: true,
@@ -980,7 +1204,6 @@ mod tests {
 
     #[test]
     fn implicit_list_is_all() {
-        // Bare list behaves identically to all:
         let list_rs = RuleSet::compile(&[RawRule {
             name: "t".into(),
             enabled: true,
@@ -1080,15 +1303,46 @@ mod tests {
         assert!(!is_ignored(&rs, &make_entry(C)));
     }
 
-    // ── First-match-wins / rule ordering ──────────────────────────────────────
+    // ── Fall-through rule matching ─────────────────────────────────────────────
 
     #[test]
-    fn first_matching_rule_wins() {
-        // Both rules match A (status=200, url=/static/foo.js).
-        // The ruleset must return the first rule's name and action, not the second's.
+    fn fall_through_both_hide_rules_accumulate_mask() {
+        // Two hide rules both match A — masks should be ORed together.
         let rs = RuleSet::compile(&[
             RawRule {
-                name: "first".into(),
+                name: "hide-urls".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(200),
+                }]),
+                action: RawAction::Hide(vec!["top_urls".into()]),
+            },
+            RawRule {
+                name: "hide-agents".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Hide(vec!["top_agents".into()]),
+            },
+        ])
+        .unwrap();
+
+        let mask = applied_hide(&rs, &make_entry(A)).expect("should match");
+        assert!(mask.contains(HideMask::TOP_URLS));
+        assert!(mask.contains(HideMask::TOP_AGENTS));
+    }
+
+    #[test]
+    fn fall_through_ignore_short_circuits() {
+        // Ignore fires on rule 1 — rule 2 (Hide) should never apply.
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "ignore-200".into(),
                 enabled: true,
                 when: RawWhen::List(vec![RawCondition {
                     field: "status".into(),
@@ -1098,7 +1352,7 @@ mod tests {
                 action: RawAction::Ignore,
             },
             RawRule {
-                name: "second".into(),
+                name: "hide-static".into(),
                 enabled: true,
                 when: RawWhen::List(vec![RawCondition {
                     field: "url".into(),
@@ -1110,12 +1364,120 @@ mod tests {
         ])
         .unwrap();
 
-        let (name, action) = rs.apply(&make_entry(A)).expect("should match");
-        assert_eq!(name.as_ref(), "first");
-        assert!(
-            matches!(action, Action::Ignore),
-            "first rule's action should win, not second's Hide"
-        );
+        let matched = rs.apply(&make_entry(A)).expect("should match");
+        assert!(matched.ignored);
+        assert_eq!(matched.hide, HideMask::NONE, "hide should not accumulate after ignore");
+    }
+
+    #[test]
+    fn fall_through_bucket_then_hide_by_bucket_condition() {
+        // Rule 1 buckets /static/, Rule 2 hides if bucket == "static".
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "bucket-static".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Bucket("static".into()),
+            },
+            RawRule {
+                name: "hide-bucketed-static".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "bucket".into(),
+                    op: "eq".into(),
+                    value: str_val("static"),
+                }]),
+                action: RawAction::Hide(vec!["top_urls".into()]),
+            },
+        ])
+        .unwrap();
+
+        let matched = rs.apply(&make_entry(A)).expect("should match A: /static/foo.js");
+        assert_eq!(matched.bucket.map(|b| b.as_ref()), Some("static"));
+        assert!(matched.hide.contains(HideMask::TOP_URLS));
+
+        // B has /old/page — should not match either rule.
+        assert!(rs.apply(&make_entry(B)).is_none());
+    }
+
+    #[test]
+    fn fall_through_first_bucket_wins() {
+        // Two bucket rules match A — first one assigns, second is skipped.
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "bucket-first".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(200),
+                }]),
+                action: RawAction::Bucket("first".into()),
+            },
+            RawRule {
+                name: "bucket-second".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Bucket("second".into()),
+            },
+        ])
+        .unwrap();
+
+        let matched = rs.apply(&make_entry(A)).expect("should match");
+        assert_eq!(matched.bucket.map(|b| b.as_ref()), Some("first"));
+    }
+
+    #[test]
+    fn bucket_neq_prevents_double_bucketing() {
+        // Use field: bucket, op: neq to guard against shadowing.
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "bucket-static".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Bucket("static".into()),
+            },
+            RawRule {
+                name: "bucket-ok-responses".into(),
+                enabled: true,
+                when: RawWhen::All {
+                    all: vec![
+                        RawCondition {
+                            field: "status".into(),
+                            op: "eq".into(),
+                            value: num(200),
+                        },
+                        RawCondition {
+                            field: "bucket".into(),
+                            op: "neq".into(),
+                            value: str_val("static"),
+                        },
+                    ],
+                },
+                action: RawAction::Bucket("ok".into()),
+            },
+        ])
+        .unwrap();
+
+        // A: /static/foo.js, status 200 — gets "static", not "ok"
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert_eq!(m.bucket.map(|b| b.as_ref()), Some("static"));
+
+        // RT: /, status 200 — not /static/, gets "ok"
+        let m = rs.apply(&make_entry(RT)).expect("should match");
+        assert_eq!(m.bucket.map(|b| b.as_ref()), Some("ok"));
     }
 
     #[test]
@@ -1127,7 +1489,6 @@ mod tests {
 
     #[test]
     fn no_match_across_multiple_rules() {
-        // Neither rule matches A (status=200, url=/static/foo.js)
         let rs = RuleSet::compile(&[
             RawRule {
                 name: "r1".into(),
@@ -1170,9 +1531,7 @@ mod tests {
         }])
         .expect("compile");
 
-        let Some((_, Action::Hide(mask))) = rs.apply(&make_entry(RT)) else {
-            panic!("expected Hide");
-        };
+        let mask = applied_hide(&rs, &make_entry(RT)).expect("expected Hide");
         assert!(mask.contains(HideMask::TIMING));
         assert!(!mask.contains(HideMask::TOP_URLS));
         assert!(!mask.contains(HideMask::TOP_HOSTS));
@@ -1195,9 +1554,7 @@ mod tests {
         }])
         .expect("compile");
 
-        let Some((_, Action::Hide(mask))) = rs.apply(&make_entry(A)) else {
-            panic!("expected Hide");
-        };
+        let mask = applied_hide(&rs, &make_entry(A)).expect("expected Hide");
         assert!(mask.contains(HideMask::TIMING));
         assert!(mask.contains(HideMask::TOP_URLS));
     }
@@ -1213,8 +1570,6 @@ mod tests {
   action:
     hide: [timing]
 "#;
-        // status 101 doesn't appear in our test entries — just verify it compiles and
-        // that a matching entry would produce the correct mask.
         let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
         let rs = RuleSet::compile(&raw).expect("compile");
         assert!(rs.apply(&make_entry(A)).is_none()); // status 200, not 101
@@ -1239,7 +1594,7 @@ mod tests {
         let entry_a = make_entry(A); // url = /static/foo.js → should match
         let entry_b = make_entry(B); // url = /old/page     → should not match
 
-        assert!(matches!(rs.apply(&entry_a), Some((_, Action::Hide(_)))));
+        assert!(applied_hide(&rs, &entry_a).is_some());
         assert!(rs.apply(&entry_b).is_none());
     }
 
@@ -1257,9 +1612,7 @@ mod tests {
         }])
         .expect("compile");
 
-        let Some((_, Action::Hide(mask))) = rs.apply(&make_entry(A)) else {
-            panic!("expected Hide");
-        };
+        let mask = applied_hide(&rs, &make_entry(A)).expect("expected Hide");
         assert!(mask.contains(HideMask::TOP_URLS));
         assert!(mask.contains(HideMask::TOP_REFS));
         assert!(!mask.contains(HideMask::TOP_HOSTS));
@@ -1284,7 +1637,8 @@ mod tests {
     }
 
     #[test]
-    fn hide_and_ignore_in_same_ruleset_first_match_wins() {
+    fn hide_and_ignore_in_same_ruleset_ignore_wins() {
+        // With fall-through: Hide accumulates, then Ignore fires and drops the entry.
         let rs = RuleSet::compile(&[
             RawRule {
                 name: "hide-static".into(),
@@ -1309,11 +1663,8 @@ mod tests {
         ])
         .expect("compile");
 
-        let entry = make_entry(A); // /static/foo.js, status 200 — both rules match
-        assert!(
-            matches!(rs.apply(&entry), Some((_, Action::Hide(_)))),
-            "hide rule should win"
-        );
+        let matched = rs.apply(&make_entry(A)).expect("should match");
+        assert!(matched.ignored, "entry should be dropped");
     }
 
     // ── Compilation errors ────────────────────────────────────────────────────
@@ -1412,30 +1763,33 @@ mod tests {
     }
 
     #[test]
-    fn sample_action_compiles() {
-        let rs = make_sample_rs(0.1);
-        let entry = make_entry(A);
-        assert!(
-            matches!(rs.apply(&entry), Some((_, Action::Sample(r))) if (r - 0.1).abs() < f64::EPSILON)
-        );
+    fn sample_rate_zero_always_drops() {
+        // rate=0.0 means drop all matching entries
+        let rs = make_sample_rs(0.0);
+        let entry = make_entry(A); // status 200
+        let m = rs.apply(&entry).expect("should match");
+        assert!(m.sampled, "rate=0.0 should always drop");
+    }
+
+    #[test]
+    fn sample_rate_one_always_keeps() {
+        // rate=1.0 means keep all matching entries
+        let rs = make_sample_rs(1.0);
+        let entry = make_entry(A); // status 200
+        let m = rs.apply(&entry).expect("should match");
+        assert!(!m.sampled, "rate=1.0 should never drop");
     }
 
     #[test]
     fn sample_rate_zero_compiles() {
         let rs = make_sample_rs(0.0);
-        assert!(matches!(
-            rs.apply(&make_entry(A)),
-            Some((_, Action::Sample(_)))
-        ));
+        assert!(rs.apply(&make_entry(A)).is_some());
     }
 
     #[test]
     fn sample_rate_one_compiles() {
         let rs = make_sample_rs(1.0);
-        assert!(matches!(
-            rs.apply(&make_entry(A)),
-            Some((_, Action::Sample(_)))
-        ));
+        assert!(rs.apply(&make_entry(A)).is_some());
     }
 
     #[test]
@@ -1484,13 +1838,13 @@ mod tests {
       op: eq
       value: 200
   action:
-    sample: 0.1
+    sample: 0.0
 "#;
+        // rate=0.0 so always drops — deterministic for testing
         let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
         let rs = RuleSet::compile(&raw).expect("compile");
-        assert!(
-            matches!(rs.apply(&make_entry(A)), Some((_, Action::Sample(r))) if (r - 0.1).abs() < f64::EPSILON)
-        );
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert!(m.sampled);
         assert!(rs.apply(&make_entry(B)).is_none()); // status 301
     }
 
@@ -1553,10 +1907,6 @@ mod tests {
         assert!(!is_ignored(&rs, &make_entry(C))); // 404
     }
 
-    // Regression: serde_yaml 0.9 cannot deserialise externally-tagged enum
-    // variants whose payload is a sequence or map — it panics with
-    // "invalid type: map, expected a Value::Tagged enum". The custom
-    // Deserialize impl on RawAction works around this.
     #[test]
     fn yaml_hide_action_deserialises_from_map() {
         let yaml = r#"
@@ -1570,10 +1920,8 @@ mod tests {
 "#;
         let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
         let rs = RuleSet::compile(&raw).expect("compile");
-        // A has referer "https://example.com/" → hide applies
-        assert!(
-            matches!(rs.apply(&make_entry(A)), Some((_, Action::Hide(m))) if m.contains(HideMask::TOP_REFS))
-        );
+        let mask = applied_hide(&rs, &make_entry(A)).expect("expected hide");
+        assert!(mask.contains(HideMask::TOP_REFS));
         assert!(rs.apply(&make_entry(B)).is_none()); // referer is "-"
     }
 
@@ -1589,10 +1937,105 @@ mod tests {
 "#;
         let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
         let rs = RuleSet::compile(&raw).expect("compile");
-        assert!(matches!(
-            rs.apply(&make_entry(B)),
-            Some((_, Action::Ignore))
-        ));
+        let m = rs.apply(&make_entry(B)).expect("should match");
+        assert!(m.ignored);
+    }
+
+    // ── Bucket action ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn yaml_bucket_action_deserialises() {
+        let yaml = r#"
+- name: "Bucket API traffic"
+  when:
+    - field: url
+      op: starts_with
+      value: "/api/"
+  action:
+    bucket: api
+"#;
+        let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
+        let rs = RuleSet::compile(&raw).expect("compile");
+        // None of A/B/C have /api/ prefix — no match.
+        assert!(rs.apply(&make_entry(A)).is_none());
+    }
+
+    #[test]
+    fn bucket_assigned_correctly() {
+        let rs = RuleSet::compile(&[RawRule {
+            name: "bucket-static".into(),
+            enabled: true,
+            when: RawWhen::List(vec![RawCondition {
+                field: "url".into(),
+                op: "starts_with".into(),
+                value: str_val("/static/"),
+            }]),
+            action: RawAction::Bucket("static-assets".into()),
+        }])
+        .expect("compile");
+
+        assert_eq!(
+            applied_bucket(&rs, &make_entry(A)),
+            Some("static-assets".to_string())
+        );
+        assert_eq!(applied_bucket(&rs, &make_entry(B)), None);
+    }
+
+    #[test]
+    fn bucket_empty_name_is_error() {
+        let err = RuleSet::compile(&[RawRule {
+            name: "t".into(),
+            enabled: true,
+            when: RawWhen::List(vec![RawCondition {
+                field: "url".into(),
+                op: "starts_with".into(),
+                value: str_val("/"),
+            }]),
+            action: RawAction::Bucket("".into()),
+        }]);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn bucket_slash_in_name_is_error() {
+        let err = RuleSet::compile(&[RawRule {
+            name: "t".into(),
+            enabled: true,
+            when: RawWhen::List(vec![RawCondition {
+                field: "url".into(),
+                op: "starts_with".into(),
+                value: str_val("/"),
+            }]),
+            action: RawAction::Bucket("foo/bar".into()),
+        }]);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn bucket_slug_collision_is_error() {
+        let err = RuleSet::compile(&[
+            RawRule {
+                name: "r1".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/a/"),
+                }]),
+                action: RawAction::Bucket("API Traffic".into()),
+            },
+            RawRule {
+                name: "r2".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/b/"),
+                }]),
+                action: RawAction::Bucket("api-traffic".into()),
+            },
+        ]);
+        assert!(err.is_err(), "slug collision should be rejected");
     }
 
     // ── enabled flag ─────────────────────────────────────────────────────────
@@ -1644,5 +2087,614 @@ mod tests {
         assert!(raw[0].enabled);
         let rs = RuleSet::compile(&raw).expect("compile");
         assert!(is_ignored(&rs, &make_entry(A)));
+    }
+
+    // ── make_slug ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn slug_basic() {
+        assert_eq!(make_slug("api"), "api");
+        assert_eq!(make_slug("API Traffic"), "api-traffic");
+        assert_eq!(make_slug("api-traffic"), "api-traffic");
+        assert_eq!(make_slug("  leading spaces  "), "leading-spaces");
+        assert_eq!(make_slug("foo__bar"), "foo-bar");
+    }
+
+    #[test]
+    fn slug_uppercase_lowercased() {
+        assert_eq!(make_slug("MyBucket"), "mybucket");
+        assert_eq!(make_slug("UPPER"), "upper");
+    }
+
+    #[test]
+    fn slug_collapses_repeated_separators() {
+        assert_eq!(make_slug("a--b"), "a-b");
+        assert_eq!(make_slug("a___b"), "a-b");
+        assert_eq!(make_slug("a - b"), "a-b");
+    }
+
+    #[test]
+    fn slug_strips_leading_trailing_separators() {
+        assert_eq!(make_slug("--api--"), "api");
+        assert_eq!(make_slug("  api  "), "api");
+    }
+
+    #[test]
+    fn slug_preserves_numbers() {
+        assert_eq!(make_slug("bucket123"), "bucket123");
+        assert_eq!(make_slug("404-errors"), "404-errors");
+    }
+
+    #[test]
+    fn slug_all_special_chars_is_empty() {
+        assert_eq!(make_slug("!!!"), "");
+        assert_eq!(make_slug("---"), "");
+    }
+
+    #[test]
+    fn slug_non_ascii_chars_treated_as_separator() {
+        // Non-ASCII chars (é, ü, etc.) are not ASCII alphanumeric → become '-'.
+        assert_eq!(make_slug("café"), "caf");
+        assert_eq!(make_slug("über"), "ber");
+        assert_eq!(make_slug("naïve"), "na-ve");
+    }
+
+    #[test]
+    fn bucket_backslash_in_name_is_error() {
+        let err = RuleSet::compile(&[RawRule {
+            name: "t".into(),
+            enabled: true,
+            when: RawWhen::List(vec![RawCondition {
+                field: "url".into(),
+                op: "starts_with".into(),
+                value: str_val("/"),
+            }]),
+            action: RawAction::Bucket("foo\\bar".into()),
+        }]);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn bucket_all_special_chars_empty_slug_is_error() {
+        let err = RuleSet::compile(&[RawRule {
+            name: "t".into(),
+            enabled: true,
+            when: RawWhen::List(vec![RawCondition {
+                field: "url".into(),
+                op: "starts_with".into(),
+                value: str_val("/"),
+            }]),
+            action: RawAction::Bucket("!!!".into()),
+        }]);
+        let msg = err.err().expect("should fail").to_string();
+        assert!(msg.contains("empty slug"), "error was: {msg}");
+    }
+
+    #[test]
+    fn yaml_bucket_action_matching_entry() {
+        // Verify the bucket is actually assigned when the entry matches.
+        let yaml = r#"
+- name: "Bucket static assets"
+  when:
+    - field: url
+      op: starts_with
+      value: "/static/"
+  action:
+    bucket: static
+"#;
+        let raw: Vec<RawRule> = serde_yaml::from_str(yaml).expect("parse yaml");
+        let rs = RuleSet::compile(&raw).expect("compile");
+        // A: /static/foo.js → should be bucketed as "static".
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert_eq!(m.bucket.map(|b| b.as_ref()), Some("static"));
+        assert!(!m.ignored);
+        // B: /old/page → no match.
+        assert!(rs.apply(&make_entry(B)).is_none());
+    }
+
+    // ── MatchEffect types ──────────────────────────────────────────────────────
+
+    #[test]
+    fn match_effect_bucketed_type_in_effects() {
+        let rs = RuleSet::compile(&[RawRule {
+            name: "bucket-static".into(),
+            enabled: true,
+            when: RawWhen::List(vec![RawCondition {
+                field: "url".into(),
+                op: "starts_with".into(),
+                value: str_val("/static/"),
+            }]),
+            action: RawAction::Bucket("static".into()),
+        }])
+        .unwrap();
+
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert_eq!(m.effects.len(), 1);
+        assert!(matches!(m.effects[0].1, MatchEffect::Bucketed));
+    }
+
+    #[test]
+    fn match_effect_hidden_type_in_effects() {
+        let rs = RuleSet::compile(&[RawRule {
+            name: "hide-static".into(),
+            enabled: true,
+            when: RawWhen::List(vec![RawCondition {
+                field: "url".into(),
+                op: "starts_with".into(),
+                value: str_val("/static/"),
+            }]),
+            action: RawAction::Hide(vec!["top_urls".into()]),
+        }])
+        .unwrap();
+
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert_eq!(m.effects.len(), 1);
+        assert!(matches!(m.effects[0].1, MatchEffect::Hidden));
+    }
+
+    #[test]
+    fn match_effect_ignored_type_in_effects() {
+        let rs = RuleSet::compile(&[RawRule {
+            name: "ignore-200".into(),
+            enabled: true,
+            when: RawWhen::List(vec![RawCondition {
+                field: "status".into(),
+                op: "eq".into(),
+                value: num(200),
+            }]),
+            action: RawAction::Ignore,
+        }])
+        .unwrap();
+
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert_eq!(m.effects.len(), 1);
+        assert!(matches!(m.effects[0].1, MatchEffect::Ignored));
+    }
+
+    #[test]
+    fn shadowed_bucket_rule_does_not_appear_in_effects() {
+        // Rule 1 buckets as "first". Rule 2 also tries to bucket — it matches but
+        // the bucket is shadowed, so rule 2 must NOT appear in the effects list.
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "bucket-first".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(200),
+                }]),
+                action: RawAction::Bucket("first".into()),
+            },
+            RawRule {
+                name: "bucket-second".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Bucket("second".into()),
+            },
+        ])
+        .unwrap();
+
+        // A matches both rules (status 200 and /static/ prefix).
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert_eq!(m.bucket.map(|b| b.as_ref()), Some("first"), "first bucket wins");
+        let effect_names: Vec<&str> = m.effects.iter().map(|(n, _)| n.as_ref()).collect();
+        assert!(effect_names.contains(&"bucket-first"), "rule 1 must be in effects");
+        assert!(!effect_names.contains(&"bucket-second"), "shadowed rule 2 must not be in effects");
+    }
+
+    // ── Fall-through: Sample + Bucket interaction ──────────────────────────────
+
+    #[test]
+    fn sample_keep_then_bucket_fires() {
+        // Sample at 1.0 always keeps. A bucket rule after it must still assign.
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "sample-keep".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(200),
+                }]),
+                action: RawAction::Sample(1.0),
+            },
+            RawRule {
+                name: "bucket-static".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Bucket("static".into()),
+            },
+        ])
+        .unwrap();
+
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert!(!m.sampled, "rate=1.0 keeps");
+        assert_eq!(m.bucket.map(|b| b.as_ref()), Some("static"), "bucket must fire after kept sample");
+    }
+
+    #[test]
+    fn sample_drop_then_bucket_does_not_fire() {
+        // Sample at 0.0 always drops. Short-circuits before bucket can assign.
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "sample-drop".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(200),
+                }]),
+                action: RawAction::Sample(0.0),
+            },
+            RawRule {
+                name: "bucket-static".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Bucket("static".into()),
+            },
+        ])
+        .unwrap();
+
+        let m = rs.apply(&make_entry(A)).expect("sample matched");
+        assert!(m.sampled, "should be dropped");
+        assert!(m.bucket.is_none(), "bucket must not be assigned after sample drop");
+    }
+
+    // ── Fall-through: Bucket + Ignore interaction ─────────────────────────────
+
+    #[test]
+    fn bucket_assigned_then_ignore_fires_both_take_effect() {
+        // Rule 1 assigns bucket. Rule 2 ignores. Both should take effect: bucket is Some
+        // and ignored is true.
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "bucket-static".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Bucket("static".into()),
+            },
+            RawRule {
+                name: "ignore-200".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(200),
+                }]),
+                action: RawAction::Ignore,
+            },
+        ])
+        .unwrap();
+
+        // A: /static/foo.js, status 200 — both rules match.
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert_eq!(m.bucket.map(|b| b.as_ref()), Some("static"), "bucket must be assigned");
+        assert!(m.ignored, "entry must be ignored");
+
+        // Effects: bucket-static (Bucketed) then ignore-200 (Ignored).
+        assert_eq!(m.effects.len(), 2);
+        assert!(matches!(m.effects[0].1, MatchEffect::Bucketed));
+        assert!(matches!(m.effects[1].1, MatchEffect::Ignored));
+    }
+
+    #[test]
+    fn ignore_before_bucket_short_circuits_bucket_assignment() {
+        // Rule 1 ignores. Rule 2 would bucket. Since Ignore short-circuits, bucket
+        // must not be assigned.
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "ignore-200".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(200),
+                }]),
+                action: RawAction::Ignore,
+            },
+            RawRule {
+                name: "bucket-static".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Bucket("static".into()),
+            },
+        ])
+        .unwrap();
+
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert!(m.ignored);
+        assert!(m.bucket.is_none(), "bucket must not be assigned after Ignore short-circuits");
+    }
+
+    // ── Bucket field conditions ────────────────────────────────────────────────
+
+    #[test]
+    fn bucket_field_in_op_matches_assigned_bucket() {
+        // Rule 1 assigns "static". Rule 2 checks bucket in ["static", "api"].
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "assign".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Bucket("static".into()),
+            },
+            RawRule {
+                name: "check-in".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "bucket".into(),
+                    op: "in".into(),
+                    value: seq(&["static", "api"]),
+                }]),
+                action: RawAction::Ignore,
+            },
+        ])
+        .unwrap();
+
+        // A: /static/foo.js — gets bucket "static", which is in ["static", "api"] → ignored.
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert_eq!(m.bucket.map(|b| b.as_ref()), Some("static"));
+        assert!(m.ignored);
+
+        // B: /old/page — no bucket → "" in ["static", "api"] → false → not ignored.
+        assert!(rs.apply(&make_entry(B)).is_none());
+    }
+
+    #[test]
+    fn bucket_field_not_in_op_excludes_assigned_bucket() {
+        // Rule 1 assigns "static". Rule 2 hides if bucket not_in ["api"].
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "assign".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Bucket("static".into()),
+            },
+            RawRule {
+                name: "check-not-in".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "bucket".into(),
+                    op: "not_in".into(),
+                    value: seq(&["api"]),
+                }]),
+                action: RawAction::Hide(vec!["top_urls".into()]),
+            },
+        ])
+        .unwrap();
+
+        // A: bucket "static", not_in ["api"] → true → hide mask set.
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert!(m.hide.contains(HideMask::TOP_URLS));
+
+        // B: no bucket (""), not_in ["api"] → "" not in ["api"] → true → hide mask set.
+        let m = rs.apply(&make_entry(B)).expect("B: rule 2 matches (empty not in [api])");
+        assert!(m.hide.contains(HideMask::TOP_URLS));
+    }
+
+    #[test]
+    fn bucket_field_eq_with_no_bucket_does_not_match_nonempty_value() {
+        // Rule checks bucket == "static" — without rule 1 assigning a bucket,
+        // field_str returns "" which never equals "static".
+        let rs = RuleSet::compile(&[RawRule {
+            name: "check-bucket".into(),
+            enabled: true,
+            when: RawWhen::List(vec![RawCondition {
+                field: "bucket".into(),
+                op: "eq".into(),
+                value: str_val("static"),
+            }]),
+            action: RawAction::Ignore,
+        }])
+        .unwrap();
+
+        // No bucket assigned to any entry — rule should never match.
+        assert!(rs.apply(&make_entry(A)).is_none());
+        assert!(rs.apply(&make_entry(B)).is_none());
+        assert!(rs.apply(&make_entry(C)).is_none());
+    }
+
+    #[test]
+    fn bucket_field_eq_empty_string_matches_unbucketed_entry() {
+        // Checking field: bucket, op: eq, value: "" — tests that the empty-string
+        // sentinel for "no bucket" is accessible via condition matching.
+        let rs = RuleSet::compile(&[RawRule {
+            name: "check-empty-bucket".into(),
+            enabled: true,
+            when: RawWhen::List(vec![RawCondition {
+                field: "bucket".into(),
+                op: "eq".into(),
+                value: str_val(""),
+            }]),
+            action: RawAction::Ignore,
+        }])
+        .unwrap();
+
+        // Entries have no bucket → "" == "" → matches.
+        assert!(is_ignored(&rs, &make_entry(A)));
+    }
+
+    // ── Effects list ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn effects_list_records_all_matched_rules() {
+        // Three rules all match A: hide, hide, bucket. Effects should list all three.
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "r1-hide".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(200),
+                }]),
+                action: RawAction::Hide(vec!["top_urls".into()]),
+            },
+            RawRule {
+                name: "r2-hide".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Hide(vec!["top_agents".into()]),
+            },
+            RawRule {
+                name: "r3-bucket".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Bucket("static".into()),
+            },
+        ])
+        .unwrap();
+
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        let rule_names: Vec<&str> = m.effects.iter().map(|(n, _)| n.as_ref()).collect();
+        assert!(rule_names.contains(&"r1-hide"), "r1 should appear in effects");
+        assert!(rule_names.contains(&"r2-hide"), "r2 should appear in effects");
+        assert!(rule_names.contains(&"r3-bucket"), "r3 should appear in effects");
+        assert_eq!(m.effects.len(), 3);
+    }
+
+    #[test]
+    fn effects_list_stops_at_ignore() {
+        // Ignore fires on rule 2 — rule 3 (hide) should never run, so effects has 2 entries.
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "r1-hide".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Hide(vec!["top_urls".into()]),
+            },
+            RawRule {
+                name: "r2-ignore".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(200),
+                }]),
+                action: RawAction::Ignore,
+            },
+            RawRule {
+                name: "r3-hide".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/"),
+                }]),
+                action: RawAction::Hide(vec!["top_agents".into()]),
+            },
+        ])
+        .unwrap();
+
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert!(m.ignored);
+        assert_eq!(m.effects.len(), 2, "only r1 and r2 effects, not r3");
+    }
+
+    // ── Sample short-circuits ─────────────────────────────────────────────────
+
+    #[test]
+    fn sample_at_zero_short_circuits_subsequent_rules() {
+        // sample rate=0.0 always drops. A hide rule after it must not run.
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "sample-drop".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(200),
+                }]),
+                action: RawAction::Sample(0.0),
+            },
+            RawRule {
+                name: "hide-after".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Hide(vec!["top_urls".into()]),
+            },
+        ])
+        .unwrap();
+
+        let m = rs.apply(&make_entry(A)).expect("sample matched");
+        assert!(m.sampled, "should be dropped by sample");
+        assert_eq!(m.hide, HideMask::NONE, "hide rule must not have run after sample drop");
+    }
+
+    #[test]
+    fn sample_at_one_continues_evaluating_subsequent_rules() {
+        // sample rate=1.0 always keeps. A hide rule after it must still run.
+        let rs = RuleSet::compile(&[
+            RawRule {
+                name: "sample-keep".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "status".into(),
+                    op: "eq".into(),
+                    value: num(200),
+                }]),
+                action: RawAction::Sample(1.0),
+            },
+            RawRule {
+                name: "hide-after".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: str_val("/static/"),
+                }]),
+                action: RawAction::Hide(vec!["top_urls".into()]),
+            },
+        ])
+        .unwrap();
+
+        let m = rs.apply(&make_entry(A)).expect("should match");
+        assert!(!m.sampled, "rate=1.0 keeps");
+        assert!(m.hide.contains(HideMask::TOP_URLS), "hide rule must run after kept sample");
     }
 }

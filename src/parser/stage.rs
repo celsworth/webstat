@@ -11,13 +11,13 @@ use crate::aggregator::messages::{
 use crate::aggregator::{ProgressState, PARSER_BATCH_SIZE};
 use crate::parser::combined::parse_local_epoch_days;
 use crate::parser::LogFormat;
-use crate::rules::{Action, HideMask, SharedRuleSet};
+use crate::rules::{HideMask, MatchEffect, SharedRuleSet};
 use crate::ua::UaParser;
-use rand::Rng as _;
 
 pub(crate) struct RuleStats {
     pub ignored: u64,
     pub hidden: u64,
+    pub bucketed: u64,
 }
 
 pub(crate) fn run_parser(
@@ -73,53 +73,40 @@ pub(crate) fn run_parser(
                             ps.lines_done.fetch_add(1, Ordering::Relaxed);
                             continue;
                         }
-                        let hidden = if let Some(rs) = &rule_set {
+                        let (hidden, bucket) = if let Some(rs) = &rule_set {
                             match rs.apply(&entry) {
-                                Some((name, Action::Ignore)) => {
-                                    rule_stats
-                                        .entry(Arc::clone(name))
-                                        .or_insert(RuleStats {
-                                            ignored: 0,
-                                            hidden: 0,
-                                        })
-                                        .ignored += 1;
-                                    ps.lines_done.fetch_add(1, Ordering::Relaxed);
-                                    continue;
-                                }
-                                Some((name, Action::Hide(mask))) => {
-                                    rule_stats
-                                        .entry(Arc::clone(name))
-                                        .or_insert(RuleStats {
-                                            ignored: 0,
-                                            hidden: 0,
-                                        })
-                                        .hidden += 1;
-                                    *mask
-                                }
-                                Some((name, Action::Sample(rate))) => {
-                                    if rand::thread_rng().gen::<f64>() >= *rate {
-                                        rule_stats
+                                Some(matched) => {
+                                    for (name, effect) in &matched.effects {
+                                        let stats = rule_stats
                                             .entry(Arc::clone(name))
                                             .or_insert(RuleStats {
                                                 ignored: 0,
                                                 hidden: 0,
-                                            })
-                                            .ignored += 1;
+                                                bucketed: 0,
+                                            });
+                                        match effect {
+                                            MatchEffect::Ignored => stats.ignored += 1,
+                                            MatchEffect::Hidden => stats.hidden += 1,
+                                            MatchEffect::Bucketed => stats.bucketed += 1,
+                                        }
+                                    }
+                                    if matched.ignored || matched.sampled {
                                         ps.lines_done.fetch_add(1, Ordering::Relaxed);
                                         continue;
                                     }
-                                    HideMask::NONE
+                                    (matched.hide, matched.bucket.map(Arc::clone))
                                 }
-                                None => HideMask::NONE,
+                                None => (HideMask::NONE, None),
                             }
                         } else {
-                            HideMask::NONE
+                            (HideMask::NONE, None)
                         };
                         entry_batch.push((
                             ParsedEntry {
                                 entry,
                                 ua_family: ua_result.family,
                                 hidden,
+                                bucket,
                             },
                             line_start,
                         ));

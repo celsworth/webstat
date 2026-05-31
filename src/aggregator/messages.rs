@@ -12,6 +12,8 @@ pub(crate) struct ParsedEntry {
     pub ua_family: Arc<str>,
     /// Which top-N tables to exclude this entry from (zero = not hidden from anything).
     pub hidden: HideMask,
+    /// Bucket assigned by the first matching Bucket rule, if any.
+    pub bucket: Option<Arc<str>>,
 }
 
 pub(crate) enum LoaderMsg {

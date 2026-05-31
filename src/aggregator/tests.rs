@@ -1157,6 +1157,92 @@ mod tests {
     }
 
     #[test]
+    fn rollback_clears_target_month_data_preserves_prior_month() {
+        // Ingest Jan + Feb entries (month boundary triggers finalize_month for Jan).
+        // After rollback to 2026-02: Jan data must survive in all tables, Feb data
+        // must be gone.  This test is a broad table-coverage check for rollback.rs.
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("webstat.db");
+        let log_path = temp.path().join("access.log");
+
+        let lines: Vec<String> = (0..5).map(jan_line).chain((0..5).map(feb_line)).collect();
+        write_plain_file(&log_path, &lines);
+
+        let mut processor = new_processor(&db_path);
+        assert_eq!(processor.process_globs(log_path.to_str().unwrap()).unwrap(), 10);
+
+        // Verify both months have data before rollback.
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            let jan: i64 = conn.query_row(
+                "SELECT COALESCE(SUM(hits),0) FROM hourly_stats WHERE date LIKE '2026-01%'",
+                [], |r| r.get(0),
+            ).unwrap();
+            let feb: i64 = conn.query_row(
+                "SELECT COALESCE(SUM(hits),0) FROM hourly_stats WHERE date LIKE '2026-02%'",
+                [], |r| r.get(0),
+            ).unwrap();
+            assert_eq!(jan, 5, "pre-rollback Jan hits");
+            assert_eq!(feb, 5, "pre-rollback Feb hits");
+        }
+
+        let mut db = Database::open(db_path.to_str().unwrap()).unwrap();
+        crate::rollback::rollback(&mut db, "2026-02", false).unwrap();
+        drop(db);
+
+        let conn = Connection::open(&db_path).unwrap();
+
+        macro_rules! count {
+            ($q:expr) => {
+                conn.query_row($q, [], |r| r.get::<_, i64>(0)).unwrap()
+            };
+        }
+
+        // hourly_stats (date-based)
+        assert_eq!(count!("SELECT COALESCE(SUM(hits),0) FROM hourly_stats WHERE date LIKE '2026-01%'"), 5, "Jan hourly_stats survives");
+        assert_eq!(count!("SELECT COALESCE(SUM(hits),0) FROM hourly_stats WHERE date LIKE '2026-02%'"), 0, "Feb hourly_stats cleared");
+
+        // daily_unique_ips (date-based; Jan rows were consumed by finalize_month, Feb rows deleted)
+        assert_eq!(count!("SELECT COUNT(*) FROM daily_unique_ips WHERE date LIKE '2026-02%'"), 0, "Feb daily_unique_ips cleared");
+
+        // daily_visitor_counts (populated by finalize_month for Jan)
+        assert!(count!("SELECT COUNT(*) FROM daily_visitor_counts WHERE date LIKE '2026-01%'") > 0, "Jan daily_visitor_counts survives");
+        assert_eq!(count!("SELECT COUNT(*) FROM daily_visitor_counts WHERE date LIKE '2026-02%'"), 0, "Feb daily_visitor_counts cleared");
+
+        // top_urls (period-based)
+        assert!(count!("SELECT COUNT(*) FROM top_urls WHERE period = '2026-01'") > 0, "Jan top_urls survives");
+        assert_eq!(count!("SELECT COUNT(*) FROM top_urls WHERE period = '2026-02'"), 0, "Feb top_urls cleared");
+
+        // top_ips (period-based)
+        assert!(count!("SELECT COUNT(*) FROM top_ips WHERE period = '2026-01'") > 0, "Jan top_ips survives");
+        assert_eq!(count!("SELECT COUNT(*) FROM top_ips WHERE period = '2026-02'"), 0, "Feb top_ips cleared");
+
+        // top_agents (period-based)
+        assert!(count!("SELECT COUNT(*) FROM top_agents WHERE period = '2026-01'") > 0, "Jan top_agents survives");
+        assert_eq!(count!("SELECT COUNT(*) FROM top_agents WHERE period = '2026-02'"), 0, "Feb top_agents cleared");
+
+        // status_codes (period-based)
+        assert!(count!("SELECT COUNT(*) FROM status_codes WHERE period = '2026-01'") > 0, "Jan status_codes survives");
+        assert_eq!(count!("SELECT COUNT(*) FROM status_codes WHERE period = '2026-02'"), 0, "Feb status_codes cleared");
+
+        // method_counts (period-based)
+        assert!(count!("SELECT COUNT(*) FROM method_counts WHERE period = '2026-01'") > 0, "Jan method_counts survives");
+        assert_eq!(count!("SELECT COUNT(*) FROM method_counts WHERE period = '2026-02'"), 0, "Feb method_counts cleared");
+
+        // protocol_counts (period-based)
+        assert!(count!("SELECT COUNT(*) FROM protocol_counts WHERE period = '2026-01'") > 0, "Jan protocol_counts survives");
+        assert_eq!(count!("SELECT COUNT(*) FROM protocol_counts WHERE period = '2026-02'"), 0, "Feb protocol_counts cleared");
+
+        // monthly_unique_ips (period-based; Jan was finalized, Feb was not)
+        assert!(count!("SELECT COUNT(*) FROM monthly_unique_ips WHERE period = '2026-01'") > 0, "Jan monthly_unique_ips survives");
+        assert_eq!(count!("SELECT COUNT(*) FROM monthly_unique_ips WHERE period = '2026-02'"), 0, "Feb monthly_unique_ips cleared");
+
+        // unique_visitor_counts: Jan entry preserved, Feb entry gone
+        assert!(count!("SELECT COALESCE(count,0) FROM unique_visitor_counts WHERE period = '2026-01'") > 0, "Jan unique_visitor_counts survives");
+        assert_eq!(count!("SELECT COUNT(*) FROM unique_visitor_counts WHERE period = '2026-02'"), 0, "Feb unique_visitor_counts cleared");
+    }
+
+    #[test]
     fn rollback_does_not_zero_prior_month_unique_visitor_count() {
         // Regression: rolling back to month M and re-ingesting must not zero out
         // unique_visitor_counts for M-1 ("Sites" in the UI).

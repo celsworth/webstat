@@ -13,10 +13,10 @@ use crate::response_time::ResponseTimeHistogram;
 
 use super::{
     count_fmt, flag_emoji, format_bytes, format_ms, format_totals, month_name, percent_str,
-    status_label, DailyAvgMax, DailyRow, DailyRtStat, HourlyAvgMax, HourlyRow, MethodRow,
-    MonthRow, MonthlyRtStat, MonthlySummary, OverallSummary, PeriodMonth, ProtoRow,
-    StatusRow, TopAgentRow, TopCountryRow, TopHostRow, TopRefRow, TopUrlRow, TotalsView,
-    YearAggregateRow, YearlySummary,
+    status_label, BucketIndexRow, BucketPageData, DailyAvgMax, DailyRow, DailyRtStat,
+    HourlyAvgMax, HourlyRow, MethodRow, MonthRow, MonthlyRtStat, MonthlySummary, OverallSummary,
+    PeriodMonth, ProtoRow, StatusRow, TopAgentRow, TopCountryRow, TopHostRow, TopRefRow,
+    TopUrlRow, TotalsView, YearAggregateRow, YearlySummary,
 };
 
 // Returns ("= ?1", period) for monthly (7-char) periods, ("LIKE ?1", "YYYY-%") for yearly.
@@ -174,6 +174,7 @@ pub(super) fn monthly_summary(
     let top_slow_urls = top_urls_avg_rt(conn, &period, top_n, compact_counts)?;
     let daily_rt_stats = daily_rt_stats_for_month(conn, year, month)?;
     let rt_distribution_buckets = monthly_rt_histogram_buckets(conn, &period)?;
+    let buckets = bucket_index_rows(conn, &period, compact_counts)?;
 
     Ok(MonthlySummary {
         period,
@@ -199,6 +200,7 @@ pub(super) fn monthly_summary(
         top_slow_urls,
         daily_rt_stats,
         rt_distribution_buckets,
+        buckets,
     })
 }
 
@@ -232,6 +234,7 @@ pub(super) fn yearly_summary(
     let method_codes = method_codes(conn, &period, compact_counts)?;
     let monthly_rt_stats = monthly_rt_stats_for_year(conn, year)?;
     let top_slow_urls = top_urls_avg_rt(conn, &period, top_n, compact_counts)?;
+    let buckets = bucket_index_rows(conn, &period, compact_counts)?;
 
     Ok(YearlySummary {
         year,
@@ -251,6 +254,7 @@ pub(super) fn yearly_summary(
         totals,
         monthly_rt_stats,
         top_slow_urls,
+        buckets,
     })
 }
 
@@ -1602,6 +1606,824 @@ fn top_urls_avg_rt(
             })
         })
         .collect()
+}
+
+// ── Bucket aggregation ────────────────────────────────────────────────────────
+
+/// Return (hits, bandwidth) totals for a specific bucket+period.
+fn bucket_totals(conn: &Connection, period: &str, bucket: &str) -> Result<(f64, f64)> {
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT COALESCE(SUM(hits),0), COALESCE(SUM(bandwidth),0) \
+         FROM bucket_period_stats WHERE period {op} AND bucket = ?2"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let (h, b) = stmt.query_row(params![param, bucket], |r| {
+        Ok((r.get::<_, i64>(0)? as f64, r.get::<_, i64>(1)? as f64))
+    })?;
+    Ok((h, b))
+}
+
+/// List all buckets active in a period, ordered by hits descending.
+pub(super) fn bucket_index_rows(
+    conn: &Connection,
+    period: &str,
+    compact_counts: bool,
+) -> Result<Vec<BucketIndexRow>> {
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT bucket, SUM(hits), SUM(bandwidth), SUM(rt_sum), SUM(rt_count), MAX(rt_max) \
+         FROM bucket_period_stats WHERE period {op} \
+         GROUP BY bucket ORDER BY SUM(hits) DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(params![param], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)? as u64,
+                r.get::<_, i64>(2)? as u64,
+                r.get::<_, i64>(3)? as u64,
+                r.get::<_, i64>(4)? as u64,
+                r.get::<_, i64>(5)? as u32,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    rows.into_iter()
+        .map(|(bucket, hits, bandwidth, rt_sum, rt_count, _rt_max)| {
+            let avg_rt_ms = if rt_count > 0 {
+                Some(format_ms(rt_sum as f64 / rt_count as f64))
+            } else {
+                None
+            };
+            let unique_sites = bucket_visitor_count(conn, period, &bucket)?;
+            let unique_sites_fmt = unique_sites.map(|v| count_fmt(v, compact_counts));
+            let slug = crate::rules::make_slug(&bucket);
+            Ok(BucketIndexRow {
+                bucket,
+                slug,
+                hits,
+                bandwidth,
+                hits_fmt: count_fmt(hits, compact_counts),
+                hits_exact_fmt: super::number_fmt(hits),
+                bandwidth_fmt: format_bytes(bandwidth),
+                avg_rt_ms,
+                unique_sites,
+                unique_sites_fmt,
+            })
+        })
+        .collect()
+}
+
+/// Build full data for a single bucket sub-page.
+pub(super) fn bucket_page_data(
+    conn: &Connection,
+    period: &str,
+    bucket_name: &str,
+    top_n: usize,
+    compact_counts: bool,
+) -> Result<BucketPageData> {
+    let (hits_total, bw_total) = bucket_totals(conn, period, bucket_name)?;
+    let (op, param) = period_clause(period);
+
+    // Summary stats
+    let (hits, bandwidth, rt_sum, rt_count, _rt_max) = {
+        let sql = format!(
+            "SELECT COALESCE(SUM(hits),0), COALESCE(SUM(bandwidth),0), \
+                    COALESCE(SUM(rt_sum),0), COALESCE(SUM(rt_count),0), COALESCE(MAX(rt_max),0) \
+             FROM bucket_period_stats WHERE period {op} AND bucket = ?2"
+        );
+        conn.prepare(&sql)?.query_row(params![param, bucket_name], |r| {
+            Ok((
+                r.get::<_, i64>(0)? as u64,
+                r.get::<_, i64>(1)? as u64,
+                r.get::<_, i64>(2)? as u64,
+                r.get::<_, i64>(3)? as u64,
+                r.get::<_, i64>(4)? as u32,
+            ))
+        })?
+    };
+    let avg_rt_ms = if rt_count > 0 {
+        Some(format_ms(rt_sum as f64 / rt_count as f64))
+    } else {
+        None
+    };
+    let p95_rt_ms = bucket_p95(conn, period, bucket_name)?;
+
+    // Top URLs
+    let top_urls_hits = bucket_top_urls_sorted(conn, period, bucket_name, top_n, compact_counts, "hits", hits_total, bw_total)?;
+    let top_urls_bandwidth = bucket_top_urls_sorted(conn, period, bucket_name, top_n, compact_counts, "bandwidth", hits_total, bw_total)?;
+    let top_slow_urls = bucket_top_urls_avg_rt(conn, period, bucket_name, top_n, compact_counts, hits_total, bw_total)?;
+
+    // Status codes (percent of bucket hits)
+    let status_codes = bucket_status_rows(conn, period, bucket_name, compact_counts, hits_total)?;
+
+    // Agents (two sorts)
+    let agents_hits = bucket_agent_rows(conn, period, bucket_name, top_n, compact_counts, hits_total, bw_total, "hits")?;
+    let agents_bandwidth = bucket_agent_rows(conn, period, bucket_name, top_n, compact_counts, hits_total, bw_total, "bandwidth")?;
+
+    // Countries
+    let countries_hits = bucket_country_rows(conn, period, bucket_name, top_n, compact_counts, hits_total, bw_total, "hits")?;
+    let countries_bandwidth = bucket_country_rows(conn, period, bucket_name, top_n, compact_counts, hits_total, bw_total, "bandwidth")?;
+
+    // Methods and protocols
+    let method_codes = bucket_method_rows(conn, period, bucket_name, compact_counts, hits_total)?;
+    let proto_codes = bucket_proto_rows(conn, period, bucket_name, compact_counts, hits_total)?;
+
+    // RT distribution
+    let rt_distribution_buckets = bucket_rt_distribution(conn, period, bucket_name)?;
+
+    let is_yearly = period.len() == 4;
+
+    // Daily/hourly activity (monthly pages) or monthly breakdown (yearly pages).
+    let daily = if is_yearly { Vec::new() } else {
+        bucket_daily_stats(conn, period, bucket_name, compact_counts)?
+    };
+    let hourly = if is_yearly { Vec::new() } else {
+        bucket_hourly_distribution(conn, period, bucket_name, compact_counts)?
+    };
+    let monthly_rows = if is_yearly {
+        bucket_monthly_rows(conn, period.parse::<i32>().unwrap_or(0), bucket_name, compact_counts)?
+    } else {
+        Vec::new()
+    };
+    // RT over time: daily stats for monthly pages, monthly stats for yearly pages.
+    let daily_rt_stats = bucket_daily_rt_stats(conn, period, bucket_name)?;
+    let visitors = bucket_visitor_count(conn, period, bucket_name)?;
+
+    let slug = crate::rules::make_slug(bucket_name);
+    Ok(BucketPageData {
+        bucket: bucket_name.to_string(),
+        slug,
+        period: period.to_string(),
+        hits_fmt: count_fmt(hits, compact_counts),
+        hits_exact_fmt: super::number_fmt(hits),
+        bandwidth_fmt: format_bytes(bandwidth),
+        visitors_fmt: visitors.map(|v| count_fmt(v, compact_counts)),
+        visitors_exact_fmt: visitors.map(|v| super::number_fmt(v)),
+        avg_rt_ms,
+        p95_rt_ms,
+        daily,
+        hourly,
+        monthly_rows,
+        daily_rt_stats,
+        top_urls_hits,
+        top_urls_bandwidth,
+        top_slow_urls,
+        status_codes,
+        agents_hits,
+        agents_bandwidth,
+        countries_hits,
+        countries_bandwidth,
+        method_codes,
+        proto_codes,
+        rt_distribution_buckets,
+    })
+}
+
+/// Load and compute p95 RT for a bucket+period from stored histograms.
+/// Monthly: loads one row. Yearly: merges all monthly rows.
+fn bucket_p95(conn: &Connection, period: &str, bucket: &str) -> Result<Option<String>> {
+    let rows: Vec<Vec<u8>> = if period.len() == 7 {
+        // Monthly — single row.
+        let blob: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT data FROM bucket_response_time_histograms WHERE period=?1 AND bucket=?2",
+                params![period, bucket],
+                |r| r.get(0),
+            )
+            .optional()?;
+        blob.into_iter().collect()
+    } else {
+        // Yearly — merge all monthly rows.
+        let like = format!("{period}-%%");
+        let mut stmt = conn.prepare(
+            "SELECT data FROM bucket_response_time_histograms WHERE period LIKE ?1 AND bucket=?2",
+        )?;
+        let blobs = stmt
+            .query_map(params![like, bucket], |r| r.get::<_, Vec<u8>>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        blobs
+    };
+
+    if rows.is_empty() {
+        return Ok(None);
+    }
+    let mut merged = ResponseTimeHistogram::new();
+    for blob in &rows {
+        merged.merge(
+            &ResponseTimeHistogram::deserialize(blob)
+                .context("deserialize bucket rt histogram for p95")?,
+        );
+    }
+    Ok(merged.avg().map(|_| format_ms(merged.percentile(95.0) as f64)))
+}
+
+fn bucket_top_urls_sorted(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+    top_n: usize,
+    compact_counts: bool,
+    order_col: &str,
+    hits_total: f64,
+    bw_total: f64,
+) -> Result<Vec<TopUrlRow>> {
+    if top_n == 0 {
+        return Ok(Vec::new());
+    }
+    let is_monthly = period.len() == 7;
+    let (op, param) = period_clause(period);
+    let sql = if is_monthly {
+        format!(
+            "SELECT url, hits, bandwidth, rt_sum, rt_count, rt_max \
+             FROM bucket_urls WHERE period {op} AND bucket = ?2 \
+             ORDER BY {order_col} DESC LIMIT ?3"
+        )
+    } else {
+        format!(
+            "SELECT url, SUM(hits), SUM(bandwidth), SUM(rt_sum), SUM(rt_count), MAX(rt_max) \
+             FROM bucket_urls WHERE period {op} AND bucket = ?2 \
+             GROUP BY url ORDER BY SUM({order_col}) DESC LIMIT ?3"
+        )
+    };
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(params![param, bucket, top_n as i64], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)? as u64,
+                r.get::<_, i64>(2)? as u64,
+                r.get::<_, i64>(3)? as u64,
+                r.get::<_, i64>(4)? as u64,
+                r.get::<_, i64>(5)? as u32,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    rows.into_iter()
+        .map(|(url, hits, bandwidth, rt_sum, rt_count, rt_max)| {
+            let (avg_ms_fmt, max_ms_fmt) = rt_display(rt_sum, rt_count, rt_max);
+            Ok(TopUrlRow {
+                url,
+                hits,
+                bandwidth,
+                hits_fmt: count_fmt(hits, compact_counts),
+                hits_exact_fmt: super::number_fmt(hits),
+                bandwidth_fmt: format_bytes(bandwidth),
+                pct_fmt: percent_str(hits as f64, hits_total),
+                bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
+                avg_ms_fmt,
+                max_ms_fmt,
+            })
+        })
+        .collect()
+}
+
+fn bucket_top_urls_avg_rt(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+    top_n: usize,
+    compact_counts: bool,
+    hits_total: f64,
+    bw_total: f64,
+) -> Result<Vec<TopUrlRow>> {
+    if top_n == 0 {
+        return Ok(Vec::new());
+    }
+    let is_monthly = period.len() == 7;
+    let (op, param) = period_clause(period);
+    let sql = if is_monthly {
+        format!(
+            "SELECT url, hits, bandwidth, rt_sum, rt_count, rt_max \
+             FROM bucket_urls WHERE period {op} AND bucket = ?2 AND rt_count > 0 \
+             ORDER BY rt_sum * 1.0 / rt_count DESC LIMIT ?3"
+        )
+    } else {
+        format!(
+            "SELECT url, SUM(hits), SUM(bandwidth), SUM(rt_sum), SUM(rt_count), MAX(rt_max) \
+             FROM bucket_urls WHERE period {op} AND bucket = ?2 \
+             GROUP BY url HAVING SUM(rt_count) > 0 \
+             ORDER BY SUM(rt_sum) * 1.0 / SUM(rt_count) DESC LIMIT ?3"
+        )
+    };
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(params![param, bucket, top_n as i64], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)? as u64,
+                r.get::<_, i64>(2)? as u64,
+                r.get::<_, i64>(3)? as u64,
+                r.get::<_, i64>(4)? as u64,
+                r.get::<_, i64>(5)? as u32,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    rows.into_iter()
+        .map(|(url, hits, bandwidth, rt_sum, rt_count, rt_max)| {
+            let (avg_ms_fmt, max_ms_fmt) = rt_display(rt_sum, rt_count, rt_max);
+            Ok(TopUrlRow {
+                url,
+                hits,
+                bandwidth,
+                hits_fmt: count_fmt(hits, compact_counts),
+                hits_exact_fmt: super::number_fmt(hits),
+                bandwidth_fmt: format_bytes(bandwidth),
+                pct_fmt: percent_str(hits as f64, hits_total),
+                bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
+                avg_ms_fmt,
+                max_ms_fmt,
+            })
+        })
+        .collect()
+}
+
+fn bucket_status_rows(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+    compact_counts: bool,
+    hits_total: f64,
+) -> Result<Vec<StatusRow>> {
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT status, SUM(hits) FROM bucket_status_codes \
+         WHERE period {op} AND bucket = ?2 GROUP BY status ORDER BY SUM(hits) DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let raw = stmt
+        .query_map(params![param, bucket], |r| {
+            Ok((r.get::<_, i64>(0)? as u16, r.get::<_, i64>(1)? as u64))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(build_status_rows(raw, compact_counts, hits_total))
+}
+
+fn bucket_agent_rows(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+    top_n: usize,
+    compact_counts: bool,
+    hits_total: f64,
+    bw_total: f64,
+    order_col: &str,
+) -> Result<Vec<TopAgentRow>> {
+    if top_n == 0 {
+        return Ok(Vec::new());
+    }
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT agent_family, SUM(hits), SUM(bandwidth) \
+         FROM bucket_agents WHERE period {op} AND bucket = ?2 \
+         GROUP BY agent_family ORDER BY SUM({order_col}) DESC LIMIT ?3"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let raw = stmt
+        .query_map(params![param, bucket, top_n as i64], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)? as u64,
+                r.get::<_, i64>(2)? as u64,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(build_agent_rows(raw, compact_counts, hits_total, bw_total))
+}
+
+fn bucket_country_rows(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+    top_n: usize,
+    compact_counts: bool,
+    hits_total: f64,
+    bw_total: f64,
+    order_col: &str,
+) -> Result<Vec<TopCountryRow>> {
+    if top_n == 0 {
+        return Ok(Vec::new());
+    }
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT bc.country_code, COALESCE(n.country_name, 'Unknown'), SUM(bc.hits), SUM(bc.bandwidth) \
+         FROM bucket_countries bc \
+         LEFT JOIN countries n ON n.country_code = bc.country_code \
+         WHERE bc.period {op} AND bc.bucket = ?2 \
+         GROUP BY bc.country_code ORDER BY SUM(bc.{order_col}) DESC LIMIT ?3"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let raw = stmt
+        .query_map(params![param, bucket, top_n as i64], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)? as u64,
+                r.get::<_, i64>(3)? as u64,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(build_country_rows(raw, compact_counts, hits_total, bw_total))
+}
+
+fn bucket_method_rows(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+    compact_counts: bool,
+    hits_total: f64,
+) -> Result<Vec<MethodRow>> {
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT method, SUM(hits) FROM bucket_method_counts \
+         WHERE period {op} AND bucket = ?2 GROUP BY method ORDER BY SUM(hits) DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let raw = stmt
+        .query_map(params![param, bucket], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(raw
+        .into_iter()
+        .map(|(method, hits)| MethodRow {
+            method,
+            hits,
+            hits_fmt: count_fmt(hits, compact_counts),
+            hits_exact_fmt: super::number_fmt(hits),
+            pct_fmt: percent_str(hits as f64, hits_total),
+        })
+        .collect())
+}
+
+fn bucket_monthly_rows(
+    conn: &Connection,
+    year: i32,
+    bucket: &str,
+    compact_counts: bool,
+) -> Result<Vec<MonthRow>> {
+    let like = format!("{year}-%");
+
+    // Pre-fetch finalized monthly unique counts.
+    let visitor_cache: std::collections::HashMap<String, u64> = {
+        let mut stmt = conn.prepare(
+            "SELECT period, count FROM bucket_unique_visitor_counts \
+             WHERE bucket=?1 AND period LIKE ?2",
+        )?;
+        let rows = stmt
+            .query_map(params![bucket, like], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter().collect()
+    };
+
+    let mut stmt = conn.prepare(
+        "SELECT substr(date,1,7) AS ym, SUM(hits), SUM(bandwidth) \
+         FROM bucket_hourly_stats \
+         WHERE date LIKE ?1 AND bucket=?2 \
+         GROUP BY ym ORDER BY ym",
+    )?;
+    let rows = stmt
+        .query_map(params![like, bucket], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)? as u64,
+                r.get::<_, i64>(2)? as u64,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    rows.into_iter()
+        .map(|(ym, hits, bandwidth)| {
+            let visitors = if let Some(&v) = visitor_cache.get(&ym) {
+                v
+            } else {
+                // Fall back to summing cached daily counts for the month.
+                let month_like = format!("{ym}-%");
+                conn.query_row(
+                    "SELECT COALESCE(SUM(count),0) FROM bucket_daily_visitor_counts \
+                     WHERE bucket=?1 AND date LIKE ?2",
+                    params![bucket, month_like],
+                    |r| r.get::<_, i64>(0).map(|v| v as u64),
+                )
+                .unwrap_or(0)
+            };
+            let month = ym.split('-').nth(1).and_then(|m| m.parse::<u32>().ok()).unwrap_or(1);
+            Ok(MonthRow {
+                period: ym,
+                month,
+                month_name: month_name(month).to_string(),
+                hits,
+                visits: 0,
+                visitors,
+                bandwidth,
+                hits_fmt: count_fmt(hits, compact_counts),
+                hits_exact_fmt: super::number_fmt(hits),
+                bandwidth_fmt: format_bytes(bandwidth),
+                visits_fmt: String::new(),
+                visits_exact_fmt: String::new(),
+                visitors_fmt: count_fmt(visitors, compact_counts),
+                visitors_exact_fmt: super::number_fmt(visitors),
+            })
+        })
+        .collect()
+}
+
+fn bucket_daily_stats(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+    compact_counts: bool,
+) -> Result<Vec<DailyRow>> {
+    let like = format!("{period}-%");
+
+    // Batch-fetch daily unique IP counts: cached rows for finalized months,
+    // live bitmap count column for the current in-progress month.
+    let visitor_cache: std::collections::HashMap<String, u64> = {
+        let mut stmt = conn.prepare(
+            "SELECT date, SUM(count) \
+             FROM ( \
+               SELECT date, count FROM bucket_daily_visitor_counts WHERE bucket=?1 AND date LIKE ?2 \
+               UNION ALL \
+               SELECT date, SUM(count) AS count FROM bucket_daily_unique_ips \
+                 WHERE bucket=?1 AND date LIKE ?2 GROUP BY date \
+             ) GROUP BY date",
+        )?;
+        let rows = stmt
+            .query_map(params![bucket, like], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter().collect()
+    };
+
+    let mut stmt = conn.prepare(
+        "SELECT date, SUM(hits), SUM(bandwidth) \
+         FROM bucket_hourly_stats \
+         WHERE date LIKE ?1 AND bucket = ?2 \
+         GROUP BY date ORDER BY date",
+    )?;
+    let rows = stmt
+        .query_map(params![like, bucket], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)? as u64,
+                r.get::<_, i64>(2)? as u64,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    rows.into_iter()
+        .map(|(date, hits, bandwidth)| {
+            let is_weekend = NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+                .map(|d| matches!(d.weekday(), Weekday::Sat | Weekday::Sun))
+                .unwrap_or(false);
+            let visitors = visitor_cache.get(&date).copied().unwrap_or(0);
+            Ok(DailyRow {
+                is_weekend,
+                hits,
+                bandwidth,
+                visits: 0,
+                visitors,
+                hits_fmt: count_fmt(hits, compact_counts),
+                hits_exact_fmt: super::number_fmt(hits),
+                bandwidth_fmt: format_bytes(bandwidth),
+                visits_fmt: String::new(),
+                visits_exact_fmt: String::new(),
+                visitors_fmt: count_fmt(visitors, compact_counts),
+                visitors_exact_fmt: super::number_fmt(visitors),
+                date,
+            })
+        })
+        .collect()
+}
+
+/// Total unique IPs for a bucket in a period.
+/// Returns None if no data is available yet.
+fn bucket_visitor_count(conn: &Connection, period: &str, bucket: &str) -> Result<Option<u64>> {
+    // Try cached monthly count first.
+    let cached: Option<u64> = conn
+        .query_row(
+            "SELECT count FROM bucket_unique_visitor_counts WHERE bucket=?1 AND period=?2",
+            params![bucket, period],
+            |r| r.get::<_, i64>(0).map(|v| v as u64),
+        )
+        .optional()?;
+    if let Some(v) = cached {
+        return Ok(Some(v));
+    }
+    // Fall back to summing the count column from live bitmap rows.
+    let like = format!("{period}-%");
+    let live: Option<u64> = conn
+        .query_row(
+            "SELECT SUM(count) FROM bucket_daily_unique_ips WHERE bucket=?1 AND date LIKE ?2",
+            params![bucket, like],
+            |r| Ok(r.get::<_, Option<i64>>(0)?.map(|v| v as u64)),
+        )
+        .optional()?
+        .flatten();
+    Ok(live)
+}
+
+fn bucket_hourly_distribution(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+    compact_counts: bool,
+) -> Result<Vec<HourlyRow>> {
+    let like = format!("{period}-%");
+    let mut stmt = conn.prepare(
+        "SELECT hour, SUM(hits), SUM(bandwidth) \
+         FROM bucket_hourly_stats \
+         WHERE date LIKE ?1 AND bucket = ?2 \
+         GROUP BY hour ORDER BY hour",
+    )?;
+    let rows = stmt
+        .query_map(params![like, bucket], |r| {
+            Ok((
+                r.get::<_, i64>(0)? as u8,
+                r.get::<_, i64>(1)? as u64,
+                r.get::<_, i64>(2)? as u64,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    rows.into_iter()
+        .map(|(hour, hits, bandwidth)| {
+            Ok(HourlyRow {
+                hour,
+                label: format!("{hour:02}:00"),
+                hits,
+                bandwidth,
+                visits: 0,
+                visits_fmt: String::new(),
+                visits_exact_fmt: String::new(),
+                hits_fmt: count_fmt(hits, compact_counts),
+                hits_exact_fmt: super::number_fmt(hits),
+                bandwidth_fmt: format_bytes(bandwidth),
+            })
+        })
+        .collect()
+}
+
+fn bucket_daily_rt_stats(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+) -> Result<Vec<DailyRtStat>> {
+    let like = format!("{period}-%");
+    // Prefer persisted stats (finalized months); fall back to live daily histograms.
+    let persisted: Vec<(String, f64, u32)> = {
+        let mut stmt = conn.prepare(
+            "SELECT date, avg_ms, p95_ms \
+             FROM bucket_daily_response_time_stats \
+             WHERE date LIKE ?1 AND bucket = ?2 ORDER BY date",
+        )?;
+        let rows = stmt
+            .query_map(params![like, bucket], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, f64>(1)?,
+                    r.get::<_, i64>(2)? as u32,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+
+    if !persisted.is_empty() {
+        return Ok(persisted
+            .into_iter()
+            .map(|(date, avg_ms, p95_ms)| DailyRtStat { date, avg_ms, p95_ms })
+            .collect());
+    }
+
+    // Current month — load live histograms.
+    let blobs: Vec<(String, Vec<u8>)> = {
+        let mut stmt = conn.prepare(
+            "SELECT date, data FROM bucket_daily_response_time_histograms \
+             WHERE date LIKE ?1 AND bucket = ?2 ORDER BY date",
+        )?;
+        let rows = stmt
+            .query_map(params![like, bucket], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+
+    blobs
+        .into_iter()
+        .filter_map(|(date, blob)| {
+            let hist = ResponseTimeHistogram::deserialize(&blob).ok()?;
+            let avg_ms = hist.avg()?;
+            let p95_ms = hist.percentile(95.0);
+            Some(Ok(DailyRtStat { date, avg_ms, p95_ms }))
+        })
+        .collect()
+}
+
+/// Compute RT distribution display buckets from stored bucket histograms.
+/// Mirrors `monthly_rt_histogram_buckets` logic.
+fn bucket_rt_distribution(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+) -> Result<Vec<(String, u64)>> {
+    // Load and merge histogram blobs for this bucket+period.
+    let blobs: Vec<Vec<u8>> = if period.len() == 7 {
+        let blob: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT data FROM bucket_response_time_histograms WHERE period=?1 AND bucket=?2",
+                params![period, bucket],
+                |r| r.get(0),
+            )
+            .optional()?;
+        blob.into_iter().collect()
+    } else {
+        let like = format!("{period}-%%");
+        let mut stmt = conn.prepare(
+            "SELECT data FROM bucket_response_time_histograms WHERE period LIKE ?1 AND bucket=?2",
+        )?;
+        let rows = stmt
+            .query_map(params![like, bucket], |r| r.get::<_, Vec<u8>>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+
+    if blobs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut hist = ResponseTimeHistogram::new();
+    for blob in &blobs {
+        hist.merge(
+            &ResponseTimeHistogram::deserialize(blob)
+                .context("deserialize bucket rt histogram for distribution")?,
+        );
+    }
+    if hist.count == 0 {
+        return Ok(Vec::new());
+    }
+
+    const BUCKET_SIZE: usize = 10;
+    const NUM_BUCKETS: usize = 20;
+    let mut out_buckets = vec![0u64; NUM_BUCKETS + 1];
+    for (ms, &count) in hist.buckets.iter().enumerate() {
+        if count == 0 {
+            continue;
+        }
+        let idx = if ms >= NUM_BUCKETS * BUCKET_SIZE { NUM_BUCKETS } else { ms / BUCKET_SIZE };
+        out_buckets[idx] += count as u64;
+    }
+    out_buckets[NUM_BUCKETS] += hist.overflow as u64;
+
+    let mut out: Vec<(String, u64)> = (0..NUM_BUCKETS)
+        .map(|i| {
+            let lo = i * BUCKET_SIZE;
+            let hi = lo + BUCKET_SIZE - 1;
+            (format!("{lo}–{hi}ms"), out_buckets[i])
+        })
+        .collect();
+    out.push((format!("{}ms+", NUM_BUCKETS * BUCKET_SIZE), out_buckets[NUM_BUCKETS]));
+    while out.last().map_or(false, |(_, c)| *c == 0) {
+        out.pop();
+    }
+    Ok(out)
+}
+
+fn bucket_proto_rows(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+    compact_counts: bool,
+    hits_total: f64,
+) -> Result<Vec<ProtoRow>> {
+    let (op, param) = period_clause(period);
+    let sql = format!(
+        "SELECT proto, SUM(hits) FROM bucket_protocol_counts \
+         WHERE period {op} AND bucket = ?2 GROUP BY proto ORDER BY SUM(hits) DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let raw = stmt
+        .query_map(params![param, bucket], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(raw
+        .into_iter()
+        .map(|(proto, hits)| ProtoRow {
+            proto,
+            hits,
+            hits_fmt: count_fmt(hits, compact_counts),
+            hits_exact_fmt: super::number_fmt(hits),
+            pct_fmt: percent_str(hits as f64, hits_total),
+        })
+        .collect())
 }
 
 #[cfg(test)]

@@ -1,0 +1,26 @@
+{% if status_codes | length > 0 %}
+<table class="data-table stats-panel__table">
+  <thead>
+    <tr><th colspan="2" class="stats-panel__heading">Hits by Response Code</th></tr>
+  </thead>
+  <tbody>
+    {% for s in status_codes %}
+    {% if s.status >= 200 and s.status < 300 %}
+      {% set row_class = "status-row--2xx" %}
+    {% elif s.status >= 300 and s.status < 400 %}
+      {% set row_class = "status-row--3xx" %}
+    {% elif s.status >= 400 and s.status < 500 %}
+      {% set row_class = "status-row--4xx" %}
+    {% elif s.status >= 500 and s.status < 600 %}
+      {% set row_class = "status-row--5xx" %}
+    {% else %}
+      {% set row_class = "status-row--other" %}
+    {% endif %}
+    <tr class="{{ row_class }}">
+      <td>{{ s.label }}</td>
+      <td class="num-col" title="{{ s.hits_exact_fmt }}"><span class="pct-value">({{ s.pct_fmt }})</span> {{ s.hits_fmt }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

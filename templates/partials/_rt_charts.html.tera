@@ -1,0 +1,14 @@
+{% if rt_over_time_chart is defined or rt_distribution_chart is defined %}
+<div class="charts-split">
+  {% if rt_over_time_chart is defined %}
+  <div class="chart-box chart-box--bar">
+    <canvas id="rtOverTimeChart"></canvas>
+  </div>
+  {% endif %}
+  {% if rt_distribution_chart is defined %}
+  <div class="chart-box chart-box--bar">
+    <canvas id="rtDistributionChart"></canvas>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
