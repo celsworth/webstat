@@ -489,5 +489,3 @@ impl Processor {
     }
 }
 
-#[cfg(test)]
-mod tests;

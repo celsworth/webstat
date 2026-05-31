@@ -21,6 +21,9 @@ mod run_accumulators;
 mod ua;
 mod update;
 
+#[cfg(test)]
+mod tests;
+
 use anyhow::{bail, Result};
 use clap::{ArgAction, Parser, Subcommand};
 

@@ -1181,6 +1181,3 @@ fn flag_emoji(code: &str) -> String {
     }
     out
 }
-
-#[cfg(test)]
-mod tests;
