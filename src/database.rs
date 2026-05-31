@@ -359,6 +359,10 @@ CREATE TABLE IF NOT EXISTS monthly_response_time_histograms (
     period TEXT NOT NULL PRIMARY KEY,
     data   BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS period_last_updated (
+    period     TEXT    PRIMARY KEY,
+    updated_at INTEGER NOT NULL
+);
 "#;
 
 // ── Database ──────────────────────────────────────────────────────────────────

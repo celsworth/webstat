@@ -2426,5 +2426,17 @@ fn bucket_proto_rows(
         .collect())
 }
 
+/// Returns a map of period → unix timestamp (seconds) for all periods that have
+/// been written since the last run. Used by `generate_html` to skip up-to-date pages.
+pub(super) fn period_last_updated(conn: &Connection) -> Result<HashMap<String, u64>> {
+    let mut stmt = conn.prepare(
+        "SELECT period, updated_at FROM period_last_updated",
+    )?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64)))?
+        .collect::<rusqlite::Result<HashMap<String, u64>>>()?;
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests;

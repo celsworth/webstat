@@ -416,17 +416,66 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
         return Ok(());
     }
 
+    // Load per-period timestamps written by flush/finalize_month. Empty map means
+    // no timestamp data (old DB or first run) — fall back to regenerating everything.
+    let db_timestamps = aggregator::period_last_updated(&conn).unwrap_or_default();
+
     logging::log_debug_at(
         1,
         &format!("Generating reports for {} year(s)", years.len()),
     );
 
     let compact_counts = false;
+    let mut pages_written = 0usize;
+    let mut pages_skipped = 0usize;
+
+    // Returns true when the HTML file exists and its mtime is >= the given unix
+    // timestamp. A missing file, a zero timestamp (unknown), or any I/O error
+    // is treated as stale.
+    let file_is_current = |html_path: &Path, db_ts: u64| -> bool {
+        if db_ts == 0 {
+            return false;
+        }
+        let Ok(meta) = fs::metadata(html_path) else {
+            return false;
+        };
+        let Ok(mtime) = meta.modified() else {
+            return false;
+        };
+        let file_secs = mtime
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        file_secs >= db_ts
+    };
 
     for year in &years {
         let year_start = std::time::Instant::now();
         let mut month_count = 0;
+        // A year page is stale when any of its months is stale (tracked below).
+        let mut year_stale = false;
+        // Effective DB timestamp for the year = max across all its months.
+        let year_db_ts: u64 = months
+            .iter()
+            .filter(|m| m.year == *year)
+            .filter_map(|m| db_timestamps.get(&format!("{}-{:02}", m.year, m.month)))
+            .copied()
+            .max()
+            .unwrap_or(0);
+
         for m in months.iter().filter(|m| m.year == *year) {
+            let period = format!("{}-{:02}", m.year, m.month);
+            let month_db_ts = db_timestamps.get(&period).copied().unwrap_or(0);
+            let month_html = output_dir.join(&period).join("index.html");
+
+            if file_is_current(&month_html, month_db_ts) {
+                logging::log_debug_at(2, &format!("  Skipped {}/index.html (up-to-date)", period));
+                pages_skipped += 1;
+                month_count += 1;
+                continue;
+            }
+
+            year_stale = true;
             let summary = aggregator::monthly_summary(
                 &conn,
                 m.year,
@@ -436,6 +485,7 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
                 cfg.anonymise_ips,
             )?;
             render_month_page(&tera, cfg, output_dir, &summary)?;
+            pages_written += 1;
             for b in &summary.buckets {
                 let data = aggregator::bucket_page_data(
                     &conn,
@@ -445,6 +495,7 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
                     compact_counts,
                 )?;
                 render_bucket_page(&tera, cfg, output_dir, &data)?;
+                pages_written += 1;
                 logging::log_debug_at(
                     2,
                     &format!("  Wrote {}/buckets/{}/index.html", summary.period, b.slug),
@@ -454,39 +505,58 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
             month_count += 1;
         }
 
-        let yearly =
-            aggregator::yearly_summary(&conn, *year, cfg.top_n, compact_counts, cfg.anonymise_ips)?;
-        render_year_page(&tera, cfg, output_dir, &yearly)?;
-        for b in &yearly.buckets {
-            let data = aggregator::bucket_page_data(
+        let year_html = output_dir.join(year.to_string()).join("index.html");
+        if year_stale || !file_is_current(&year_html, year_db_ts) {
+            let yearly = aggregator::yearly_summary(
                 &conn,
-                &year.to_string(),
-                &b.bucket,
+                *year,
                 cfg.top_n,
                 compact_counts,
+                cfg.anonymise_ips,
             )?;
-            render_bucket_page(&tera, cfg, output_dir, &data)?;
+            render_year_page(&tera, cfg, output_dir, &yearly)?;
+            pages_written += 1;
+            for b in &yearly.buckets {
+                let data = aggregator::bucket_page_data(
+                    &conn,
+                    &year.to_string(),
+                    &b.bucket,
+                    cfg.top_n,
+                    compact_counts,
+                )?;
+                render_bucket_page(&tera, cfg, output_dir, &data)?;
+                pages_written += 1;
+            }
+            logging::log_debug_at(
+                1,
+                &format!(
+                    "  Wrote {}/index.html ({} months, {:.2}s)",
+                    year,
+                    month_count,
+                    year_start.elapsed().as_secs_f64()
+                ),
+            );
+        } else {
+            logging::log_debug_at(
+                1,
+                &format!("  Skipped {}/index.html (up-to-date)", year),
+            );
+            pages_skipped += 1;
         }
-        logging::log_debug_at(
-            1,
-            &format!(
-                "  Wrote {}/index.html ({} months, {:.2}s)",
-                year,
-                month_count,
-                year_start.elapsed().as_secs_f64()
-            ),
-        );
     }
 
     let overall = aggregator::overall_summary(&conn, cfg.top_n, compact_counts)?;
-
     render_index_page(&tera, cfg, output_dir, &years, &months, &overall)?;
+    pages_written += 1;
     logging::log_debug_at(1, &format!("Wrote {}/index.html", cfg.output_dir));
 
     let total_elapsed = gen_start.elapsed().as_secs_f64();
     logging::log_debug_at(
         1,
-        &format!("Report generation complete ({:.2}s)", total_elapsed),
+        &format!(
+            "Report generation complete ({} written, {} skipped, {:.2}s)",
+            pages_written, pages_skipped, total_elapsed
+        ),
     );
     Ok(())
 }

@@ -642,6 +642,22 @@ impl Database {
             )?;
         }
 
+        // Only update the period timestamp when actual log data was written.
+        // Parse-state-only flushes (e.g. already-completed files carried as
+        // pending_parse_states) must not advance the timestamp or stale-page
+        // detection would incorrectly mark up-to-date HTML pages as stale.
+        if !data.period.is_empty() && !data.hourly.is_empty() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            tx.execute(
+                "INSERT INTO period_last_updated (period, updated_at) VALUES (?1, ?2)
+                 ON CONFLICT (period) DO UPDATE SET updated_at = excluded.updated_at",
+                params![data.period, now],
+            )?;
+        }
+
         tx.commit().context("Failed to commit flush transaction")?;
         Ok(())
     }
@@ -1003,6 +1019,18 @@ impl Database {
              ON CONFLICT (key) DO UPDATE SET value = '1'",
             params![format!("month_{}_complete", period)],
         )?;
+
+        {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            tx.execute(
+                "INSERT INTO period_last_updated (period, updated_at) VALUES (?1, ?2)
+                 ON CONFLICT (period) DO UPDATE SET updated_at = excluded.updated_at",
+                params![period, now],
+            )?;
+        }
 
         tx.commit()
             .context("Failed to commit finalize_month transaction")?;

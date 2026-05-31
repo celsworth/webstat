@@ -12,6 +12,7 @@ use rusqlite::Connection;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
+use std::time::SystemTime;
 use tempfile::TempDir;
 
 fn sample_line_at(
@@ -321,4 +322,340 @@ fn style_overrides_appear_in_html_output() {
         .expect("read index");
     assert!(index_html.contains("--accent: #facade"), "accent CSS var missing");
     assert!(index_html.contains("#abcdef"), "bar_hits chart colour missing");
+}
+
+fn mtime(path: &Path) -> SystemTime {
+    fs::metadata(path)
+        .expect("metadata")
+        .modified()
+        .expect("mtime")
+}
+
+// ── Staleness / incremental generation tests ──────────────────────────────────
+
+#[test]
+fn period_last_updated_populated_after_processing() {
+    let temp = TempDir::new().expect("tempdir");
+    let log_path = temp.path().join("access.log");
+    write_plain_file(
+        &log_path,
+        &[
+            sample_line_at(
+                "10.0.0.1",
+                "09/May/2026:08:00:00 +0000",
+                "/a",
+                200,
+                100,
+                "-",
+                "Mozilla/5.0",
+            ),
+            sample_line_at(
+                "10.0.0.1",
+                "10/Jun/2026:08:00:00 +0000",
+                "/b",
+                200,
+                200,
+                "-",
+                "Mozilla/5.0",
+            ),
+        ],
+    );
+    let cfg = Config {
+        site_name: "Timestamps".to_string(),
+        log_glob: log_path.to_string_lossy().into_owned(),
+        ..base_cfg(&temp)
+    };
+
+    process_logs(&cfg);
+
+    let conn = Connection::open(&cfg.database).expect("open db");
+    let rows: Vec<(String, i64)> = {
+        let mut stmt = conn
+            .prepare("SELECT period, updated_at FROM period_last_updated ORDER BY period")
+            .expect("prepare");
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("query")
+            .map(|r| r.expect("row"))
+            .collect()
+    };
+
+    // The in-progress month (2026-06) is written by flush; 2026-05 is finalized.
+    let periods: Vec<&str> = rows.iter().map(|(p, _)| p.as_str()).collect();
+    assert!(
+        periods.contains(&"2026-05"),
+        "finalized month must have a timestamp"
+    );
+    assert!(
+        periods.contains(&"2026-06"),
+        "in-progress month must have a timestamp"
+    );
+    for (_, ts) in &rows {
+        assert!(*ts > 0, "timestamp must be positive");
+    }
+}
+
+#[test]
+fn second_generate_skips_current_pages() {
+    let temp = TempDir::new().expect("tempdir");
+    let log_path = temp.path().join("access.log");
+    write_plain_file(
+        &log_path,
+        &[sample_line_at(
+            "10.0.0.1",
+            "09/May/2026:08:00:00 +0000",
+            "/index.html",
+            200,
+            42,
+            "-",
+            "Mozilla/5.0",
+        )],
+    );
+    let cfg = Config {
+        site_name: "Skip Test".to_string(),
+        log_glob: log_path.to_string_lossy().into_owned(),
+        ..base_cfg(&temp)
+    };
+
+    process_logs(&cfg);
+    generate_html(&cfg).expect("first generate");
+
+    let output = temp.path().join("output");
+    let month_html = output.join("2026-05").join("index.html");
+    let year_html = output.join("2026").join("index.html");
+    let index_html = output.join("index.html");
+
+    let month_mtime_before = mtime(&month_html);
+    let year_mtime_before = mtime(&year_html);
+    // index is always regenerated, so we don't check it
+
+    // Sleep long enough for the filesystem clock to advance if any file is rewritten.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    generate_html(&cfg).expect("second generate");
+
+    assert_eq!(
+        mtime(&month_html),
+        month_mtime_before,
+        "month page must not be rewritten on second generate"
+    );
+    assert_eq!(
+        mtime(&year_html),
+        year_mtime_before,
+        "year page must not be rewritten on second generate"
+    );
+    // index.html always regenerates
+    assert!(index_html.exists());
+}
+
+#[test]
+fn new_month_data_triggers_regeneration_of_that_month_only() {
+    let temp = TempDir::new().expect("tempdir");
+    let log_a = temp.path().join("access-a.log");
+    let log_b = temp.path().join("access-b.log");
+
+    write_plain_file(
+        &log_a,
+        &[sample_line_at(
+            "10.0.0.1",
+            "09/May/2026:08:00:00 +0000",
+            "/may",
+            200,
+            10,
+            "-",
+            "Mozilla/5.0",
+        )],
+    );
+    write_plain_file(&log_b, &[]);
+
+    let cfg_a = Config {
+        site_name: "Incremental".to_string(),
+        log_glob: log_a.to_string_lossy().into_owned(),
+        ..base_cfg(&temp)
+    };
+
+    process_logs(&cfg_a);
+    generate_html(&cfg_a).expect("first generate");
+
+    let output = temp.path().join("output");
+    let may_html = output.join("2026-05").join("index.html");
+    let year_html = output.join("2026").join("index.html");
+    let may_mtime_before = mtime(&may_html);
+    let year_mtime_before = mtime(&year_html);
+
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Add a new log file for June.
+    write_plain_file(
+        &log_b,
+        &[sample_line_at(
+            "10.0.0.2",
+            "15/Jun/2026:10:00:00 +0000",
+            "/jun",
+            200,
+            20,
+            "-",
+            "Mozilla/5.0",
+        )],
+    );
+    let cfg_b = Config {
+        site_name: "Incremental".to_string(),
+        log_glob: format!(
+            "{},{}",
+            log_a.to_str().unwrap(),
+            log_b.to_str().unwrap()
+        ),
+        ..base_cfg(&temp)
+    };
+
+    process_logs(&cfg_b);
+    generate_html(&cfg_b).expect("second generate");
+
+    // May page: not touched by second run, must be skipped (mtime unchanged).
+    assert_eq!(
+        mtime(&may_html),
+        may_mtime_before,
+        "may page must not be rewritten when only june data was added"
+    );
+
+    // June page: must now exist (new).
+    let jun_html = output.join("2026-06").join("index.html");
+    assert!(jun_html.exists(), "june page must be generated");
+
+    // Year page: stale because june is new, must be rewritten.
+    assert!(
+        mtime(&year_html) > year_mtime_before,
+        "year page must be rewritten when a new month is added"
+    );
+}
+
+#[test]
+fn deleted_page_regenerated_even_if_db_timestamp_old() {
+    let temp = TempDir::new().expect("tempdir");
+    let log_path = temp.path().join("access.log");
+    write_plain_file(
+        &log_path,
+        &[sample_line_at(
+            "10.0.0.1",
+            "09/May/2026:08:00:00 +0000",
+            "/index.html",
+            200,
+            42,
+            "-",
+            "Mozilla/5.0",
+        )],
+    );
+    let cfg = Config {
+        site_name: "Delete Test".to_string(),
+        log_glob: log_path.to_string_lossy().into_owned(),
+        ..base_cfg(&temp)
+    };
+
+    process_logs(&cfg);
+    generate_html(&cfg).expect("first generate");
+
+    let output = temp.path().join("output");
+    let month_html = output.join("2026-05").join("index.html");
+    assert!(month_html.exists());
+
+    // Delete the month page.
+    fs::remove_file(&month_html).expect("remove month html");
+    assert!(!month_html.exists());
+
+    // Second generate — no new data, but page is missing.
+    generate_html(&cfg).expect("second generate after delete");
+    assert!(
+        month_html.exists(),
+        "deleted month page must be regenerated even with no new data"
+    );
+}
+
+#[test]
+fn year_page_skipped_when_all_months_current() {
+    let temp = TempDir::new().expect("tempdir");
+    let log_path = temp.path().join("access.log");
+    write_plain_file(
+        &log_path,
+        &[sample_line_at(
+            "10.0.0.1",
+            "09/May/2026:08:00:00 +0000",
+            "/index.html",
+            200,
+            42,
+            "-",
+            "Mozilla/5.0",
+        )],
+    );
+    let cfg = Config {
+        site_name: "Year Skip".to_string(),
+        log_glob: log_path.to_string_lossy().into_owned(),
+        ..base_cfg(&temp)
+    };
+
+    process_logs(&cfg);
+    generate_html(&cfg).expect("first generate");
+
+    let year_html = temp.path().join("output").join("2026").join("index.html");
+    let year_mtime_before = mtime(&year_html);
+
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    generate_html(&cfg).expect("second generate");
+
+    assert_eq!(
+        mtime(&year_html),
+        year_mtime_before,
+        "year page must not be rewritten when all months are current"
+    );
+}
+
+#[test]
+fn generate_without_db_timestamps_regenerates_everything() {
+    let temp = TempDir::new().expect("tempdir");
+    let log_path = temp.path().join("access.log");
+    write_plain_file(
+        &log_path,
+        &[sample_line_at(
+            "10.0.0.1",
+            "09/May/2026:08:00:00 +0000",
+            "/index.html",
+            200,
+            42,
+            "-",
+            "Mozilla/5.0",
+        )],
+    );
+    let cfg = Config {
+        site_name: "No Timestamps".to_string(),
+        log_glob: log_path.to_string_lossy().into_owned(),
+        ..base_cfg(&temp)
+    };
+
+    process_logs(&cfg);
+    generate_html(&cfg).expect("first generate");
+
+    let output = temp.path().join("output");
+    let month_html = output.join("2026-05").join("index.html");
+    let year_html = output.join("2026").join("index.html");
+
+    // Wipe period_last_updated to simulate an old DB with no timestamps.
+    let conn = Connection::open(&cfg.database).expect("open db");
+    conn.execute("DELETE FROM period_last_updated", [])
+        .expect("delete timestamps");
+    drop(conn);
+
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    let month_mtime_before = mtime(&month_html);
+    let year_mtime_before = mtime(&year_html);
+
+    generate_html(&cfg).expect("second generate without timestamps");
+
+    assert!(
+        mtime(&month_html) > month_mtime_before,
+        "month page must be regenerated when DB timestamps are absent"
+    );
+    assert!(
+        mtime(&year_html) > year_mtime_before,
+        "year page must be regenerated when DB timestamps are absent"
+    );
 }
