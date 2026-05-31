@@ -1,4 +1,4 @@
-// Visit state persistence: load and save VisitStateUpdate rows for per-IP session tracking.
+// Visit state persistence: load VisitStateUpdate rows for per-IP session tracking.
 
 use super::*;
 
