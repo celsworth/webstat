@@ -46,6 +46,9 @@ cargo test
 - **`src/reports.rs`** — HTML report generation via Tera templates
 - **`src/reports/aggregator.rs`** — report-specific SQL summarisation
 - **`src/reports/charts.rs`** — Chart.js dataset assembly
+- **`src/tests/mod.rs`** — integration test suite root; unit tests stay co-located with their modules
+- **`src/tests/pipeline.rs`** — integration tests: file resume, gzip fingerprinting, month boundaries, rules, rollback + re-ingest cycles
+- **`src/tests/reports.rs`** — integration tests: end-to-end report generation via `process_globs` + `generate_html`
 
 ## Pipeline
 
@@ -89,6 +92,18 @@ Unique IP counting is exact, not approximate, and uses roaring bitmaps for compa
 **`finalize_year`**: sums cardinalities of the accumulated `yearly_unique_ips` rows (each group is disjoint, no further ORing needed), writes the yearly count, deletes yearly rows.
 
 **Reports**: daily counts use `SUM(count)` SQL. Monthly/yearly counts read from `unique_visitor_counts` cache; for in-progress periods (no cache entry), fall back to loading and ORing blobs in Rust.
+
+**Per-bucket unique IP counting** mirrors the global flow. `BucketAcc.daily_ips` accumulates per-date bitmaps in-memory; `flush` writes them to `bucket_daily_unique_ips`. `finalize_month` ORs those daily rows into a monthly bitmap, writes the monthly count to `bucket_unique_visitor_counts` (period `YYYY-MM`), saves the monthly bitmap snapshot to `bucket_monthly_unique_ips`, then ORs all of that year's monthly snapshots and writes a yearly entry to `bucket_unique_visitor_counts` (period `YYYY`). Daily rows are deleted after finalize. Rollback deletes affected `bucket_monthly_unique_ips` rows and calls `recompute_yearly_bucket_counts` to rebuild yearly entries from surviving monthly snapshots.
+
+## Bucket system
+
+Rules with `action: bucket: <name>` tag matching entries into named buckets (e.g. `api`, `static`). Bucketing is additive — an entry that falls into a bucket is still counted in all global tables. Multiple rules can match; the first `bucket` action wins.
+
+**In-memory accumulation**: `RunAccumulators.bucket_stats` maps bucket name to `BucketAcc`, which carries hits, bandwidth, RT histogram, status codes, agents, countries, method/protocol counts, URL stats, and per-date `IpBitmaps`.
+
+**SQLite tables**: `bucket_period_stats` (hits/bw/RT per period), `bucket_urls`, `bucket_status_codes`, `bucket_agents`, `bucket_countries`, `bucket_method_counts`, `bucket_protocol_counts`, `bucket_response_time_histograms`, `bucket_daily_unique_ips`, `bucket_daily_visitor_counts`, `bucket_monthly_unique_ips`, `bucket_unique_visitor_counts`, `bucket_hourly_stats`, `bucket_daily_response_time_histograms`, `bucket_daily_response_time_stats`.
+
+**Reports**: each period page shows a Buckets summary table (hits, bandwidth, avg RT, unique sites). Each bucket has its own sub-page (`buckets/<slug>/index.html`) with the same breakdown panels as a period page. Unique sites on yearly pages are served from the `bucket_unique_visitor_counts` yearly cache written by `finalize_month`.
 
 ## Top-N tables
 

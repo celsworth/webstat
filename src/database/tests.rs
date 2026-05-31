@@ -1,4 +1,4 @@
-// Integration tests for database schema, state persistence, and writer correctness.
+// Unit tests for database schema, flush correctness, finalize_month, and writer behaviour.
 
 use super::*;
 
