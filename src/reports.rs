@@ -55,6 +55,8 @@ struct PeriodMonth {
     month: u32,
     month_name: String,
     period: String,
+    /// URL-path segment for this month: "YYYY/MM"
+    path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -123,6 +125,8 @@ pub(crate) struct HourlyRow {
 pub(crate) struct MonthRow {
     period: String,
     month: u32,
+    /// Zero-padded two-digit month: "01"–"12"
+    month_str: String,
     month_name: String,
     hits: u64,
     visits: u64,
@@ -466,7 +470,10 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
         for m in months.iter().filter(|m| m.year == *year) {
             let period = format!("{}-{:02}", m.year, m.month);
             let month_db_ts = db_timestamps.get(&period).copied().unwrap_or(0);
-            let month_html = output_dir.join(&period).join("index.html");
+            let month_html = output_dir
+                .join(&period[..4])
+                .join(&period[5..])
+                .join("index.html");
 
             if file_is_current(&month_html, month_db_ts) {
                 logging::log_debug_at(2, &format!("  Skipped {}/index.html (up-to-date)", period));
@@ -528,7 +535,7 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
                 pages_written += 1;
             }
             logging::log_debug_at(
-                1,
+                2,
                 &format!(
                     "  Wrote {}/index.html ({} months, {:.2}s)",
                     year,
@@ -538,7 +545,7 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
             );
         } else {
             logging::log_debug_at(
-                1,
+                2,
                 &format!("  Skipped {}/index.html (up-to-date)", year),
             );
             pages_skipped += 1;
@@ -548,7 +555,7 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
     let overall = aggregator::overall_summary(&conn, cfg.top_n, compact_counts)?;
     render_index_page(&tera, cfg, output_dir, &years, &months, &overall)?;
     pages_written += 1;
-    logging::log_debug_at(1, &format!("Wrote {}/index.html", cfg.output_dir));
+    logging::log_debug_at(2, &format!("Wrote {}/index.html", cfg.output_dir));
 
     let total_elapsed = gen_start.elapsed().as_secs_f64();
     logging::log_debug_at(
@@ -816,9 +823,10 @@ fn render_month_page(
     }
 
     let page = tera.render("month.html.tera", &page_ctx)?;
-    let html = render_layout(tera, cfg, "../assets", "../index.html", page)?;
+    let html = render_layout(tera, cfg, "../../assets", "../../index.html", page)?;
 
-    let month_dir = output_dir.join(&summary.period);
+    let month_str = &summary.period[5..]; // "YYYY-MM" → "MM"
+    let month_dir = output_dir.join(summary.year.to_string()).join(month_str);
     fs::create_dir_all(&month_dir)?;
     fs::write(month_dir.join("index.html"), html)?;
     Ok(())
@@ -916,14 +924,26 @@ fn render_bucket_page(
 
     let template = if is_yearly { "bucket_year.html.tera" } else { "bucket_month.html.tera" };
     let page = tera.render(template, &ctx)?;
-    // Bucket pages live at {output}/{period}/buckets/{slug}/index.html
-    // → assets at ../../../assets, overview at ../../../index.html
-    let html = render_layout(tera, cfg, "../../../assets", "../../../index.html", page)?;
 
-    let bucket_dir = output_dir
-        .join(&data.period)
-        .join("buckets")
-        .join(&data.slug);
+    let (assets, overview, bucket_dir) = if is_yearly {
+        // output/YYYY/buckets/slug/index.html  →  3 levels up
+        let dir = output_dir
+            .join(&data.period)
+            .join("buckets")
+            .join(&data.slug);
+        ("../../../assets", "../../../index.html", dir)
+    } else {
+        // output/YYYY/MM/buckets/slug/index.html  →  4 levels up
+        let month_str = &data.period[5..]; // "YYYY-MM" → "MM"
+        let dir = output_dir
+            .join(&data.period[..4])
+            .join(month_str)
+            .join("buckets")
+            .join(&data.slug);
+        ("../../../../assets", "../../../../index.html", dir)
+    };
+
+    let html = render_layout(tera, cfg, assets, overview, page)?;
     fs::create_dir_all(&bucket_dir)?;
     fs::write(bucket_dir.join("index.html"), html)?;
     Ok(())

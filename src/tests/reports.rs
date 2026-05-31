@@ -176,9 +176,9 @@ fn report_generation_e2e_multi_year_outputs_pages_and_filters_referrers() {
     assert!(output_dir.join("2024").join("index.html").exists());
     assert!(output_dir.join("2025").join("index.html").exists());
     assert!(output_dir.join("2026").join("index.html").exists());
-    assert!(output_dir.join("2024-12").join("index.html").exists());
-    assert!(output_dir.join("2025-07").join("index.html").exists());
-    assert!(output_dir.join("2026-05").join("index.html").exists());
+    assert!(output_dir.join("2024").join("12").join("index.html").exists());
+    assert!(output_dir.join("2025").join("07").join("index.html").exists());
+    assert!(output_dir.join("2026").join("05").join("index.html").exists());
     assert!(output_dir.join("assets").join("style.css").exists());
     assert!(output_dir.join("assets").join("chart.min.js").exists());
     assert!(output_dir.join("assets").join("app.js").exists());
@@ -186,10 +186,10 @@ fn report_generation_e2e_multi_year_outputs_pages_and_filters_referrers() {
     let index_html = fs::read_to_string(output_dir.join("index.html")).expect("read index");
     assert!(index_html.contains("E2E Site - Web Statistics"));
     assert!(index_html.contains("2024/index.html"));
-    assert!(index_html.contains("2026-05/index.html"));
+    assert!(index_html.contains("2026/05/index.html"));
 
     let may_html =
-        fs::read_to_string(output_dir.join("2026-05").join("index.html")).expect("read may");
+        fs::read_to_string(output_dir.join("2026").join("05").join("index.html")).expect("read may");
     assert!(may_html.contains("Sites per Day"));
     assert!(may_html.contains("Bandwidth per Day"));
     assert!(may_html.contains("status-row--5xx"));
@@ -282,7 +282,7 @@ fn report_generation_e2e_second_run_without_changes_is_idempotent() {
     assert_eq!(hits_after, hits_before);
 
     let may_html =
-        fs::read_to_string(output_dir.join("2026-05").join("index.html")).expect("read may");
+        fs::read_to_string(output_dir.join("2026").join("05").join("index.html")).expect("read may");
     assert!(may_html.contains("Code 503 - Service Unavailable"));
     assert!(may_html.contains("/boom"));
 }
@@ -420,7 +420,7 @@ fn second_generate_skips_current_pages() {
     generate_html(&cfg).expect("first generate");
 
     let output = temp.path().join("output");
-    let month_html = output.join("2026-05").join("index.html");
+    let month_html = output.join("2026").join("05").join("index.html");
     let year_html = output.join("2026").join("index.html");
     let index_html = output.join("index.html");
 
@@ -477,7 +477,7 @@ fn new_month_data_triggers_regeneration_of_that_month_only() {
     generate_html(&cfg_a).expect("first generate");
 
     let output = temp.path().join("output");
-    let may_html = output.join("2026-05").join("index.html");
+    let may_html = output.join("2026").join("05").join("index.html");
     let year_html = output.join("2026").join("index.html");
     let may_mtime_before = mtime(&may_html);
     let year_mtime_before = mtime(&year_html);
@@ -518,7 +518,7 @@ fn new_month_data_triggers_regeneration_of_that_month_only() {
     );
 
     // June page: must now exist (new).
-    let jun_html = output.join("2026-06").join("index.html");
+    let jun_html = output.join("2026").join("06").join("index.html");
     assert!(jun_html.exists(), "june page must be generated");
 
     // Year page: stale because june is new, must be rewritten.
@@ -554,7 +554,7 @@ fn deleted_page_regenerated_even_if_db_timestamp_old() {
     generate_html(&cfg).expect("first generate");
 
     let output = temp.path().join("output");
-    let month_html = output.join("2026-05").join("index.html");
+    let month_html = output.join("2026").join("05").join("index.html");
     assert!(month_html.exists());
 
     // Delete the month page.
@@ -634,7 +634,7 @@ fn generate_without_db_timestamps_regenerates_everything() {
     generate_html(&cfg).expect("first generate");
 
     let output = temp.path().join("output");
-    let month_html = output.join("2026-05").join("index.html");
+    let month_html = output.join("2026").join("05").join("index.html");
     let year_html = output.join("2026").join("index.html");
 
     // Wipe period_last_updated to simulate an old DB with no timestamps.

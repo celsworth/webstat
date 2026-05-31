@@ -1,5 +1,6 @@
 <div class="page-header">
   <h2>{{ month_name }} {{ year }}</h2>
+  <p class="page-subtitle"><a href="../index.html">&larr; {{ year }}</a></p>
 </div>
 
 <section class="summary-bar">

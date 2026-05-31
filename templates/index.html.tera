@@ -83,7 +83,7 @@
   <div class="month-grid">
     {% for m in months %}
     {% if m.year == yr.year %}
-    <a href="{{ m.period }}/index.html" class="month-card">
+    <a href="{{ m.path }}/index.html" class="month-card">
       <span class="month-name">{{ m.month_name }}</span>
       <span class="month-year">{{ yr.year }}</span>
     </a>

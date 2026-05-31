@@ -1,5 +1,6 @@
 <div class="page-header">
   <h2>{{ year }} - Annual Summary</h2>
+  <p class="page-subtitle"><a href="../index.html">&larr; Overview</a></p>
 </div>
 
 <section class="summary-bar">
@@ -83,7 +84,7 @@
       {% for row in monthly_rows %}
       <tr>
         <td>
-            <a href="../{{ row.period }}/index.html">
+            <a href="{{ row.month_str }}/index.html">
               {{ row.month_name }}
             </a>
         </td>

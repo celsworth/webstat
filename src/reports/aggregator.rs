@@ -127,6 +127,7 @@ pub(super) fn available_months(conn: &Connection) -> Result<Vec<PeriodMonth>> {
         };
 
         out.push(PeriodMonth {
+            path: format!("{year}/{month:02}"),
             year,
             month,
             month_name: month_name(month).to_string(),
@@ -520,6 +521,7 @@ fn monthly_rows(conn: &Connection, year: i32, compact_counts: bool) -> Result<Ve
         out.push(MonthRow {
             period: ym,
             month,
+            month_str: format!("{month:02}"),
             month_name: month_name(month).to_string(),
             hits,
             visits,
@@ -2117,6 +2119,7 @@ fn bucket_monthly_rows(
             Ok(MonthRow {
                 period: ym,
                 month,
+                month_str: format!("{month:02}"),
                 month_name: month_name(month).to_string(),
                 hits,
                 visits: 0,
