@@ -57,6 +57,10 @@
 </section>
 {% endif %}
 
+<section class="charts-col">
+  {% include "templates/partials/_heatmap.html.tera" %}
+</section>
+
 {% for yr in yearly_rows | reverse %}
 <section class="year-section">
   <h2>

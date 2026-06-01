@@ -414,6 +414,7 @@ struct OverallSummary {
     status_codes: Vec<StatusRow>,
     totals: TotalsView,
     all_time_available: bool,
+    weekday_hour: Vec<WeekdayRow>,
 }
 
 pub fn generate_html(cfg: &Config) -> Result<()> {
@@ -673,6 +674,10 @@ fn render_index_page(
         "agents_chart",
         &charts::agents_chart(&overall.top_agents_hits)?,
     );
+
+    if !overall.weekday_hour.is_empty() {
+        page_ctx.insert("weekday_hour", &overall.weekday_hour);
+    }
 
     let page = tera.render("index.html.tera", &page_ctx)?;
     let html = render_layout(tera, cfg, "assets", "index.html", page)?;

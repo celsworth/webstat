@@ -202,7 +202,7 @@ fn report_generation_e2e_multi_year_outputs_pages_and_filters_referrers() {
     // All May hits land on Sat 9 May 2026: two at 08:00, one at 09:00 (the
     // Googlebot 09:10 hit is bot-filtered). The busiest cell (Sat 08:00) must
     // render at full intensity, and the grid must carry all seven weekday rows.
-    assert!(may_html.contains("Traffic by Day &amp; Hour"));
+    assert!(may_html.contains("Hits by Day &amp; Hour"));
     assert!(may_html.contains(r#"class="heatmap""#));
     for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] {
         assert!(
@@ -223,11 +223,12 @@ fn report_generation_e2e_multi_year_outputs_pages_and_filters_referrers() {
     // The yearly page carries the same heatmap (aggregated across the year).
     let year_html =
         fs::read_to_string(output_dir.join("2026").join("index.html")).expect("read 2026");
-    assert!(year_html.contains("Traffic by Day &amp; Hour"));
+    assert!(year_html.contains("Hits by Day &amp; Hour"));
     assert_eq!(year_html.matches("heatmap__cell").count(), 168);
 
-    // The all-time overview page has no per-period heatmap.
-    assert!(!index_html.contains("heatmap__cell"));
+    // The all-time overview page also carries the full-width heatmap.
+    assert!(index_html.contains("Hits by Day &amp; Hour"));
+    assert_eq!(index_html.matches("heatmap__cell").count(), 168);
 
     let conn = Connection::open(&cfg.database).expect("open db for checks");
     let total_hits: i64 = conn

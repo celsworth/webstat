@@ -278,6 +278,8 @@ pub(super) fn overall_summary(
 
     let status_codes = status_codes_all(conn, compact_counts)?;
     let all_time_available = all_time_visitor_count(conn)? > 0;
+    // All-time heatmap: "%" matches every date in hourly_stats.
+    let weekday_hour = weekday_hour_grid(conn, "%", compact_counts)?;
 
     Ok(OverallSummary {
         yearly_rows,
@@ -288,6 +290,7 @@ pub(super) fn overall_summary(
         status_codes,
         totals,
         all_time_available,
+        weekday_hour,
     })
 }
 
