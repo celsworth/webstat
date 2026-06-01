@@ -240,6 +240,17 @@ impl Processor {
             }
         }
 
+        // ── Top erroring URLs (4xx / 5xx) ──────────────────────────────────────
+        if self.enable_top_error_urls && status >= 400 && !hide.contains(HideMask::TOP_URLS) {
+            let e = run_acc.error_urls.entry(clean_path.to_string()).or_default();
+            if status_class == 4 {
+                e.c4xx += 1;
+            } else {
+                e.c5xx += 1;
+            }
+            e.bandwidth += bytes;
+        }
+
         if self.enable_top_sites && !hide.contains(HideMask::TOP_HOSTS) {
             if let Some(e) = run_acc.hosts.get_mut(ip) {
                 e.0 += 1;

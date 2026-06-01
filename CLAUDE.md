@@ -113,6 +113,8 @@ Top-N tables (`top_urls`, `top_ips`, `top_referrers`, `top_agents`) accumulate e
 
 Each table can be individually disabled via config flags (`enable_top_urls`, `enable_top_sites`, `enable_top_refs`, `enable_top_agents`).
 
+**Top erroring URLs** (`top_error_urls`, gated by `enable_top_error_urls`): a separate per-period table keyed by URL, splitting 4xx/5xx counts (`c4xx`, `c5xx`) plus `bandwidth`. Populated in `aggregate_entry` for any `status >= 400` (respecting `HideMask::TOP_URLS`). Uses the same bounding machinery as `top_urls`: `pretrim_error_urls` at month-end, a `cull_period` block (by `c4xx+c5xx` and `bandwidth`), and a `finalize_month` trim to the union of top-N by `c4xx+c5xx` and top-N by `bandwidth`. Reports render a sortable panel (4xx / 5xx / Bandwidth tabs) on the month, year, and overview pages.
+
 ## Resume / dedup system
 
 Each processed file gets a `ParseState` row in SQLite keyed by path and inode. Fields tracked: compressed size, uncompressed size, compressed/uncompressed head fingerprints, offsets, mtime, completed flag.

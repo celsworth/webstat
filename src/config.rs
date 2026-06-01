@@ -68,6 +68,8 @@ pub struct Config {
     pub enable_top_refs: bool,
     /// Enable Top Agents tracking.
     pub enable_top_agents: bool,
+    /// Enable Top Erroring URLs tracking (4xx/5xx).
+    pub enable_top_error_urls: bool,
     pub bot_filter: bool,
     /// Periodic database checkpoint interval in minutes.
     /// `0` disables checkpointing (flush only at end of run/file).
@@ -95,6 +97,7 @@ impl Default for Config {
             enable_top_sites: true,
             enable_top_refs: true,
             enable_top_agents: true,
+            enable_top_error_urls: true,
             bot_filter: true,
             checkpoint_minutes: 0,
             anonymise_ips: false,

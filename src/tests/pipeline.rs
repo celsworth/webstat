@@ -89,6 +89,7 @@ fn base_processor_config() -> ProcessorConfig {
         enable_top_sites: true,
         enable_top_refs: true,
         enable_top_agents: true,
+        enable_top_error_urls: true,
         rule_set: None,
     }
 }
@@ -888,6 +889,117 @@ fn enable_top_agents_false_skips_agents_table() {
         )
         .expect("count agent rows");
     assert_eq!(agent_rows, 0, "enable_top_agents=false must not populate top_agents");
+}
+
+// ── Top erroring URLs (4xx/5xx) ───────────────────────────────────────────
+
+#[test]
+fn error_urls_record_4xx_5xx_split_and_exclude_2xx() {
+    let temp = TempDir::new().expect("tempdir");
+    let db_path = temp.path().join("webstat.db");
+    let log_path = temp.path().join("errors.log");
+
+    // /missing: two 404s; /broken: one 500; /ok: one 200 (must not appear).
+    let lines = vec![
+        r#"1.2.3.1 - - [10/May/2026:14:00:01 +0000] "GET /missing HTTP/1.1" 404 100 "-" "-""#.to_string(),
+        r#"1.2.3.2 - - [10/May/2026:14:00:02 +0000] "GET /missing HTTP/1.1" 404 100 "-" "-""#.to_string(),
+        r#"1.2.3.3 - - [10/May/2026:14:00:03 +0000] "GET /broken HTTP/1.1" 500 50 "-" "-""#.to_string(),
+        r#"1.2.3.4 - - [10/May/2026:14:00:04 +0000] "GET /ok HTTP/1.1" 200 999 "-" "-""#.to_string(),
+    ];
+    write_plain_file(&log_path, &lines);
+
+    let mut processor = new_processor(&db_path);
+    processor
+        .process_globs(log_path.to_str().unwrap())
+        .expect("process");
+
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let (c4, c5, bw): (i64, i64, i64) = conn
+        .query_row(
+            "SELECT c4xx, c5xx, bandwidth FROM top_error_urls WHERE period='2026-05' AND url='/missing'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("missing row");
+    assert_eq!((c4, c5, bw), (2, 0, 200));
+
+    let (c4, c5): (i64, i64) = conn
+        .query_row(
+            "SELECT c4xx, c5xx FROM top_error_urls WHERE period='2026-05' AND url='/broken'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("broken row");
+    assert_eq!((c4, c5), (0, 1));
+
+    let ok_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM top_error_urls WHERE period='2026-05' AND url='/ok'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("ok count");
+    assert_eq!(ok_rows, 0, "2xx-only URLs must not appear in top_error_urls");
+}
+
+#[test]
+fn error_urls_trimmed_at_month_finalize_keeps_heaviest() {
+    let temp = TempDir::new().expect("tempdir");
+    let db_path = temp.path().join("webstat.db");
+    let log_path = temp.path().join("scan.log");
+
+    // Scanner storm: 60 distinct 404 URLs hit once each, plus /hot hit 50 times.
+    // top_n defaults to 20, so finalize_month trims to the union of top-20 by
+    // (c4xx+c5xx) and top-20 by bandwidth — well under 60 rows — but /hot must survive.
+    let mut lines = Vec::new();
+    for i in 0..60 {
+        lines.push(format!(
+            r#"9.9.9.{} - - [10/May/2026:14:00:00 +0000] "GET /scan{} HTTP/1.1" 404 10 "-" "-""#,
+            i % 250,
+            i
+        ));
+    }
+    for i in 0..50 {
+        lines.push(format!(
+            r#"9.9.8.{} - - [10/May/2026:14:01:00 +0000] "GET /hot HTTP/1.1" 404 10 "-" "-""#,
+            i % 250
+        ));
+    }
+    // A June entry forces finalize_month for 2026-05 on the next run start.
+    lines.push(
+        r#"8.8.8.8 - - [01/Jun/2026:00:00:00 +0000] "GET /june HTTP/1.1" 200 10 "-" "-""#.to_string(),
+    );
+    write_plain_file(&log_path, &lines);
+
+    let mut processor = new_processor(&db_path);
+    processor
+        .process_globs(log_path.to_str().unwrap())
+        .expect("process");
+
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let hot: i64 = conn
+        .query_row(
+            "SELECT c4xx FROM top_error_urls WHERE period='2026-05' AND url='/hot'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("hot row");
+    assert_eq!(hot, 50, "heaviest erroring URL must survive the trim");
+
+    let rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM top_error_urls WHERE period='2026-05'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("row count");
+    assert!(
+        rows <= 40,
+        "finalize_month must trim toward top_n (got {rows} rows)"
+    );
+    assert!(rows < 61, "trim must drop scanner noise");
 }
 
 #[test]

@@ -172,6 +172,19 @@ pub(crate) struct TopUrlRow {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub(crate) struct ErrorUrlRow {
+    url: String,
+    c4xx: u64,
+    c5xx: u64,
+    bandwidth: u64,
+    c4xx_fmt: String,
+    c4xx_exact_fmt: String,
+    c5xx_fmt: String,
+    c5xx_exact_fmt: String,
+    bandwidth_fmt: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct TopHostRow {
     host: String,
     country_code: String,
@@ -346,6 +359,9 @@ struct MonthlySummary {
     totals: TotalsView,
     top_urls_hits: Vec<TopUrlRow>,
     top_urls_bandwidth: Vec<TopUrlRow>,
+    top_error_urls_4xx: Vec<ErrorUrlRow>,
+    top_error_urls_5xx: Vec<ErrorUrlRow>,
+    top_error_urls_bandwidth: Vec<ErrorUrlRow>,
     top_ips_hits: Vec<TopHostRow>,
     top_ips_bandwidth: Vec<TopHostRow>,
     top_refs: Vec<TopRefRow>,
@@ -371,6 +387,9 @@ struct YearlySummary {
     monthly_rows: Vec<MonthRow>,
     top_urls_hits: Vec<TopUrlRow>,
     top_urls_bandwidth: Vec<TopUrlRow>,
+    top_error_urls_4xx: Vec<ErrorUrlRow>,
+    top_error_urls_5xx: Vec<ErrorUrlRow>,
+    top_error_urls_bandwidth: Vec<ErrorUrlRow>,
     top_ips_hits: Vec<TopHostRow>,
     top_ips_bandwidth: Vec<TopHostRow>,
     top_refs: Vec<TopRefRow>,
@@ -407,6 +426,9 @@ struct YearAggregateRow {
 #[derive(Debug, Clone)]
 struct OverallSummary {
     yearly_rows: Vec<YearAggregateRow>,
+    top_error_urls_4xx: Vec<ErrorUrlRow>,
+    top_error_urls_5xx: Vec<ErrorUrlRow>,
+    top_error_urls_bandwidth: Vec<ErrorUrlRow>,
     top_agents_hits: Vec<TopAgentRow>,
     top_agents_bandwidth: Vec<TopAgentRow>,
     top_countries_hits: Vec<TopCountryRow>,
@@ -654,6 +676,9 @@ fn render_index_page(
     page_ctx.insert("top_countries_bandwidth", &overall.top_countries_bandwidth);
     page_ctx.insert("top_agents_hits", &overall.top_agents_hits);
     page_ctx.insert("top_agents_bandwidth", &overall.top_agents_bandwidth);
+    page_ctx.insert("top_error_urls_4xx", &overall.top_error_urls_4xx);
+    page_ctx.insert("top_error_urls_5xx", &overall.top_error_urls_5xx);
+    page_ctx.insert("top_error_urls_bandwidth", &overall.top_error_urls_bandwidth);
     page_ctx.insert(
         "overview_chart",
         &charts::yearly_overview_chart(&overall.yearly_rows, &cfg.style)?,
@@ -696,6 +721,9 @@ fn render_year_page(
     page_ctx.insert("monthly_rows", &summary.monthly_rows);
     page_ctx.insert("top_urls_hits", &summary.top_urls_hits);
     page_ctx.insert("top_urls_bandwidth", &summary.top_urls_bandwidth);
+    page_ctx.insert("top_error_urls_4xx", &summary.top_error_urls_4xx);
+    page_ctx.insert("top_error_urls_5xx", &summary.top_error_urls_5xx);
+    page_ctx.insert("top_error_urls_bandwidth", &summary.top_error_urls_bandwidth);
     page_ctx.insert("top_ips_hits", &summary.top_ips_hits);
     page_ctx.insert("top_ips_bandwidth", &summary.top_ips_bandwidth);
     page_ctx.insert("top_refs", &summary.top_refs);
@@ -775,6 +803,9 @@ fn render_month_page(
     page_ctx.insert("totals", &summary.totals);
     page_ctx.insert("top_urls_hits", &summary.top_urls_hits);
     page_ctx.insert("top_urls_bandwidth", &summary.top_urls_bandwidth);
+    page_ctx.insert("top_error_urls_4xx", &summary.top_error_urls_4xx);
+    page_ctx.insert("top_error_urls_5xx", &summary.top_error_urls_5xx);
+    page_ctx.insert("top_error_urls_bandwidth", &summary.top_error_urls_bandwidth);
     page_ctx.insert("top_ips_hits", &summary.top_ips_hits);
     page_ctx.insert("top_ips_bandwidth", &summary.top_ips_bandwidth);
     page_ctx.insert("top_refs", &summary.top_refs);

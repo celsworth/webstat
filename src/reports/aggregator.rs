@@ -13,7 +13,7 @@ use crate::response_time::ResponseTimeHistogram;
 
 use super::{
     count_fmt, flag_emoji, format_bytes, format_ms, format_totals, month_name, percent_str,
-    status_label, BucketIndexRow, BucketPageData, DailyAvgMax, DailyRow, DailyRtStat,
+    status_label, BucketIndexRow, BucketPageData, DailyAvgMax, DailyRow, DailyRtStat, ErrorUrlRow,
     HeatCell, HourlyAvgMax, HourlyRow, MethodRow, MonthRow, MonthlyRtStat, MonthlySummary,
     OverallSummary, PeriodMonth, ProtoRow, StatusRow, TopAgentRow, TopCountryRow, TopHostRow,
     TopRefRow, TopUrlRow, TotalsView, WeekdayRow, YearAggregateRow, YearlySummary,
@@ -158,6 +158,10 @@ pub(super) fn monthly_summary(
 
     let top_urls_hits = top_urls_hits(conn, &period, top_n, compact_counts)?;
     let top_urls_bandwidth = top_urls_bandwidth(conn, &period, top_n, compact_counts)?;
+    let top_error_urls_4xx = top_error_urls_sorted(conn, &period, top_n, compact_counts, "4xx")?;
+    let top_error_urls_5xx = top_error_urls_sorted(conn, &period, top_n, compact_counts, "5xx")?;
+    let top_error_urls_bandwidth =
+        top_error_urls_sorted(conn, &period, top_n, compact_counts, "bandwidth")?;
     let top_ips_hits = top_ips_hits(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_ips_bandwidth = top_ips_bandwidth(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_refs = top_refs(conn, &period, top_n, compact_counts)?;
@@ -187,6 +191,9 @@ pub(super) fn monthly_summary(
         totals,
         top_urls_hits,
         top_urls_bandwidth,
+        top_error_urls_4xx,
+        top_error_urls_5xx,
+        top_error_urls_bandwidth,
         top_ips_hits,
         top_ips_bandwidth,
         top_refs,
@@ -224,6 +231,10 @@ pub(super) fn yearly_summary(
 
     let top_urls_hits = top_urls_hits(conn, &period, top_n, compact_counts)?;
     let top_urls_bandwidth = top_urls_bandwidth(conn, &period, top_n, compact_counts)?;
+    let top_error_urls_4xx = top_error_urls_sorted(conn, &period, top_n, compact_counts, "4xx")?;
+    let top_error_urls_5xx = top_error_urls_sorted(conn, &period, top_n, compact_counts, "5xx")?;
+    let top_error_urls_bandwidth =
+        top_error_urls_sorted(conn, &period, top_n, compact_counts, "bandwidth")?;
     let top_ips_hits = top_ips_hits(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_ips_bandwidth = top_ips_bandwidth(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_refs = top_refs(conn, &period, top_n, compact_counts)?;
@@ -245,6 +256,9 @@ pub(super) fn yearly_summary(
         monthly_rows,
         top_urls_hits,
         top_urls_bandwidth,
+        top_error_urls_4xx,
+        top_error_urls_5xx,
+        top_error_urls_bandwidth,
         top_ips_hits,
         top_ips_bandwidth,
         top_refs,
@@ -271,6 +285,10 @@ pub(super) fn overall_summary(
     let yearly_rows = yearly_rows(conn, compact_counts)?;
     let totals = overall_totals(conn, compact_counts)?;
 
+    let top_error_urls_4xx = top_error_urls_all(conn, top_n, compact_counts, "4xx")?;
+    let top_error_urls_5xx = top_error_urls_all(conn, top_n, compact_counts, "5xx")?;
+    let top_error_urls_bandwidth = top_error_urls_all(conn, top_n, compact_counts, "bandwidth")?;
+
     let top_agents_hits = top_agents_sorted_all(conn, top_n, compact_counts, "hits")?;
     let top_agents_bandwidth = top_agents_sorted_all(conn, top_n, compact_counts, "bandwidth")?;
     let top_countries_hits = top_countries_sorted_all(conn, top_n, compact_counts, "hits")?;
@@ -283,6 +301,9 @@ pub(super) fn overall_summary(
 
     Ok(OverallSummary {
         yearly_rows,
+        top_error_urls_4xx,
+        top_error_urls_5xx,
+        top_error_urls_bandwidth,
         top_agents_hits,
         top_agents_bandwidth,
         top_countries_hits,
@@ -933,6 +954,110 @@ fn rt_display(rt_sum: u64, rt_count: u64, rt_max: u32) -> (Option<String>, Optio
         Some(format_ms(rt_sum as f64 / rt_count as f64)),
         Some(format_ms(rt_max as f64)),
     )
+}
+
+/// SQL ORDER BY expression for the error-URL sort `key`, for monthly (raw rows)
+/// or yearly/all-time (summed) queries.
+fn error_url_order(key: &str, summed: bool) -> &'static str {
+    match (key, summed) {
+        ("4xx", false) => "c4xx",
+        ("5xx", false) => "c5xx",
+        ("bandwidth", false) => "bandwidth",
+        ("4xx", true) => "SUM(c4xx)",
+        ("5xx", true) => "SUM(c5xx)",
+        _ => "SUM(bandwidth)",
+    }
+}
+
+fn build_error_url_rows(
+    raw: Vec<(String, u64, u64, u64)>,
+    compact_counts: bool,
+) -> Vec<ErrorUrlRow> {
+    raw.into_iter()
+        .map(|(url, c4xx, c5xx, bandwidth)| ErrorUrlRow {
+            url,
+            c4xx,
+            c5xx,
+            bandwidth,
+            c4xx_fmt: count_fmt(c4xx, compact_counts),
+            c4xx_exact_fmt: super::number_fmt(c4xx),
+            c5xx_fmt: count_fmt(c5xx, compact_counts),
+            c5xx_exact_fmt: super::number_fmt(c5xx),
+            bandwidth_fmt: format_bytes(bandwidth),
+        })
+        .collect()
+}
+
+/// Top erroring URLs for a monthly ("YYYY-MM") or yearly ("YYYY") period,
+/// sorted by `key` ("4xx", "5xx", or "bandwidth").
+fn top_error_urls_sorted(
+    conn: &Connection,
+    period: &str,
+    top_n: usize,
+    compact_counts: bool,
+    key: &str,
+) -> Result<Vec<ErrorUrlRow>> {
+    if top_n == 0 {
+        return Ok(Vec::new());
+    }
+    let is_monthly = period.len() == 7;
+    let (op, param) = period_clause(period);
+    let order = error_url_order(key, !is_monthly);
+    let sql = if is_monthly {
+        format!(
+            "SELECT url, c4xx, c5xx, bandwidth \
+             FROM top_error_urls WHERE period {op} \
+             ORDER BY {order} DESC LIMIT ?2"
+        )
+    } else {
+        format!(
+            "SELECT url, SUM(c4xx), SUM(c5xx), SUM(bandwidth) \
+             FROM top_error_urls WHERE period {op} \
+             GROUP BY url ORDER BY {order} DESC LIMIT ?2"
+        )
+    };
+    let mut stmt = conn.prepare(&sql)?;
+    let raw: Vec<(String, u64, u64, u64)> = stmt
+        .query_map(params![param, top_n as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)? as u64,
+                row.get::<_, i64>(2)? as u64,
+                row.get::<_, i64>(3)? as u64,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(build_error_url_rows(raw, compact_counts))
+}
+
+/// All-time top erroring URLs (summed across every period), sorted by `key`.
+fn top_error_urls_all(
+    conn: &Connection,
+    top_n: usize,
+    compact_counts: bool,
+    key: &str,
+) -> Result<Vec<ErrorUrlRow>> {
+    if top_n == 0 {
+        return Ok(Vec::new());
+    }
+    let order = error_url_order(key, true);
+    let sql = format!(
+        "SELECT url, SUM(c4xx), SUM(c5xx), SUM(bandwidth) \
+         FROM top_error_urls \
+         GROUP BY url ORDER BY {order} DESC LIMIT ?1"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let raw: Vec<(String, u64, u64, u64)> = stmt
+        .query_map(params![top_n as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)? as u64,
+                row.get::<_, i64>(2)? as u64,
+                row.get::<_, i64>(3)? as u64,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(build_error_url_rows(raw, compact_counts))
 }
 
 fn top_ips_hits(

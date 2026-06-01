@@ -333,6 +333,9 @@
 {% set tab_prefix = "top" %}
 {% include "templates/partials/_top_urls_panel.html.tera" %}
 
+{% set err_tab_prefix = "err" %}
+{% include "templates/partials/_top_error_urls.html.tera" %}
+
 {% include "templates/partials/_top_ips_panel.html.tera" %}
 
 {% include "templates/partials/_top_refs_section.html.tera" %}

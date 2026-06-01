@@ -81,6 +81,7 @@ cp webstat.yml.example webstat.yml
 | `enable_top_sites` | `true` | |
 | `enable_top_refs` | `true` | |
 | `enable_top_agents` | `true` | |
+| `enable_top_error_urls` | `true` | Track top erroring URLs (4xx/5xx) per period |
 
 ### Style
 

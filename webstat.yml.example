@@ -33,6 +33,7 @@ enable_top_urls: true
 enable_top_hosts: true
 enable_top_refs: true
 enable_top_agents: true
+enable_top_error_urls: true
 
 # HTML report colour overrides.
 # Any key omitted uses the built-in default. Overrides apply to both light and dark mode.

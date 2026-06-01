@@ -20,6 +20,15 @@ pub(crate) struct UrlStats {
     pub(crate) rt_max: u32,
 }
 
+/// Per-URL error counters for the "top erroring URLs" report. Keyed by URL,
+/// splitting 4xx and 5xx responses so cardinality stays bounded to distinct URLs.
+#[derive(Default)]
+pub(crate) struct ErrUrlStats {
+    pub(crate) c4xx: u64,
+    pub(crate) c5xx: u64,
+    pub(crate) bandwidth: u64,
+}
+
 /// Per-bucket accumulator: mirrors a subset of RunAccumulators for a single named bucket.
 #[derive(Default)]
 pub(crate) struct BucketAcc {
@@ -47,6 +56,7 @@ pub(crate) struct RunAccumulators {
     pub(crate) current_month: String,
     pub(crate) hourly: HourlyMap,
     pub(crate) url_stats: AHashMap<String, UrlStats>,
+    pub(crate) error_urls: AHashMap<String, ErrUrlStats>,
     pub(crate) hosts: AHashMap<String, (u64, u64)>,
     pub(crate) refs: AHashMap<String, u64>,
     pub(crate) agents: AHashMap<String, (u64, u64)>,
@@ -66,6 +76,7 @@ impl RunAccumulators {
             current_month,
             hourly: AHashMap::with_capacity(32),
             url_stats: AHashMap::with_capacity(65_536),
+            error_urls: AHashMap::with_capacity(4_096),
             hosts: AHashMap::with_capacity(65_536),
             refs: AHashMap::with_capacity(4_096),
             agents: AHashMap::with_capacity(256),
@@ -82,6 +93,7 @@ impl RunAccumulators {
     pub(crate) fn is_empty(&self) -> bool {
         self.hourly.is_empty()
             && self.url_stats.is_empty()
+            && self.error_urls.is_empty()
             && self.hosts.is_empty()
             && self.refs.is_empty()
             && self.agents.is_empty()

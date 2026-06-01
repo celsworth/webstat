@@ -46,6 +46,7 @@ impl Processor {
             period,
             hourly: &run_acc.hourly,
             url_stats: &run_acc.url_stats,
+            error_urls: &run_acc.error_urls,
             hosts: &run_acc.hosts,
             host_geo: &host_geo,
             refs: &run_acc.refs,
@@ -104,6 +105,7 @@ fn pretrim_for_month_end(run_acc: &mut RunAccumulators, top_n: usize) {
         return;
     }
     pretrim_url_stats(&mut run_acc.url_stats, top_n);
+    pretrim_error_urls(&mut run_acc.error_urls, top_n);
     pretrim_hits_bw_map(&mut run_acc.hosts, top_n);
     pretrim_count_map(&mut run_acc.refs, top_n);
     pretrim_hits_bw_map(&mut run_acc.agents, top_n);
@@ -137,6 +139,28 @@ fn pretrim_url_stats(
         .collect();
     by_rt.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     keep.extend(by_rt.into_iter().take(top_n).map(|(k, _)| k.clone()));
+
+    map.retain(|k, _| keep.contains(k.as_str()));
+}
+
+/// Keep the union of top_n by total errors (c4xx+c5xx) and top_n by bandwidth.
+fn pretrim_error_urls(
+    map: &mut ahash::AHashMap<String, crate::run_accumulators::ErrUrlStats>,
+    top_n: usize,
+) {
+    if map.len() <= top_n {
+        return;
+    }
+    let mut keep = ahash::AHashSet::with_capacity(top_n * 2);
+
+    let mut by_err: Vec<(&String, u64)> =
+        map.iter().map(|(k, v)| (k, v.c4xx + v.c5xx)).collect();
+    by_err.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    keep.extend(by_err.into_iter().take(top_n).map(|(k, _)| k.clone()));
+
+    let mut by_bw: Vec<(&String, u64)> = map.iter().map(|(k, v)| (k, v.bandwidth)).collect();
+    by_bw.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    keep.extend(by_bw.into_iter().take(top_n).map(|(k, _)| k.clone()));
 
     map.retain(|k, _| keep.contains(k.as_str()));
 }

@@ -102,6 +102,14 @@ CREATE TABLE IF NOT EXISTS top_urls (
     rt_max    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (period, url)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS top_error_urls (
+    period    TEXT    NOT NULL,
+    url       TEXT    NOT NULL,
+    c4xx      INTEGER NOT NULL DEFAULT 0,
+    c5xx      INTEGER NOT NULL DEFAULT 0,
+    bandwidth INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (period, url)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS top_ips (
     period       TEXT    NOT NULL,
     host_kind    INTEGER NOT NULL,

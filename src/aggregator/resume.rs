@@ -913,6 +913,7 @@ mod tests {
                 enable_top_sites: false,
                 enable_top_refs: false,
                 enable_top_agents: false,
+                enable_top_error_urls: false,
                 rule_set: None,
             },
         )

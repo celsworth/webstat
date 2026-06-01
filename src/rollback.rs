@@ -51,6 +51,7 @@ pub fn rollback(db: &mut Database, target_month: &str, dry_run: bool) -> Result<
     // ── Monthly aggregated tables ─────────────────────────────────────────────
     for table in &[
         "top_urls",
+        "top_error_urls",
         "top_ips",
         "top_referrers",
         "top_agents",
@@ -426,6 +427,7 @@ mod tests {
             period,
             hourly: &ahash::AHashMap::new(),
             url_stats: &ahash::AHashMap::new(),
+            error_urls: &ahash::AHashMap::new(),
             hosts: &ahash::AHashMap::new(),
             host_geo: &ahash::AHashMap::new(),
             refs: &ahash::AHashMap::new(),

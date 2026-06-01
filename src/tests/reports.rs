@@ -60,6 +60,7 @@ fn process_logs(cfg: &Config) -> u64 {
             enable_top_sites: cfg.enable_top_sites,
             enable_top_refs: cfg.enable_top_refs,
             enable_top_agents: cfg.enable_top_agents,
+            enable_top_error_urls: cfg.enable_top_error_urls,
             rule_set: if cfg.rules.is_empty() {
                 None
             } else {
@@ -187,6 +188,9 @@ fn report_generation_e2e_multi_year_outputs_pages_and_filters_referrers() {
     assert!(index_html.contains("E2E Site - Web Statistics"));
     assert!(index_html.contains("2024/index.html"));
     assert!(index_html.contains("2026/05/index.html"));
+    // Overview's Top Erroring URLs panel is a closed-by-default accordion.
+    assert!(index_html.contains("<summary>Top Erroring URLs</summary>"));
+    assert!(index_html.contains(r#"class="stats-panel collapsible-section""#));
 
     let may_html =
         fs::read_to_string(output_dir.join("2026").join("05").join("index.html")).expect("read may");
@@ -194,6 +198,11 @@ fn report_generation_e2e_multi_year_outputs_pages_and_filters_referrers() {
     assert!(may_html.contains("Bandwidth per Day"));
     assert!(may_html.contains("status-row--5xx"));
     assert!(may_html.contains("Code 503 - Service Unavailable"));
+    // Top erroring URLs panel: /boom (503) must render a 5xx tab/table.
+    assert!(may_html.contains(r#"id="err-error-urls-5xx""#));
+    assert!(may_html.contains(r#"data-tabs-target="err-error-urls-5xx""#));
+    // The accordion treatment is overview-only; month pages keep a plain panel.
+    assert!(!may_html.contains("<summary>Top Erroring URLs</summary>"));
     assert!(may_html.contains("google.com"));
     assert!(!may_html.contains("mysite.test"));
     assert!(!may_html.contains("bot.html"));

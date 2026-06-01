@@ -61,6 +61,10 @@
   {% include "templates/partials/_heatmap.html.tera" %}
 </section>
 
+{% set err_tab_prefix = "err" %}
+{% set err_collapsible = true %}
+{% include "templates/partials/_top_error_urls.html.tera" %}
+
 {% for yr in yearly_rows | reverse %}
 <section class="year-section">
   <h2>

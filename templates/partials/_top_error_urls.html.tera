@@ -1,0 +1,94 @@
+{# Top erroring URLs (4xx/5xx). Requires err_tab_prefix to be set before include,
+   e.g. {% set err_tab_prefix = "err" %} #}
+{% if top_error_urls_4xx | length > 0 or top_error_urls_5xx | length > 0 or top_error_urls_bandwidth | length > 0 %}
+{# When err_collapsible is set (overview page), render as a closed-by-default
+   accordion; otherwise a plain panel. #}
+{% if err_collapsible | default(value=false) %}
+<details class="stats-panel collapsible-section" data-tabs>
+  <summary>Top Erroring URLs</summary>
+{% else %}
+<div class="stats-panel" data-tabs>
+{% endif %}
+  <div class="tab-group-header">
+    <span class="tab-group-title" data-tabs-title></span>
+    <div data-tabs-nav>
+      {% if top_error_urls_4xx | length > 0 %}
+      <button class="tab-btn" data-tabs-target="{{ err_tab_prefix }}-error-urls-4xx" data-tabs-label="Top Erroring URLs by 4xx">4xx</button>
+      {% endif %}
+      {% if top_error_urls_5xx | length > 0 %}
+      <button class="tab-btn" data-tabs-target="{{ err_tab_prefix }}-error-urls-5xx" data-tabs-label="Top Erroring URLs by 5xx">5xx</button>
+      {% endif %}
+      {% if top_error_urls_bandwidth | length > 0 %}
+      <button class="tab-btn" data-tabs-target="{{ err_tab_prefix }}-error-urls-bandwidth" data-tabs-label="Top Erroring URLs by Bandwidth">Bandwidth</button>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if top_error_urls_4xx | length > 0 %}
+  <div id="{{ err_tab_prefix }}-error-urls-4xx" data-tabs-panel>
+    <table class="data-table stats-panel__table">
+      <thead>
+        <tr><th>#</th><th>URL</th><th class="num-col">4xx</th><th class="num-col">5xx</th><th class="num-col">Bandwidth</th></tr>
+      </thead>
+      <tbody>
+        {% for row in top_error_urls_4xx %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td class="url-cell">{{ row.url }}</td>
+          <td class="num-col" data-value="{{ row.c4xx }}" title="{{ row.c4xx_exact_fmt }}">{{ row.c4xx_fmt }}</td>
+          <td class="num-col" data-value="{{ row.c5xx }}" title="{{ row.c5xx_exact_fmt }}">{{ row.c5xx_fmt }}</td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if top_error_urls_5xx | length > 0 %}
+  <div id="{{ err_tab_prefix }}-error-urls-5xx" data-tabs-panel>
+    <table class="data-table stats-panel__table">
+      <thead>
+        <tr><th>#</th><th>URL</th><th class="num-col">4xx</th><th class="num-col">5xx</th><th class="num-col">Bandwidth</th></tr>
+      </thead>
+      <tbody>
+        {% for row in top_error_urls_5xx %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td class="url-cell">{{ row.url }}</td>
+          <td class="num-col" data-value="{{ row.c4xx }}" title="{{ row.c4xx_exact_fmt }}">{{ row.c4xx_fmt }}</td>
+          <td class="num-col" data-value="{{ row.c5xx }}" title="{{ row.c5xx_exact_fmt }}">{{ row.c5xx_fmt }}</td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if top_error_urls_bandwidth | length > 0 %}
+  <div id="{{ err_tab_prefix }}-error-urls-bandwidth" data-tabs-panel>
+    <table class="data-table stats-panel__table">
+      <thead>
+        <tr><th>#</th><th>URL</th><th class="num-col">4xx</th><th class="num-col">5xx</th><th class="num-col">Bandwidth</th></tr>
+      </thead>
+      <tbody>
+        {% for row in top_error_urls_bandwidth %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td class="url-cell">{{ row.url }}</td>
+          <td class="num-col" data-value="{{ row.c4xx }}" title="{{ row.c4xx_exact_fmt }}">{{ row.c4xx_fmt }}</td>
+          <td class="num-col" data-value="{{ row.c5xx }}" title="{{ row.c5xx_exact_fmt }}">{{ row.c5xx_fmt }}</td>
+          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+{% if err_collapsible | default(value=false) %}
+</details>
+{% else %}
+</div>
+{% endif %}
+{% endif %}

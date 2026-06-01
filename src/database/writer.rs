@@ -12,12 +12,13 @@ use crate::accumulators::HourlyMap;
 use crate::ip::IpBitmaps;
 use crate::method_proto::{METHOD_NAMES, PROTO_NAMES};
 use crate::response_time::ResponseTimeHistogram;
-use crate::run_accumulators::{BucketAcc, UrlStats};
+use crate::run_accumulators::{BucketAcc, ErrUrlStats, UrlStats};
 
 pub struct FlushData<'a> {
     pub period: &'a str,
     pub hourly: &'a HourlyMap,
     pub url_stats: &'a AHashMap<String, UrlStats>,
+    pub error_urls: &'a AHashMap<String, ErrUrlStats>,
     pub hosts: &'a AHashMap<String, (u64, u64)>,
     pub host_geo: &'a AHashMap<String, (Arc<str>, Arc<str>)>,
     pub refs: &'a AHashMap<String, u64>,
@@ -161,6 +162,27 @@ impl Database {
                     stats.rt_sum as i64,
                     stats.rt_count as i64,
                     stats.rt_max as i64,
+                ])?;
+            }
+        }
+
+        // top_error_urls — 4xx/5xx counters keyed by URL
+        if !data.error_urls.is_empty() {
+            let sql = "INSERT INTO top_error_urls \
+                       (period,url,c4xx,c5xx,bandwidth) \
+                       VALUES (?1,?2,?3,?4,?5) \
+                       ON CONFLICT (period,url) DO UPDATE SET \
+                         c4xx=c4xx+excluded.c4xx, \
+                         c5xx=c5xx+excluded.c5xx, \
+                         bandwidth=bandwidth+excluded.bandwidth";
+            let mut stmt = tx.prepare_cached(sql)?;
+            for (url, stats) in data.error_urls {
+                stmt.execute(params![
+                    data.period,
+                    url,
+                    stats.c4xx as i64,
+                    stats.c5xx as i64,
+                    stats.bandwidth as i64,
                 ])?;
             }
         }
@@ -923,6 +945,16 @@ impl Database {
 
         if top_n > 0 {
             tx.execute(
+                "DELETE FROM top_error_urls \
+                 WHERE period=?1 \
+                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY (c4xx+c5xx) DESC LIMIT ?2) \
+                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY bandwidth DESC LIMIT ?2)",
+                params![period, top_n as i64],
+            )?;
+        }
+
+        if top_n > 0 {
+            tx.execute(
                 "DELETE FROM top_ips \
                  WHERE period=?1 \
                  AND (host_kind,host_hi,host_lo) NOT IN (SELECT host_kind,host_hi,host_lo FROM top_ips WHERE period=?1 ORDER BY hits DESC LIMIT ?2) \
@@ -1114,6 +1146,40 @@ impl Database {
                         params![period, hits_thresh, bw_thresh],
                     )?;
                 }
+            }
+        }
+
+        // ── top_error_urls ────────────────────────────────────────────────────
+        {
+            let count: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM top_error_urls WHERE period=?1",
+                params![period],
+                |r| r.get(0),
+            )?;
+            if count > threshold {
+                let err_nth: i64 = tx
+                    .query_row(
+                        "SELECT c4xx+c5xx FROM top_error_urls WHERE period=?1 \
+                         ORDER BY (c4xx+c5xx) DESC LIMIT 1 OFFSET ?2",
+                        params![period, offset],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or(0);
+                let bw_nth: i64 = tx
+                    .query_row(
+                        "SELECT bandwidth FROM top_error_urls WHERE period=?1 \
+                         ORDER BY bandwidth DESC LIMIT 1 OFFSET ?2",
+                        params![period, offset],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or(0);
+                tx.execute(
+                    "DELETE FROM top_error_urls WHERE period=?1 \
+                     AND (c4xx+c5xx) < ?2 AND bandwidth < ?3",
+                    params![period, err_nth / CULL_FRACTION, bw_nth / CULL_FRACTION],
+                )?;
             }
         }
 
