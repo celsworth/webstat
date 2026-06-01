@@ -275,8 +275,7 @@ main.container {
 /* ---- Weekday × hour heatmap ---- */
 /* Header bar matches table headings: muted text on the alt surface, uppercase. */
 .heatmap-title {
-    margin: 0;
-    padding: 0.6rem 0.9rem;
+    padding: 0.25rem 0.75rem;
     background: var(--surface-alt);
     border-bottom: 1px solid var(--border);
     font-size: 0.8rem;
@@ -287,7 +286,7 @@ main.container {
 }
 
 .heatmap-body {
-    padding: 1.25rem;
+    padding: 0.25rem 0.5rem;
 }
 
 .heatmap-scroll {
@@ -324,7 +323,7 @@ main.container {
 
 .heatmap__cell {
     height: 1.5rem;
-    border-radius: 3px;
+    border-radius: 1px;
     /* Blend the accent colour over the surface by the cell's relative intensity. */
     background: color-mix(in srgb, var(--accent) calc(var(--heat) * 100%), var(--surface-alt));
 }
@@ -361,7 +360,8 @@ main.container {
     gap: var(--gap);
 }
 
-:is(.charts-triple, .charts-split) > .chart-box {
+:is(.charts-triple, .charts-split) > .chart-box,
+.charts-split > .stats-panel {
     min-width: 0;
 }
 
@@ -718,45 +718,45 @@ code {
 
 /* ---------- Collapsible sections ---------- */
 .collapsible-section > summary {
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.35rem 0.75rem;
-  background: var(--surface-alt);
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-  cursor: pointer;
-  user-select: none;
-  border-bottom: 1px solid transparent;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.35rem 0.75rem;
+    background: var(--surface-alt);
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid transparent;
 }
 
 .collapsible-section > summary::-webkit-details-marker {
-  display: none;
+    display: none;
 }
 
 .collapsible-section > summary::before {
-  content: '▶';
-  font-size: 0.55rem;
-  display: inline-block;
-  flex-shrink: 0;
-  transition: transform 0.15s ease;
+    content: "▶";
+    font-size: 0.55rem;
+    display: inline-block;
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
 }
 
 .collapsible-section[open] > summary {
-  border-bottom-color: var(--border);
+    border-bottom-color: var(--border);
 }
 
 .collapsible-section[open] > summary::before {
-  transform: rotate(90deg);
+    transform: rotate(90deg);
 }
 
 .collapsible-section__body {
-  overflow: hidden;
-  transition: height 0.15s ease;
+    overflow: hidden;
+    transition: height 0.15s ease;
 }
 
 /* ---------- Footer ---------- */

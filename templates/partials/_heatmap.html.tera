@@ -1,5 +1,4 @@
 {% if weekday_hour is defined and weekday_hour | length > 0 %}
-<section class="stats-group">
   <div class="stats-panel heatmap-panel">
     <h3 class="heatmap-title">Traffic by Day &amp; Hour</h3>
     <div class="heatmap-body">
@@ -37,5 +36,4 @@
     </p>
     </div>
   </div>
-</section>
 {% endif %}

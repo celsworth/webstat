@@ -33,9 +33,9 @@
     <div class="chart-box chart-box--bar">
       <canvas id="overviewChart"></canvas>
     </div>
-    {% if rt_distribution_chart is defined %}
+    {% if overview_sites_chart is defined %}
     <div class="chart-box chart-box--bar">
-      <canvas id="rtDistributionChart"></canvas>
+      <canvas id="overviewSitesChart"></canvas>
     </div>
     {% endif %}
   </div>
@@ -47,9 +47,9 @@
       <canvas id="rtOverTimeChart"></canvas>
     </div>
     {% endif %}
-    {% if overview_sites_chart is defined %}
+    {% if rt_distribution_chart is defined %}
     <div class="chart-box chart-box--bar">
-      <canvas id="overviewSitesChart"></canvas>
+      <canvas id="rtDistributionChart"></canvas>
     </div>
     {% endif %}
   </div>

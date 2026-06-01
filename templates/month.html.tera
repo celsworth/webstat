@@ -48,11 +48,12 @@
 
 {% include "templates/partials/_rt_charts.html.tera" %}
 
-<div class="chart-box chart-box--bar">
-  <canvas id="hourlyChart"></canvas>
+<div class="charts-split">
+  <div class="chart-box chart-box--bar">
+    <canvas id="hourlyChart"></canvas>
+  </div>
+  {% include "templates/partials/_heatmap.html.tera" %}
 </div>
-
-{% include "templates/partials/_heatmap.html.tera" %}
 
 {% if status_codes | length > 0
    or top_agents_hits | length > 0
