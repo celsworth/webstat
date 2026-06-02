@@ -915,23 +915,25 @@ fn error_urls_record_4xx_5xx_split_and_exclude_2xx() {
 
     let conn = Connection::open(&db_path).expect("open db");
 
-    let (c4, c5, bw): (i64, i64, i64) = conn
+    // /missing is hit twice with 404 → goes into c404 (specific bucket), not c4xx overflow
+    let (c404, c5xx, bw): (i64, i64, i64) = conn
         .query_row(
-            "SELECT c4xx, c5xx, bandwidth FROM top_error_urls WHERE period='2026-05' AND url='/missing'",
+            "SELECT c404, c5xx, bandwidth FROM top_error_urls WHERE period='2026-05' AND url='/missing'",
             [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .expect("missing row");
-    assert_eq!((c4, c5, bw), (2, 0, 200));
+    assert_eq!((c404, c5xx, bw), (2, 0, 200));
 
-    let (c4, c5): (i64, i64) = conn
+    // /broken is hit once with 500 → goes into c500 (specific bucket), not c5xx overflow
+    let (c4xx, c500): (i64, i64) = conn
         .query_row(
-            "SELECT c4xx, c5xx FROM top_error_urls WHERE period='2026-05' AND url='/broken'",
+            "SELECT c4xx, c500 FROM top_error_urls WHERE period='2026-05' AND url='/broken'",
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .expect("broken row");
-    assert_eq!((c4, c5), (0, 1));
+    assert_eq!((c4xx, c500), (0, 1));
 
     let ok_rows: i64 = conn
         .query_row(
@@ -979,9 +981,10 @@ fn error_urls_trimmed_at_month_finalize_keeps_heaviest() {
 
     let conn = Connection::open(&db_path).expect("open db");
 
+    // /hot is hit 50 times with 404 → goes into c404 (specific bucket)
     let hot: i64 = conn
         .query_row(
-            "SELECT c4xx FROM top_error_urls WHERE period='2026-05' AND url='/hot'",
+            "SELECT c404 FROM top_error_urls WHERE period='2026-05' AND url='/hot'",
             [],
             |r| r.get(0),
         )
@@ -1000,6 +1003,185 @@ fn error_urls_trimmed_at_month_finalize_keeps_heaviest() {
         "finalize_month must trim toward top_n (got {rows} rows)"
     );
     assert!(rows < 61, "trim must drop scanner noise");
+}
+
+#[test]
+fn error_urls_per_code_dispatch_and_overflow() {
+    // Each tracked status code lands in its own column; untracked codes land in
+    // the overflow buckets (c4xx / c5xx). No column is contaminated by another code.
+    let temp = TempDir::new().expect("tempdir");
+    let db_path = temp.path().join("webstat.db");
+    let log_path = temp.path().join("codes.log");
+
+    // One request per URL, each with a distinct status code.
+    // 405 and 504 are deliberately untracked → overflow.
+    let entries: &[(&str, u16)] = &[
+        ("/c400", 400),
+        ("/c401", 401),
+        ("/c403", 403),
+        ("/c404", 404),
+        ("/c422", 422),
+        ("/c429", 429),
+        ("/c405", 405), // untracked 4xx → c4xx overflow
+        ("/c500", 500),
+        ("/c502", 502),
+        ("/c503", 503),
+        ("/c504", 504), // untracked 5xx → c5xx overflow
+    ];
+    let lines: Vec<String> = entries
+        .iter()
+        .map(|(url, code)| {
+            format!(
+                r#"1.2.3.4 - - [10/May/2026:14:00:00 +0000] "GET {url} HTTP/1.1" {code} 100 "-" "-""#
+            )
+        })
+        .collect();
+    write_plain_file(&log_path, &lines);
+
+    let mut processor = new_processor(&db_path);
+    processor
+        .process_globs(log_path.to_str().unwrap())
+        .expect("process");
+
+    let conn = Connection::open(&db_path).expect("open db");
+
+    // Returns (c400,c401,c403,c404,c422,c429,c4xx,c500,c502,c503,c5xx) for a URL.
+    let cols = |url: &str| -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+        conn.query_row(
+            "SELECT c400,c401,c403,c404,c422,c429,c4xx,c500,c502,c503,c5xx \
+             FROM top_error_urls WHERE period='2026-05' AND url=?1",
+            [url],
+            |r| {
+                Ok((
+                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?,
+                    r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?,
+                ))
+            },
+        )
+        .unwrap_or((0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+    };
+
+    assert_eq!(cols("/c400"), (1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), "400");
+    assert_eq!(cols("/c401"), (0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0), "401");
+    assert_eq!(cols("/c403"), (0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0), "403");
+    assert_eq!(cols("/c404"), (0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0), "404");
+    assert_eq!(cols("/c422"), (0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0), "422");
+    assert_eq!(cols("/c429"), (0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0), "429");
+    assert_eq!(cols("/c405"), (0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0), "405 → c4xx overflow");
+    assert_eq!(cols("/c500"), (0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0), "500");
+    assert_eq!(cols("/c502"), (0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0), "502");
+    assert_eq!(cols("/c503"), (0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0), "503");
+    assert_eq!(cols("/c504"), (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1), "504 → c5xx overflow");
+}
+
+#[test]
+fn error_urls_mixed_codes_same_url_accumulate_independently() {
+    // The same URL hit with several distinct error codes: each code's counter
+    // must accumulate independently without bleeding into adjacent columns.
+    let temp = TempDir::new().expect("tempdir");
+    let db_path = temp.path().join("webstat.db");
+    let log_path = temp.path().join("multi.log");
+
+    let lines = vec![
+        // 3× 404
+        r#"1.1.1.1 - - [10/May/2026:14:00:01 +0000] "GET /api HTTP/1.1" 404 50 "-" "-""#.to_string(),
+        r#"1.1.1.2 - - [10/May/2026:14:00:02 +0000] "GET /api HTTP/1.1" 404 50 "-" "-""#.to_string(),
+        r#"1.1.1.3 - - [10/May/2026:14:00:03 +0000] "GET /api HTTP/1.1" 404 50 "-" "-""#.to_string(),
+        // 2× 429
+        r#"2.2.2.1 - - [10/May/2026:14:00:04 +0000] "GET /api HTTP/1.1" 429 20 "-" "-""#.to_string(),
+        r#"2.2.2.2 - - [10/May/2026:14:00:05 +0000] "GET /api HTTP/1.1" 429 20 "-" "-""#.to_string(),
+        // 1× 500
+        r#"3.3.3.1 - - [10/May/2026:14:00:06 +0000] "GET /api HTTP/1.1" 500 10 "-" "-""#.to_string(),
+        // 1× 408 (untracked → c4xx overflow)
+        r#"4.4.4.1 - - [10/May/2026:14:00:07 +0000] "GET /api HTTP/1.1" 408 10 "-" "-""#.to_string(),
+    ];
+    write_plain_file(&log_path, &lines);
+
+    let mut processor = new_processor(&db_path);
+    processor
+        .process_globs(log_path.to_str().unwrap())
+        .expect("process");
+
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let (c404, c429, c4xx, c500, bw): (i64, i64, i64, i64, i64) = conn
+        .query_row(
+            "SELECT c404,c429,c4xx,c500,bandwidth \
+             FROM top_error_urls WHERE period='2026-05' AND url='/api'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .expect("api row");
+
+    assert_eq!(c404, 3, "404 count");
+    assert_eq!(c429, 2, "429 count");
+    assert_eq!(c4xx, 1, "408 must land in c4xx overflow");
+    assert_eq!(c500, 1, "500 count");
+    assert_eq!(bw, 3 * 50 + 2 * 20 + 10 + 10, "total bandwidth");
+}
+
+#[test]
+fn error_urls_trim_union_preserves_dominant_single_code_url() {
+    // A URL that dominates one specific code (429) but has a low total error count
+    // must survive finalize_month trim even when 25 other URLs each have more total
+    // errors. The trim keeps the union of top-N per code, not just top-N by total.
+    //
+    // Setup: 25 URLs × 30 hits with 404 (total errors = 30 each), plus /only-429
+    // with 5 hits of 429 (total errors = 5). With top_n=20, a trim by total errors
+    // alone would leave /only-429 at rank 26 and drop it. The per-code union must
+    // keep it because it is rank 1 by c429.
+    let temp = TempDir::new().expect("tempdir");
+    let db_path = temp.path().join("webstat.db");
+    let log_path = temp.path().join("union.log");
+
+    let mut lines = Vec::new();
+    for url_idx in 0..25u8 {
+        for hit in 0..30u8 {
+            lines.push(format!(
+                r#"9.9.{url_idx}.{hit} - - [10/May/2026:14:00:00 +0000] "GET /page{url_idx} HTTP/1.1" 404 10 "-" "-""#,
+            ));
+        }
+    }
+    for hit in 0..5u8 {
+        lines.push(format!(
+            r#"8.8.8.{hit} - - [10/May/2026:14:01:00 +0000] "GET /only-429 HTTP/1.1" 429 10 "-" "-""#,
+        ));
+    }
+    // June entry forces finalize_month for May.
+    lines.push(
+        r#"1.1.1.1 - - [01/Jun/2026:00:00:00 +0000] "GET / HTTP/1.1" 200 10 "-" "-""#.to_string(),
+    );
+    write_plain_file(&log_path, &lines);
+
+    let mut processor = new_processor(&db_path);
+    processor
+        .process_globs(log_path.to_str().unwrap())
+        .expect("process");
+
+    let conn = Connection::open(&db_path).expect("open db");
+
+    // /only-429 must be kept: rank 1 by c429, even though rank 26 by total errors.
+    let c429: i64 = conn
+        .query_row(
+            "SELECT c429 FROM top_error_urls WHERE period='2026-05' AND url='/only-429'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("/only-429 must survive trim due to per-code union");
+    assert_eq!(c429, 5);
+
+    // The 25 competing 404 URLs must have their top 20 kept as well.
+    let page_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM top_error_urls WHERE period='2026-05' AND url LIKE '/page%'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("page count");
+    assert!(
+        page_rows >= 20,
+        "at least top_n=20 of the /page* URLs must survive (got {page_rows})"
+    );
 }
 
 #[test]

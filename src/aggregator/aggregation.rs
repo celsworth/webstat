@@ -243,10 +243,18 @@ impl Processor {
         // ── Top erroring URLs (4xx / 5xx) ──────────────────────────────────────
         if self.enable_top_error_urls && status >= 400 && !hide.contains(HideMask::TOP_URLS) {
             let e = run_acc.error_urls.entry(clean_path.to_string()).or_default();
-            if status_class == 4 {
-                e.c4xx += 1;
-            } else {
-                e.c5xx += 1;
+            match status {
+                400 => e.c400 += 1,
+                401 => e.c401 += 1,
+                403 => e.c403 += 1,
+                404 => e.c404 += 1,
+                422 => e.c422 += 1,
+                429 => e.c429 += 1,
+                500 => e.c500 += 1,
+                502 => e.c502 += 1,
+                503 => e.c503 += 1,
+                400..=499 => e.c4xx += 1,
+                _ => e.c5xx += 1,
             }
             e.bandwidth += bytes;
         }

@@ -169,19 +169,25 @@ pub(crate) struct TopUrlRow {
     bandwidth_pct_fmt: String,
     avg_ms_fmt: Option<String>,
     max_ms_fmt: Option<String>,
+    avg_ms_raw: Option<u64>,
+    max_ms_raw: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ErrorUrlRow {
     url: String,
-    c4xx: u64,
-    c5xx: u64,
-    bandwidth: u64,
-    c4xx_fmt: String,
-    c4xx_exact_fmt: String,
-    c5xx_fmt: String,
-    c5xx_exact_fmt: String,
-    bandwidth_fmt: String,
+    c400: u64, c400_fmt: String,
+    c401: u64, c401_fmt: String,
+    c403: u64, c403_fmt: String,
+    c404: u64, c404_fmt: String,
+    c422: u64, c422_fmt: String,
+    c429: u64, c429_fmt: String,
+    c4xx: u64, c4xx_fmt: String,
+    c500: u64, c500_fmt: String,
+    c502: u64, c502_fmt: String,
+    c503: u64, c503_fmt: String,
+    c5xx: u64, c5xx_fmt: String,
+    bandwidth: u64, bandwidth_fmt: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -336,14 +342,10 @@ pub(crate) struct BucketPageData {
     pub(crate) daily_rt_stats: Vec<DailyRtStat>,
     /// Populated for yearly periods (YYYY) — one row per month.
     pub(crate) monthly_rows: Vec<MonthRow>,
-    pub(crate) top_urls_hits: Vec<TopUrlRow>,
-    pub(crate) top_urls_bandwidth: Vec<TopUrlRow>,
-    pub(crate) top_slow_urls: Vec<TopUrlRow>,
+    pub(crate) top_urls: Vec<TopUrlRow>,
     pub(crate) status_codes: Vec<StatusRow>,
-    pub(crate) agents_hits: Vec<TopAgentRow>,
-    pub(crate) agents_bandwidth: Vec<TopAgentRow>,
-    pub(crate) countries_hits: Vec<TopCountryRow>,
-    pub(crate) countries_bandwidth: Vec<TopCountryRow>,
+    pub(crate) agents: Vec<TopAgentRow>,
+    pub(crate) countries: Vec<TopCountryRow>,
     pub(crate) method_codes: Vec<MethodRow>,
     pub(crate) proto_codes: Vec<ProtoRow>,
     pub(crate) rt_distribution_buckets: Vec<(String, u64)>,
@@ -357,24 +359,17 @@ struct MonthlySummary {
     daily: Vec<DailyRow>,
     hourly: Vec<HourlyRow>,
     totals: TotalsView,
-    top_urls_hits: Vec<TopUrlRow>,
-    top_urls_bandwidth: Vec<TopUrlRow>,
-    top_error_urls_4xx: Vec<ErrorUrlRow>,
-    top_error_urls_5xx: Vec<ErrorUrlRow>,
-    top_error_urls_bandwidth: Vec<ErrorUrlRow>,
-    top_ips_hits: Vec<TopHostRow>,
-    top_ips_bandwidth: Vec<TopHostRow>,
+    top_urls: Vec<TopUrlRow>,
+    top_error_urls: Vec<ErrorUrlRow>,
+    top_ips: Vec<TopHostRow>,
     top_refs: Vec<TopRefRow>,
-    top_agents_hits: Vec<TopAgentRow>,
-    top_agents_bandwidth: Vec<TopAgentRow>,
-    top_countries_hits: Vec<TopCountryRow>,
-    top_countries_bandwidth: Vec<TopCountryRow>,
+    top_agents: Vec<TopAgentRow>,
+    top_countries: Vec<TopCountryRow>,
     status_codes: Vec<StatusRow>,
     proto_codes: Vec<ProtoRow>,
     method_codes: Vec<MethodRow>,
     daily_avg_max: DailyAvgMax,
     hourly_avg_max: HourlyAvgMax,
-    top_slow_urls: Vec<TopUrlRow>,
     daily_rt_stats: Vec<DailyRtStat>,
     rt_distribution_buckets: Vec<(String, u64)>,
     buckets: Vec<BucketIndexRow>,
@@ -385,24 +380,17 @@ struct MonthlySummary {
 struct YearlySummary {
     year: i32,
     monthly_rows: Vec<MonthRow>,
-    top_urls_hits: Vec<TopUrlRow>,
-    top_urls_bandwidth: Vec<TopUrlRow>,
-    top_error_urls_4xx: Vec<ErrorUrlRow>,
-    top_error_urls_5xx: Vec<ErrorUrlRow>,
-    top_error_urls_bandwidth: Vec<ErrorUrlRow>,
-    top_ips_hits: Vec<TopHostRow>,
-    top_ips_bandwidth: Vec<TopHostRow>,
+    top_urls: Vec<TopUrlRow>,
+    top_error_urls: Vec<ErrorUrlRow>,
+    top_ips: Vec<TopHostRow>,
     top_refs: Vec<TopRefRow>,
-    top_agents_hits: Vec<TopAgentRow>,
-    top_agents_bandwidth: Vec<TopAgentRow>,
-    top_countries_hits: Vec<TopCountryRow>,
-    top_countries_bandwidth: Vec<TopCountryRow>,
+    top_agents: Vec<TopAgentRow>,
+    top_countries: Vec<TopCountryRow>,
     status_codes: Vec<StatusRow>,
     proto_codes: Vec<ProtoRow>,
     method_codes: Vec<MethodRow>,
     totals: TotalsView,
     monthly_rt_stats: Vec<MonthlyRtStat>,
-    top_slow_urls: Vec<TopUrlRow>,
     buckets: Vec<BucketIndexRow>,
     weekday_hour: Vec<WeekdayRow>,
 }
@@ -426,13 +414,9 @@ struct YearAggregateRow {
 #[derive(Debug, Clone)]
 struct OverallSummary {
     yearly_rows: Vec<YearAggregateRow>,
-    top_error_urls_4xx: Vec<ErrorUrlRow>,
-    top_error_urls_5xx: Vec<ErrorUrlRow>,
-    top_error_urls_bandwidth: Vec<ErrorUrlRow>,
-    top_agents_hits: Vec<TopAgentRow>,
-    top_agents_bandwidth: Vec<TopAgentRow>,
-    top_countries_hits: Vec<TopCountryRow>,
-    top_countries_bandwidth: Vec<TopCountryRow>,
+    top_error_urls: Vec<ErrorUrlRow>,
+    top_agents: Vec<TopAgentRow>,
+    top_countries: Vec<TopCountryRow>,
     status_codes: Vec<StatusRow>,
     totals: TotalsView,
     all_time_available: bool,
@@ -666,19 +650,16 @@ fn render_index_page(
 ) -> Result<()> {
     let mut page_ctx = TeraContext::new();
     page_ctx.insert("site_name", &cfg.site_name);
+    page_ctx.insert("top_n", &cfg.top_n);
     page_ctx.insert("years", years);
     page_ctx.insert("yearly_rows", &overall.yearly_rows);
     page_ctx.insert("months", months);
     page_ctx.insert("totals", &overall.totals);
     page_ctx.insert("all_time_available", &overall.all_time_available);
     page_ctx.insert("status_codes", &overall.status_codes);
-    page_ctx.insert("top_countries_hits", &overall.top_countries_hits);
-    page_ctx.insert("top_countries_bandwidth", &overall.top_countries_bandwidth);
-    page_ctx.insert("top_agents_hits", &overall.top_agents_hits);
-    page_ctx.insert("top_agents_bandwidth", &overall.top_agents_bandwidth);
-    page_ctx.insert("top_error_urls_4xx", &overall.top_error_urls_4xx);
-    page_ctx.insert("top_error_urls_5xx", &overall.top_error_urls_5xx);
-    page_ctx.insert("top_error_urls_bandwidth", &overall.top_error_urls_bandwidth);
+    page_ctx.insert("top_countries", &overall.top_countries);
+    page_ctx.insert("top_agents", &overall.top_agents);
+    page_ctx.insert("top_error_urls", &overall.top_error_urls);
     page_ctx.insert(
         "overview_chart",
         &charts::yearly_overview_chart(&overall.yearly_rows, &cfg.style)?,
@@ -693,11 +674,11 @@ fn render_index_page(
     );
     page_ctx.insert(
         "country_chart",
-        &charts::countries_chart(&overall.top_countries_hits)?,
+        &charts::countries_chart(&overall.top_countries)?,
     );
     page_ctx.insert(
         "agents_chart",
-        &charts::agents_chart(&overall.top_agents_hits)?,
+        &charts::agents_chart(&overall.top_agents)?,
     );
 
     if !overall.weekday_hour.is_empty() {
@@ -717,25 +698,19 @@ fn render_year_page(
     summary: &YearlySummary,
 ) -> Result<()> {
     let mut page_ctx = TeraContext::new();
+    page_ctx.insert("top_n", &cfg.top_n);
     page_ctx.insert("year", &summary.year);
     page_ctx.insert("monthly_rows", &summary.monthly_rows);
-    page_ctx.insert("top_urls_hits", &summary.top_urls_hits);
-    page_ctx.insert("top_urls_bandwidth", &summary.top_urls_bandwidth);
-    page_ctx.insert("top_error_urls_4xx", &summary.top_error_urls_4xx);
-    page_ctx.insert("top_error_urls_5xx", &summary.top_error_urls_5xx);
-    page_ctx.insert("top_error_urls_bandwidth", &summary.top_error_urls_bandwidth);
-    page_ctx.insert("top_ips_hits", &summary.top_ips_hits);
-    page_ctx.insert("top_ips_bandwidth", &summary.top_ips_bandwidth);
+    page_ctx.insert("top_urls", &summary.top_urls);
+    page_ctx.insert("top_error_urls", &summary.top_error_urls);
+    page_ctx.insert("top_ips", &summary.top_ips);
     page_ctx.insert("top_refs", &summary.top_refs);
-    page_ctx.insert("top_agents_hits", &summary.top_agents_hits);
-    page_ctx.insert("top_agents_bandwidth", &summary.top_agents_bandwidth);
-    page_ctx.insert("top_countries_hits", &summary.top_countries_hits);
-    page_ctx.insert("top_countries_bandwidth", &summary.top_countries_bandwidth);
+    page_ctx.insert("top_agents", &summary.top_agents);
+    page_ctx.insert("top_countries", &summary.top_countries);
     page_ctx.insert("status_codes", &summary.status_codes);
     page_ctx.insert("proto_codes", &summary.proto_codes);
     page_ctx.insert("method_codes", &summary.method_codes);
     page_ctx.insert("totals", &summary.totals);
-    page_ctx.insert("top_slow_urls", &summary.top_slow_urls);
 
     page_ctx.insert(
         "overview_chart",
@@ -751,11 +726,11 @@ fn render_year_page(
     );
     page_ctx.insert(
         "country_chart",
-        &charts::countries_chart(&summary.top_countries_hits)?,
+        &charts::countries_chart(&summary.top_countries)?,
     );
     page_ctx.insert(
         "agents_chart",
-        &charts::agents_chart(&summary.top_agents_hits)?,
+        &charts::agents_chart(&summary.top_agents)?,
     );
     if !summary.monthly_rt_stats.is_empty() {
         let labels: Vec<&str> = summary
@@ -800,26 +775,19 @@ fn render_month_page(
     page_ctx.insert("month_name", &summary.month_name);
     page_ctx.insert("daily", &summary.daily);
     page_ctx.insert("hourly", &summary.hourly);
+    page_ctx.insert("top_n", &cfg.top_n);
     page_ctx.insert("totals", &summary.totals);
-    page_ctx.insert("top_urls_hits", &summary.top_urls_hits);
-    page_ctx.insert("top_urls_bandwidth", &summary.top_urls_bandwidth);
-    page_ctx.insert("top_error_urls_4xx", &summary.top_error_urls_4xx);
-    page_ctx.insert("top_error_urls_5xx", &summary.top_error_urls_5xx);
-    page_ctx.insert("top_error_urls_bandwidth", &summary.top_error_urls_bandwidth);
-    page_ctx.insert("top_ips_hits", &summary.top_ips_hits);
-    page_ctx.insert("top_ips_bandwidth", &summary.top_ips_bandwidth);
+    page_ctx.insert("top_urls", &summary.top_urls);
+    page_ctx.insert("top_error_urls", &summary.top_error_urls);
+    page_ctx.insert("top_ips", &summary.top_ips);
     page_ctx.insert("top_refs", &summary.top_refs);
-    page_ctx.insert("top_agents_hits", &summary.top_agents_hits);
-    page_ctx.insert("top_agents_bandwidth", &summary.top_agents_bandwidth);
-    page_ctx.insert("top_countries_hits", &summary.top_countries_hits);
-    page_ctx.insert("top_countries_bandwidth", &summary.top_countries_bandwidth);
+    page_ctx.insert("top_agents", &summary.top_agents);
+    page_ctx.insert("top_countries", &summary.top_countries);
     page_ctx.insert("status_codes", &summary.status_codes);
     page_ctx.insert("proto_codes", &summary.proto_codes);
     page_ctx.insert("method_codes", &summary.method_codes);
     page_ctx.insert("daily_avg_max", &summary.daily_avg_max);
     page_ctx.insert("hourly_avg_max", &summary.hourly_avg_max);
-
-    page_ctx.insert("top_slow_urls", &summary.top_slow_urls);
 
     if !summary.daily_rt_stats.is_empty() {
         let labels: Vec<&str> = summary
@@ -869,11 +837,11 @@ fn render_month_page(
     );
     page_ctx.insert(
         "country_chart",
-        &charts::countries_chart(&summary.top_countries_hits)?,
+        &charts::countries_chart(&summary.top_countries)?,
     );
     page_ctx.insert(
         "agents_chart",
-        &charts::agents_chart(&summary.top_agents_hits)?,
+        &charts::agents_chart(&summary.top_agents)?,
     );
 
     if !summary.buckets.is_empty() {
@@ -911,14 +879,11 @@ fn render_bucket_page(
     ctx.insert("visitors_exact_fmt", &data.visitors_exact_fmt);
     ctx.insert("avg_rt_ms", &data.avg_rt_ms);
     ctx.insert("p95_rt_ms", &data.p95_rt_ms);
-    ctx.insert("top_urls_hits", &data.top_urls_hits);
-    ctx.insert("top_urls_bandwidth", &data.top_urls_bandwidth);
-    ctx.insert("top_slow_urls", &data.top_slow_urls);
+    ctx.insert("top_n", &cfg.top_n);
+    ctx.insert("top_urls", &data.top_urls);
     ctx.insert("status_codes", &data.status_codes);
-    ctx.insert("agents_hits", &data.agents_hits);
-    ctx.insert("agents_bandwidth", &data.agents_bandwidth);
-    ctx.insert("countries_hits", &data.countries_hits);
-    ctx.insert("countries_bandwidth", &data.countries_bandwidth);
+    ctx.insert("agents", &data.agents);
+    ctx.insert("countries", &data.countries);
     ctx.insert("method_codes", &data.method_codes);
     ctx.insert("proto_codes", &data.proto_codes);
 
@@ -928,11 +893,11 @@ fn render_bucket_page(
             &charts::status_chart(&data.status_codes, &cfg.style)?,
         );
     }
-    if !data.agents_hits.is_empty() {
-        ctx.insert("agents_chart", &charts::agents_chart(&data.agents_hits)?);
+    if !data.agents.is_empty() {
+        ctx.insert("agents_chart", &charts::agents_chart(&data.agents)?);
     }
-    if !data.countries_hits.is_empty() {
-        ctx.insert("country_chart", &charts::countries_chart(&data.countries_hits)?);
+    if !data.countries.is_empty() {
+        ctx.insert("country_chart", &charts::countries_chart(&data.countries)?);
     }
     if !data.rt_distribution_buckets.is_empty() {
         let labels: Vec<&str> = data

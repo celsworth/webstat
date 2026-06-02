@@ -18,6 +18,7 @@
   </header>
 
   <script src="{{ assets_path }}/chart.min.js"></script>
+  <script src="{{ assets_path }}/app.js"></script>
 
   <main class="container">
     {{ content | safe }}
@@ -32,7 +33,5 @@
       </p>
     </div>
   </footer>
-
-  <script src="{{ assets_path }}/app.js"></script>
 </body>
 </html>

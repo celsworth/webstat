@@ -56,7 +56,7 @@
   {% endif %}
 </section>
 
-{% if status_codes | length > 0 or agents_hits | length > 0 or agents_bandwidth | length > 0 or countries_hits | length > 0 %}
+{% if status_codes | length > 0 or agents | length > 0 or countries | length > 0 %}
 <section class="charts-col">
   <div class="charts-triple">
     {% if status_codes | length > 0 %}
@@ -64,12 +64,12 @@
       <canvas id="statusChart"></canvas>
     </div>
     {% endif %}
-    {% if countries_hits | length > 0 %}
+    {% if countries | length > 0 %}
     <div class="chart-box">
       <canvas id="countries_hitsChart"></canvas>
     </div>
     {% endif %}
-    {% if agents_hits | length > 0 or agents_bandwidth | length > 0 %}
+    {% if agents | length > 0 %}
     <div class="chart-box">
       <canvas id="agentsChart"></canvas>
     </div>
@@ -115,119 +115,53 @@
   {% include "templates/partials/_proto_method_tables.html.tera" %}
 </section>
 
-{% if agents_hits | length > 0 or agents_bandwidth | length > 0 %}
-<div class="stats-panel" data-tabs>
-  <div class="tab-group-header">
-    <span class="tab-group-title" data-tabs-title></span>
-    <div data-tabs-nav>
-      {% if agents_hits | length > 0 %}
-      <button class="tab-btn" data-tabs-target="bucket-agents-hits" data-tabs-label="Browser Families by Hits">Hits</button>
-      {% endif %}
-      {% if agents_bandwidth | length > 0 %}
-      <button class="tab-btn" data-tabs-target="bucket-agents-bandwidth" data-tabs-label="Browser Families by Bandwidth">Bandwidth</button>
-      {% endif %}
-    </div>
-  </div>
-  {% if agents_hits | length > 0 %}
-  <div id="bucket-agents-hits" data-tabs-panel>
-    <table class="data-table stats-panel__table">
-      <thead><tr><th>#</th><th>Browser Family</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr></thead>
-      <tbody>
-        {% for row in agents_hits %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td>{{ row.agent }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
-            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
-          </td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">
-            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
-  {% if agents_bandwidth | length > 0 %}
-  <div id="bucket-agents-bandwidth" data-tabs-panel>
-    <table class="data-table stats-panel__table">
-      <thead><tr><th>#</th><th>Browser Family</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr></thead>
-      <tbody>
-        {% for row in agents_bandwidth %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td>{{ row.agent }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
-            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
-          </td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">
-            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
+{% if agents | length > 0 %}
+<div class="stats-panel">
+  <table class="data-table stats-panel__table" id="bucket-agents-table">
+    <thead>
+      <tr><th>#</th><th>Browser Family</th><th class="num-col" data-col="2">Hits</th><th class="num-col" data-col="3">Bandwidth</th></tr>
+    </thead>
+    <tbody>
+      {% for row in agents %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.agent }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
+          <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
+        </td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">
+          <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <script>makeSortable('bucket-agents-table', 2, {{ top_n }});</script>
 </div>
 {% endif %}
 
-{% if countries_hits | length > 0 or countries_bandwidth | length > 0 %}
-<div class="stats-panel" data-tabs>
-  <div class="tab-group-header">
-    <span class="tab-group-title" data-tabs-title></span>
-    <div data-tabs-nav>
-      {% if countries_hits | length > 0 %}
-      <button class="tab-btn" data-tabs-target="bucket-countries_hits-hits" data-tabs-label="Top Countries by Hits">Hits</button>
-      {% endif %}
-      {% if countries_bandwidth | length > 0 %}
-      <button class="tab-btn" data-tabs-target="bucket-countries_hits-bandwidth" data-tabs-label="Top Countries by Bandwidth">Bandwidth</button>
-      {% endif %}
-    </div>
-  </div>
-  {% if countries_hits | length > 0 %}
-  <div id="bucket-countries_hits-hits" data-tabs-panel>
-    <table class="data-table stats-panel__table">
-      <thead><tr><th>#</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr></thead>
-      <tbody>
-        {% for row in countries_hits %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td>{{ row.country_flag }} {{ row.country_name }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
-            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
-          </td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">
-            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
-  {% if countries_bandwidth | length > 0 %}
-  <div id="bucket-countries_hits-bandwidth" data-tabs-panel>
-    <table class="data-table stats-panel__table">
-      <thead><tr><th>#</th><th>Country</th><th class="num-col">Hits</th><th class="num-col">Bandwidth</th></tr></thead>
-      <tbody>
-        {% for row in countries_bandwidth %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td>{{ row.country_flag }} {{ row.country_name }}</td>
-          <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
-            <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
-          </td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">
-            <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
+{% if countries | length > 0 %}
+<div class="stats-panel">
+  <table class="data-table stats-panel__table" id="bucket-countries-table">
+    <thead>
+      <tr><th>#</th><th>Country</th><th class="num-col" data-col="2">Hits</th><th class="num-col" data-col="3">Bandwidth</th></tr>
+    </thead>
+    <tbody>
+      {% for row in countries %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.country_flag }} {{ row.country_name }}</td>
+        <td class="num-col" data-value="{{ row.hits }}" title="{{ row.hits_exact_fmt }}">
+          <span class="pct-value">({{ row.pct_fmt }})</span> {{ row.hits_fmt }}
+        </td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">
+          <span class="pct-value">({{ row.bandwidth_pct_fmt }})</span> {{ row.bandwidth_fmt }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <script>makeSortable('bucket-countries-table', 2, {{ top_n }});</script>
 </div>
 {% endif %}
 

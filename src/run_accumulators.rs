@@ -20,14 +20,24 @@ pub(crate) struct UrlStats {
     pub(crate) rt_max: u32,
 }
 
-/// Per-URL error counters for the "top erroring URLs" report. Keyed by URL,
-/// splitting 4xx and 5xx responses so cardinality stays bounded to distinct URLs.
+/// Per-URL error counters for the "top erroring URLs" report. Keyed by URL.
+/// c4xx/c5xx are overflow buckets for codes not individually tracked.
 #[derive(Default)]
 pub(crate) struct ErrUrlStats {
+    pub(crate) c400: u64,
+    pub(crate) c401: u64,
+    pub(crate) c403: u64,
+    pub(crate) c404: u64,
+    pub(crate) c422: u64,
+    pub(crate) c429: u64,
     pub(crate) c4xx: u64,
+    pub(crate) c500: u64,
+    pub(crate) c502: u64,
+    pub(crate) c503: u64,
     pub(crate) c5xx: u64,
     pub(crate) bandwidth: u64,
 }
+
 
 /// Per-bucket accumulator: mirrors a subset of RunAccumulators for a single named bucket.
 #[derive(Default)]

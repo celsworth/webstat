@@ -1,94 +1,65 @@
-{# Top erroring URLs (4xx/5xx). Requires err_tab_prefix to be set before include,
-   e.g. {% set err_tab_prefix = "err" %} #}
-{% if top_error_urls_4xx | length > 0 or top_error_urls_5xx | length > 0 or top_error_urls_bandwidth | length > 0 %}
-{# When err_collapsible is set (overview page), render as a closed-by-default
-   accordion; otherwise a plain panel. #}
+{# Top erroring URLs. Single table with client-side column-header sort.
+   On the overview page (err_collapsible=true) the outer element is a <details>
+   with the panel styling. On monthly/yearly the panel wraps an inner <details>
+   matching the Daily/Hourly Statistics pattern. #}
+{% if top_error_urls | length > 0 %}
 {% if err_collapsible | default(value=false) %}
-<details class="stats-panel collapsible-section" data-tabs>
+<details class="stats-panel collapsible-section">
   <summary>Top Erroring URLs</summary>
 {% else %}
-<div class="stats-panel" data-tabs>
+<div class="stats-panel">
+  <details class="collapsible-section">
+    <summary>Top Erroring URLs</summary>
+    <div class="collapsible-section__body">
 {% endif %}
-  <div class="tab-group-header">
-    <span class="tab-group-title" data-tabs-title></span>
-    <div data-tabs-nav>
-      {% if top_error_urls_4xx | length > 0 %}
-      <button class="tab-btn" data-tabs-target="{{ err_tab_prefix }}-error-urls-4xx" data-tabs-label="Top Erroring URLs by 4xx">4xx</button>
-      {% endif %}
-      {% if top_error_urls_5xx | length > 0 %}
-      <button class="tab-btn" data-tabs-target="{{ err_tab_prefix }}-error-urls-5xx" data-tabs-label="Top Erroring URLs by 5xx">5xx</button>
-      {% endif %}
-      {% if top_error_urls_bandwidth | length > 0 %}
-      <button class="tab-btn" data-tabs-target="{{ err_tab_prefix }}-error-urls-bandwidth" data-tabs-label="Top Erroring URLs by Bandwidth">Bandwidth</button>
-      {% endif %}
-    </div>
+  <div style="overflow-x:auto">
+  <table class="data-table stats-panel__table" id="err-url-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>URL</th>
+        <th class="num-col" data-col="2" title="Sort by 400">400</th>
+        <th class="num-col" data-col="3" title="Sort by 401">401</th>
+        <th class="num-col" data-col="4" title="Sort by 403">403</th>
+        <th class="num-col" data-col="5" title="Sort by 404">404</th>
+        <th class="num-col" data-col="6" title="Sort by 422">422</th>
+        <th class="num-col" data-col="7" title="Sort by 429">429</th>
+        <th class="num-col" data-col="8" title="Sort by other 4xx">4xx</th>
+        <th class="num-col" data-col="9" title="Sort by 500">500</th>
+        <th class="num-col" data-col="10" title="Sort by 502">502</th>
+        <th class="num-col" data-col="11" title="Sort by 503">503</th>
+        <th class="num-col" data-col="12" title="Sort by other 5xx">5xx</th>
+        <th class="num-col" data-col="13" title="Sort by bandwidth">BW</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in top_error_urls %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td class="url-cell">{{ row.url }}</td>
+        <td class="num-col" data-value="{{ row.c400 }}">{{ row.c400_fmt }}</td>
+        <td class="num-col" data-value="{{ row.c401 }}">{{ row.c401_fmt }}</td>
+        <td class="num-col" data-value="{{ row.c403 }}">{{ row.c403_fmt }}</td>
+        <td class="num-col" data-value="{{ row.c404 }}">{{ row.c404_fmt }}</td>
+        <td class="num-col" data-value="{{ row.c422 }}">{{ row.c422_fmt }}</td>
+        <td class="num-col" data-value="{{ row.c429 }}">{{ row.c429_fmt }}</td>
+        <td class="num-col" data-value="{{ row.c4xx }}">{{ row.c4xx_fmt }}</td>
+        <td class="num-col" data-value="{{ row.c500 }}">{{ row.c500_fmt }}</td>
+        <td class="num-col" data-value="{{ row.c502 }}">{{ row.c502_fmt }}</td>
+        <td class="num-col" data-value="{{ row.c503 }}">{{ row.c503_fmt }}</td>
+        <td class="num-col" data-value="{{ row.c5xx }}">{{ row.c5xx_fmt }}</td>
+        <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
   </div>
-
-  {% if top_error_urls_4xx | length > 0 %}
-  <div id="{{ err_tab_prefix }}-error-urls-4xx" data-tabs-panel>
-    <table class="data-table stats-panel__table">
-      <thead>
-        <tr><th>#</th><th>URL</th><th class="num-col">4xx</th><th class="num-col">5xx</th><th class="num-col">Bandwidth</th></tr>
-      </thead>
-      <tbody>
-        {% for row in top_error_urls_4xx %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td class="url-cell">{{ row.url }}</td>
-          <td class="num-col" data-value="{{ row.c4xx }}" title="{{ row.c4xx_exact_fmt }}">{{ row.c4xx_fmt }}</td>
-          <td class="num-col" data-value="{{ row.c5xx }}" title="{{ row.c5xx_exact_fmt }}">{{ row.c5xx_fmt }}</td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
-
-  {% if top_error_urls_5xx | length > 0 %}
-  <div id="{{ err_tab_prefix }}-error-urls-5xx" data-tabs-panel>
-    <table class="data-table stats-panel__table">
-      <thead>
-        <tr><th>#</th><th>URL</th><th class="num-col">4xx</th><th class="num-col">5xx</th><th class="num-col">Bandwidth</th></tr>
-      </thead>
-      <tbody>
-        {% for row in top_error_urls_5xx %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td class="url-cell">{{ row.url }}</td>
-          <td class="num-col" data-value="{{ row.c4xx }}" title="{{ row.c4xx_exact_fmt }}">{{ row.c4xx_fmt }}</td>
-          <td class="num-col" data-value="{{ row.c5xx }}" title="{{ row.c5xx_exact_fmt }}">{{ row.c5xx_fmt }}</td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
-
-  {% if top_error_urls_bandwidth | length > 0 %}
-  <div id="{{ err_tab_prefix }}-error-urls-bandwidth" data-tabs-panel>
-    <table class="data-table stats-panel__table">
-      <thead>
-        <tr><th>#</th><th>URL</th><th class="num-col">4xx</th><th class="num-col">5xx</th><th class="num-col">Bandwidth</th></tr>
-      </thead>
-      <tbody>
-        {% for row in top_error_urls_bandwidth %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td class="url-cell">{{ row.url }}</td>
-          <td class="num-col" data-value="{{ row.c4xx }}" title="{{ row.c4xx_exact_fmt }}">{{ row.c4xx_fmt }}</td>
-          <td class="num-col" data-value="{{ row.c5xx }}" title="{{ row.c5xx_exact_fmt }}">{{ row.c5xx_fmt }}</td>
-          <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
+  <script>makeSortable('err-url-table', 5, {{ top_n }});</script>
 {% if err_collapsible | default(value=false) %}
 </details>
 {% else %}
+    </div>
+  </details>
 </div>
 {% endif %}
 {% endif %}

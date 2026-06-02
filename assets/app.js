@@ -1,26 +1,6 @@
 (function() {
   'use strict';
 
-  function initTabs(container) {
-    const buttons = Array.from(container.querySelectorAll('[data-tabs-target]'));
-    if (buttons.length === 0) return;
-
-    const titleEl = container.querySelector('[data-tabs-title]');
-    const panels = Array.from(container.querySelectorAll('[data-tabs-panel]'));
-
-    function activate(btn) {
-      const targetId = btn.dataset.tabsTarget;
-      buttons.forEach((b) => b.classList.toggle('tab-btn--active', b === btn));
-      panels.forEach((panel) => { panel.hidden = panel.id !== targetId; });
-      if (titleEl) titleEl.textContent = btn.dataset.tabsLabel || btn.textContent;
-    }
-
-    buttons.forEach((btn) => btn.addEventListener('click', () => activate(btn)));
-
-    const initial = buttons.find((b) => b.classList.contains('tab-btn--active')) || buttons[0];
-    activate(initial);
-  }
-
   function initCollapsible(details) {
     const body = details.querySelector('.collapsible-section__body');
     const summary = details.querySelector('summary');
@@ -65,7 +45,57 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('[data-tabs]').forEach(initTabs);
     document.querySelectorAll('.collapsible-section').forEach(initCollapsible);
   });
 })();
+
+// Attach a column-header sort + top-N visibility cap to a data table.
+// defaultSortCol: 0-based <td> index of the initial sort column (desc).
+// topN: max rows to display at once; remaining rows are hidden in the DOM.
+window.makeSortable = function(tableId, defaultSortCol, topN) {
+  var table = document.getElementById(tableId);
+  if (!table) return;
+  var tbody = table.querySelector('tbody');
+  var ths = table.querySelectorAll('thead th[data-col]');
+  var sortCol = defaultSortCol;
+  var sortAsc = false;
+
+  function applySort() {
+    var rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+      var av = parseFloat(a.querySelectorAll('td')[sortCol].dataset.value) || 0;
+      var bv = parseFloat(b.querySelectorAll('td')[sortCol].dataset.value) || 0;
+      return sortAsc ? av - bv : bv - av;
+    });
+    rows.forEach(function(r, i) {
+      r.querySelector('td').textContent = i + 1;
+      r.style.display = i < topN ? '' : 'none';
+      tbody.appendChild(r);
+    });
+  }
+
+  // Initial state: hide rows beyond topN (server pre-sorted by default col).
+  Array.from(tbody.querySelectorAll('tr')).forEach(function(r, i) {
+    if (i >= topN) r.style.display = 'none';
+  });
+
+  // Mark initial sort column.
+  ths.forEach(function(th) {
+    th.style.cursor = 'pointer';
+    if (parseInt(th.dataset.col, 10) === defaultSortCol) {
+      th.textContent += ' ▼'; // ▼
+    }
+    th.addEventListener('click', function() {
+      var col = parseInt(th.dataset.col, 10);
+      if (sortCol === col) {
+        sortAsc = !sortAsc;
+      } else {
+        sortCol = col;
+        sortAsc = false;
+      }
+      ths.forEach(function(h) { h.textContent = h.textContent.replace(/ [▲▼]$/, ''); });
+      th.textContent += sortAsc ? ' ▲' : ' ▼';
+      applySort();
+    });
+  });
+};

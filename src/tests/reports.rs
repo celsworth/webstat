@@ -198,11 +198,12 @@ fn report_generation_e2e_multi_year_outputs_pages_and_filters_referrers() {
     assert!(may_html.contains("Bandwidth per Day"));
     assert!(may_html.contains("status-row--5xx"));
     assert!(may_html.contains("Code 503 - Service Unavailable"));
-    // Top erroring URLs panel: /boom (503) must render a 5xx tab/table.
-    assert!(may_html.contains(r#"id="err-error-urls-5xx""#));
-    assert!(may_html.contains(r#"data-tabs-target="err-error-urls-5xx""#));
-    // The accordion treatment is overview-only; month pages keep a plain panel.
-    assert!(!may_html.contains("<summary>Top Erroring URLs</summary>"));
+    // Top erroring URLs panel: sortable table with per-code columns.
+    assert!(may_html.contains(r#"id="err-url-table""#));
+    assert!(may_html.contains(r#"data-col="11""#)); // 503 column header
+    // Month page wraps the table in an inner collapsible <details> (not overview-style outer).
+    assert!(may_html.contains("<summary>Top Erroring URLs</summary>"));
+    assert!(may_html.contains(r#"class="collapsible-section__body""#));
     assert!(may_html.contains("google.com"));
     assert!(!may_html.contains("mysite.test"));
     assert!(!may_html.contains("bot.html"));
@@ -698,5 +699,89 @@ fn generate_without_db_timestamps_regenerates_everything() {
     assert!(
         mtime(&year_html) > year_mtime_before,
         "year page must be regenerated when DB timestamps are absent"
+    );
+}
+
+#[test]
+fn bucket_pages_render_without_errors() {
+    // Regression: bucket_month.html.tera and bucket_year.html.tera used to
+    // reference `agents_hits` / `countries_hits` (old tab-split variable names)
+    // which were removed when tables became single sortable unions.  This test
+    // exercises full bucket page generation so template variable mismatches are
+    // caught at test time.
+    let temp = TempDir::new().expect("tempdir");
+    let log_path = temp.path().join("access.log");
+
+    // Two months of requests so both a bucket_month and a bucket_year page are
+    // generated.  Some hits go to /api/* (tagged "api") and some to /static/*
+    // (tagged "static") to populate agents, countries, and URL tables.
+    let lines: Vec<String> = vec![
+        // May 2026 — api bucket hits
+        sample_line_at("1.1.1.1", "10/May/2026:10:00:00 +0000", "/api/users",  200, 500, "-", "Mozilla/5.0"),
+        sample_line_at("1.1.1.2", "10/May/2026:10:01:00 +0000", "/api/orders", 200, 300, "-", "Chrome/120"),
+        sample_line_at("2.2.2.2", "10/May/2026:10:02:00 +0000", "/api/users",  404,  50, "-", "Mozilla/5.0"),
+        // May 2026 — static bucket hits
+        sample_line_at("1.1.1.1", "10/May/2026:11:00:00 +0000", "/static/app.js", 200, 2000, "-", "Mozilla/5.0"),
+        // June 2026 — forces a second month (and thus year page)
+        sample_line_at("3.3.3.3", "05/Jun/2026:09:00:00 +0000", "/api/ping",  200, 10, "-", "Firefox/120"),
+    ];
+    write_plain_file(&log_path, &lines);
+
+    let cfg = Config {
+        site_name: "Bucket Test".to_string(),
+        log_glob: log_path.to_str().unwrap().to_string(),
+        rules: vec![
+            RawRule {
+                name: "api bucket".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: serde_yaml::Value::String("/api/".into()),
+                }]),
+                action: RawAction::Bucket("api".into()),
+            },
+            RawRule {
+                name: "static bucket".into(),
+                enabled: true,
+                when: RawWhen::List(vec![RawCondition {
+                    field: "url".into(),
+                    op: "starts_with".into(),
+                    value: serde_yaml::Value::String("/static/".into()),
+                }]),
+                action: RawAction::Bucket("static".into()),
+            },
+        ],
+        ..base_cfg(&temp)
+    };
+
+    process_logs(&cfg);
+    // Must not panic — template variable mismatches cause a descriptive error here.
+    generate_html(&cfg).expect("bucket page generation must succeed");
+
+    let output_dir = temp.path().join("output");
+
+    // Both bucket sub-pages must exist.
+    assert!(
+        output_dir.join("2026").join("05").join("buckets").join("api").join("index.html").exists(),
+        "bucket month page for api must be generated"
+    );
+    assert!(
+        output_dir.join("2026").join("buckets").join("api").join("index.html").exists(),
+        "bucket year page for api must be generated"
+    );
+
+    // Spot-check that the rendered bucket month page contains sortable-table
+    // markup (agents and countries now use makeSortable, not data-tabs).
+    let bucket_may = fs::read_to_string(
+        output_dir.join("2026").join("05").join("buckets").join("api").join("index.html")
+    ).expect("read bucket may");
+    assert!(
+        bucket_may.contains("bucket-agents-table") || !bucket_may.contains("Browser Family"),
+        "agents table must use sortable id or be absent"
+    );
+    assert!(
+        !bucket_may.contains("bucket-agents-hits"),
+        "old tab-split variable name must not appear in rendered output"
     );
 }

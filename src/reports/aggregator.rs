@@ -156,27 +156,18 @@ pub(super) fn monthly_summary(
         totals.p95_rt_ms = Some(format_ms(p95 as f64));
     }
 
-    let top_urls_hits = top_urls_hits(conn, &period, top_n, compact_counts)?;
-    let top_urls_bandwidth = top_urls_bandwidth(conn, &period, top_n, compact_counts)?;
-    let top_error_urls_4xx = top_error_urls_sorted(conn, &period, top_n, compact_counts, "4xx")?;
-    let top_error_urls_5xx = top_error_urls_sorted(conn, &period, top_n, compact_counts, "5xx")?;
-    let top_error_urls_bandwidth =
-        top_error_urls_sorted(conn, &period, top_n, compact_counts, "bandwidth")?;
-    let top_ips_hits = top_ips_hits(conn, &period, top_n, compact_counts, anonymise_ips)?;
-    let top_ips_bandwidth = top_ips_bandwidth(conn, &period, top_n, compact_counts, anonymise_ips)?;
+    let top_urls = top_urls_union(conn, &period, top_n, compact_counts)?;
+    let top_error_urls = top_error_urls_period(conn, &period, top_n, compact_counts)?;
+    let top_ips = top_ips_union(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_refs = top_refs(conn, &period, top_n, compact_counts)?;
-
-    let top_agents_hits = top_agents_sorted(conn, &period, top_n, compact_counts, "hits")?;
-    let top_agents_bandwidth = top_agents_sorted(conn, &period, top_n, compact_counts, "bandwidth")?;
-    let top_countries_hits = top_countries_sorted(conn, &period, top_n, compact_counts, "hits")?;
-    let top_countries_bandwidth = top_countries_sorted(conn, &period, top_n, compact_counts, "bandwidth")?;
+    let top_agents = top_agents_union(conn, &period, top_n, compact_counts)?;
+    let top_countries = top_countries_union(conn, &period, top_n, compact_counts)?;
 
     let status_codes = status_codes(conn, &period, compact_counts)?;
     let proto_codes = proto_codes(conn, &period, compact_counts)?;
     let method_codes = method_codes(conn, &period, compact_counts)?;
     let daily_avg_max = daily_avg_max_from_rows(&daily, compact_counts);
     let hourly_avg_max = hourly_avg_max(conn, year, month, compact_counts)?;
-    let top_slow_urls = top_urls_avg_rt(conn, &period, top_n, compact_counts)?;
     let daily_rt_stats = daily_rt_stats_for_month(conn, year, month)?;
     let rt_distribution_buckets = monthly_rt_histogram_buckets(conn, &period)?;
     let buckets = bucket_index_rows(conn, &period, compact_counts)?;
@@ -189,24 +180,17 @@ pub(super) fn monthly_summary(
         daily,
         hourly,
         totals,
-        top_urls_hits,
-        top_urls_bandwidth,
-        top_error_urls_4xx,
-        top_error_urls_5xx,
-        top_error_urls_bandwidth,
-        top_ips_hits,
-        top_ips_bandwidth,
+        top_urls,
+        top_error_urls,
+        top_ips,
         top_refs,
-        top_agents_hits,
-        top_agents_bandwidth,
-        top_countries_hits,
-        top_countries_bandwidth,
+        top_agents,
+        top_countries,
         status_codes,
         proto_codes,
         method_codes,
         daily_avg_max,
         hourly_avg_max,
-        top_slow_urls,
         daily_rt_stats,
         rt_distribution_buckets,
         buckets,
@@ -229,49 +213,34 @@ pub(super) fn yearly_summary(
         totals.p95_rt_ms = Some(format_ms(p95 as f64));
     }
 
-    let top_urls_hits = top_urls_hits(conn, &period, top_n, compact_counts)?;
-    let top_urls_bandwidth = top_urls_bandwidth(conn, &period, top_n, compact_counts)?;
-    let top_error_urls_4xx = top_error_urls_sorted(conn, &period, top_n, compact_counts, "4xx")?;
-    let top_error_urls_5xx = top_error_urls_sorted(conn, &period, top_n, compact_counts, "5xx")?;
-    let top_error_urls_bandwidth =
-        top_error_urls_sorted(conn, &period, top_n, compact_counts, "bandwidth")?;
-    let top_ips_hits = top_ips_hits(conn, &period, top_n, compact_counts, anonymise_ips)?;
-    let top_ips_bandwidth = top_ips_bandwidth(conn, &period, top_n, compact_counts, anonymise_ips)?;
+    let top_urls = top_urls_union(conn, &period, top_n, compact_counts)?;
+    let top_error_urls = top_error_urls_period(conn, &period, top_n, compact_counts)?;
+    let top_ips = top_ips_union(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_refs = top_refs(conn, &period, top_n, compact_counts)?;
-    let top_agents_hits = top_agents_sorted(conn, &period, top_n, compact_counts, "hits")?;
-    let top_agents_bandwidth = top_agents_sorted(conn, &period, top_n, compact_counts, "bandwidth")?;
-    let top_countries_hits = top_countries_sorted(conn, &period, top_n, compact_counts, "hits")?;
-    let top_countries_bandwidth = top_countries_sorted(conn, &period, top_n, compact_counts, "bandwidth")?;
+    let top_agents = top_agents_union(conn, &period, top_n, compact_counts)?;
+    let top_countries = top_countries_union(conn, &period, top_n, compact_counts)?;
 
     let status_codes = status_codes(conn, &period, compact_counts)?;
     let proto_codes = proto_codes(conn, &period, compact_counts)?;
     let method_codes = method_codes(conn, &period, compact_counts)?;
     let monthly_rt_stats = monthly_rt_stats_for_year(conn, year)?;
-    let top_slow_urls = top_urls_avg_rt(conn, &period, top_n, compact_counts)?;
     let buckets = bucket_index_rows(conn, &period, compact_counts)?;
     let weekday_hour = weekday_hour_grid(conn, &format!("{period}-%"), compact_counts)?;
 
     Ok(YearlySummary {
         year,
         monthly_rows,
-        top_urls_hits,
-        top_urls_bandwidth,
-        top_error_urls_4xx,
-        top_error_urls_5xx,
-        top_error_urls_bandwidth,
-        top_ips_hits,
-        top_ips_bandwidth,
+        top_urls,
+        top_error_urls,
+        top_ips,
         top_refs,
-        top_agents_hits,
-        top_agents_bandwidth,
-        top_countries_hits,
-        top_countries_bandwidth,
+        top_agents,
+        top_countries,
         status_codes,
         proto_codes,
         method_codes,
         totals,
         monthly_rt_stats,
-        top_slow_urls,
         buckets,
         weekday_hour,
     })
@@ -285,14 +254,9 @@ pub(super) fn overall_summary(
     let yearly_rows = yearly_rows(conn, compact_counts)?;
     let totals = overall_totals(conn, compact_counts)?;
 
-    let top_error_urls_4xx = top_error_urls_all(conn, top_n, compact_counts, "4xx")?;
-    let top_error_urls_5xx = top_error_urls_all(conn, top_n, compact_counts, "5xx")?;
-    let top_error_urls_bandwidth = top_error_urls_all(conn, top_n, compact_counts, "bandwidth")?;
-
-    let top_agents_hits = top_agents_sorted_all(conn, top_n, compact_counts, "hits")?;
-    let top_agents_bandwidth = top_agents_sorted_all(conn, top_n, compact_counts, "bandwidth")?;
-    let top_countries_hits = top_countries_sorted_all(conn, top_n, compact_counts, "hits")?;
-    let top_countries_bandwidth = top_countries_sorted_all(conn, top_n, compact_counts, "bandwidth")?;
+    let top_error_urls = top_error_urls_all(conn, top_n, compact_counts)?;
+    let top_agents = top_agents_union_all(conn, top_n, compact_counts)?;
+    let top_countries = top_countries_union_all(conn, top_n, compact_counts)?;
 
     let status_codes = status_codes_all(conn, compact_counts)?;
     let all_time_available = all_time_visitor_count(conn)? > 0;
@@ -301,13 +265,9 @@ pub(super) fn overall_summary(
 
     Ok(OverallSummary {
         yearly_rows,
-        top_error_urls_4xx,
-        top_error_urls_5xx,
-        top_error_urls_bandwidth,
-        top_agents_hits,
-        top_agents_bandwidth,
-        top_countries_hits,
-        top_countries_bandwidth,
+        top_error_urls,
+        top_agents,
+        top_countries,
         status_codes,
         totals,
         all_time_available,
@@ -865,84 +825,26 @@ fn all_time_visitor_count(conn: &Connection) -> Result<u64> {
     Ok(v4.len() + v6.values().map(|t| t.len()).sum::<u64>())
 }
 
-fn top_urls_hits(
-    conn: &Connection,
-    period: &str,
-    top_n: usize,
-    compact_counts: bool,
-) -> Result<Vec<TopUrlRow>> {
-    top_urls_sorted(conn, period, top_n, compact_counts, "hits")
-}
-
-fn top_urls_bandwidth(
-    conn: &Connection,
-    period: &str,
-    top_n: usize,
-    compact_counts: bool,
-) -> Result<Vec<TopUrlRow>> {
-    top_urls_sorted(conn, period, top_n, compact_counts, "bandwidth")
-}
-
-fn top_urls_sorted(
-    conn: &Connection,
-    period: &str,
-    top_n: usize,
-    compact_counts: bool,
-    order_col: &str,
-) -> Result<Vec<TopUrlRow>> {
-    if top_n == 0 {
-        return Ok(Vec::new());
+fn build_url_row(
+    url: String, hits: u64, bandwidth: u64,
+    rt_sum: u64, rt_count: u64, rt_max: u32,
+    compact_counts: bool, hits_total: f64, bw_total: f64,
+) -> TopUrlRow {
+    let (avg_ms_fmt, max_ms_fmt) = rt_display(rt_sum, rt_count, rt_max);
+    TopUrlRow {
+        url,
+        hits,
+        bandwidth,
+        hits_fmt: count_fmt(hits, compact_counts),
+        hits_exact_fmt: super::number_fmt(hits),
+        bandwidth_fmt: format_bytes(bandwidth),
+        pct_fmt: percent_str(hits as f64, hits_total),
+        bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
+        avg_ms_fmt,
+        max_ms_fmt,
+        avg_ms_raw: if rt_count > 0 { Some(rt_sum / rt_count) } else { None },
+        max_ms_raw: rt_max,
     }
-    let is_monthly = period.len() == 7;
-    let (op, param) = period_clause(period);
-
-    // For monthly: read rt_hist blob to compute P95. For yearly: GROUP BY SUM, no blob.
-    let sql = if is_monthly {
-        format!(
-            "SELECT url, hits, bandwidth, rt_sum, rt_count, rt_max \
-             FROM top_urls WHERE period {op} \
-             ORDER BY {order_col} DESC LIMIT ?2"
-        )
-    } else {
-        format!(
-            "SELECT url, SUM(hits), SUM(bandwidth), SUM(rt_sum), SUM(rt_count), MAX(rt_max) \
-             FROM top_urls WHERE period {op} \
-             GROUP BY url ORDER BY SUM({order_col}) DESC LIMIT ?2"
-        )
-    };
-
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt
-        .query_map(params![param, top_n as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)? as u64,
-                row.get::<_, i64>(2)? as u64,
-                row.get::<_, i64>(3)? as u64,
-                row.get::<_, i64>(4)? as u64,
-                row.get::<_, i64>(5)? as u32,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-
-    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
-    rows.into_iter()
-        .map(|(url, hits, bandwidth, rt_sum, rt_count, rt_max)| {
-            let (avg_ms_fmt, max_ms_fmt) = rt_display(rt_sum, rt_count, rt_max);
-            Ok(TopUrlRow {
-                url,
-                hits,
-                bandwidth,
-                hits_fmt: count_fmt(hits, compact_counts),
-                hits_exact_fmt: super::number_fmt(hits),
-                bandwidth_fmt: format_bytes(bandwidth),
-                pct_fmt: percent_str(hits as f64, hits_total),
-                bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
-                avg_ms_fmt,
-                max_ms_fmt,
-            })
-        })
-        .collect()
 }
 
 /// Compute avg and max display strings from rt fields.
@@ -956,189 +858,531 @@ fn rt_display(rt_sum: u64, rt_count: u64, rt_max: u32) -> (Option<String>, Optio
     )
 }
 
-/// SQL ORDER BY expression for the error-URL sort `key`, for monthly (raw rows)
-/// or yearly/all-time (summed) queries.
-fn error_url_order(key: &str, summed: bool) -> &'static str {
-    match (key, summed) {
-        ("4xx", false) => "c4xx",
-        ("5xx", false) => "c5xx",
-        ("bandwidth", false) => "bandwidth",
-        ("4xx", true) => "SUM(c4xx)",
-        ("5xx", true) => "SUM(c5xx)",
-        _ => "SUM(bandwidth)",
-    }
-}
+// ── Union query helpers ───────────────────────────────────────────────────────
+// Each function runs multiple sort-order queries, deduplicates by key, and
+// returns a single Vec sorted by hits descending.  This ensures every column
+// in the sortable table has its top-N represented in the DOM.
 
-fn build_error_url_rows(
-    raw: Vec<(String, u64, u64, u64)>,
-    compact_counts: bool,
-) -> Vec<ErrorUrlRow> {
-    raw.into_iter()
-        .map(|(url, c4xx, c5xx, bandwidth)| ErrorUrlRow {
-            url,
-            c4xx,
-            c5xx,
-            bandwidth,
-            c4xx_fmt: count_fmt(c4xx, compact_counts),
-            c4xx_exact_fmt: super::number_fmt(c4xx),
-            c5xx_fmt: count_fmt(c5xx, compact_counts),
-            c5xx_exact_fmt: super::number_fmt(c5xx),
-            bandwidth_fmt: format_bytes(bandwidth),
-        })
-        .collect()
-}
-
-/// Top erroring URLs for a monthly ("YYYY-MM") or yearly ("YYYY") period,
-/// sorted by `key` ("4xx", "5xx", or "bandwidth").
-fn top_error_urls_sorted(
+fn top_urls_union(
     conn: &Connection,
     period: &str,
     top_n: usize,
     compact_counts: bool,
-    key: &str,
+) -> Result<Vec<TopUrlRow>> {
+    if top_n == 0 {
+        return Ok(Vec::new());
+    }
+    let is_monthly = period.len() == 7;
+    let (op, param) = period_clause(period);
+    type Raw = (String, u64, u64, u64, u64, u32);
+    let mut seen: ahash::AHashMap<String, Raw> = ahash::AHashMap::new();
+
+    for order_col in ["hits", "bandwidth"] {
+        let sql = if is_monthly {
+            format!("SELECT url,hits,bandwidth,rt_sum,rt_count,rt_max \
+                     FROM top_urls WHERE period {op} ORDER BY {order_col} DESC LIMIT ?2")
+        } else {
+            format!("SELECT url,SUM(hits),SUM(bandwidth),SUM(rt_sum),SUM(rt_count),MAX(rt_max) \
+                     FROM top_urls WHERE period {op} GROUP BY url \
+                     ORDER BY SUM({order_col}) DESC LIMIT ?2")
+        };
+        let mut stmt = conn.prepare(&sql)?;
+        for row in stmt.query_map(params![param, top_n as i64], |r| {
+            Ok((r.get::<_,String>(0)?, r.get::<_,i64>(1)? as u64, r.get::<_,i64>(2)? as u64,
+                r.get::<_,i64>(3)? as u64, r.get::<_,i64>(4)? as u64, r.get::<_,i64>(5)? as u32))
+        })? {
+            let r = row?;
+            seen.entry(r.0.clone()).or_insert(r);
+        }
+    }
+    // avg RT sort
+    let rt_sql = if is_monthly {
+        format!("SELECT url,hits,bandwidth,rt_sum,rt_count,rt_max \
+                 FROM top_urls WHERE period {op} AND rt_count>0 \
+                 ORDER BY rt_sum*1.0/rt_count DESC LIMIT ?2")
+    } else {
+        format!("SELECT url,SUM(hits),SUM(bandwidth),SUM(rt_sum),SUM(rt_count),MAX(rt_max) \
+                 FROM top_urls WHERE period {op} GROUP BY url HAVING SUM(rt_count)>0 \
+                 ORDER BY SUM(rt_sum)*1.0/SUM(rt_count) DESC LIMIT ?2")
+    };
+    let mut stmt = conn.prepare(&rt_sql)?;
+    for row in stmt.query_map(params![param, top_n as i64], |r| {
+        Ok((r.get::<_,String>(0)?, r.get::<_,i64>(1)? as u64, r.get::<_,i64>(2)? as u64,
+            r.get::<_,i64>(3)? as u64, r.get::<_,i64>(4)? as u64, r.get::<_,i64>(5)? as u32))
+    })? {
+        let r = row?;
+        seen.entry(r.0.clone()).or_insert(r);
+    }
+
+    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
+    let mut raw: Vec<Raw> = seen.into_values().collect();
+    raw.sort_unstable_by(|a, b| b.1.cmp(&a.1).then_with(|| b.2.cmp(&a.2)));
+    Ok(raw.into_iter()
+        .map(|(url, hits, bw, rt_sum, rt_count, rt_max)|
+            build_url_row(url, hits, bw, rt_sum, rt_count, rt_max, compact_counts, hits_total, bw_total))
+        .collect())
+}
+
+fn top_ips_union(
+    conn: &Connection,
+    period: &str,
+    top_n: usize,
+    compact_counts: bool,
+    anonymise_ips: bool,
+) -> Result<Vec<TopHostRow>> {
+    let (op, param) = period_clause(period);
+    type Raw = (u8, u64, u64, u64, u64, String, String);
+    let mut seen: ahash::AHashMap<(u8, u64, u64), Raw> = ahash::AHashMap::new();
+
+    for order_col in ["hits", "bandwidth"] {
+        let sql = format!(
+            "SELECT t.host_kind,t.host_hi,t.host_lo,SUM(t.hits),SUM(t.bandwidth),\
+             COALESCE(MAX(t.country_code),'--'),COALESCE(MAX(cn.country_name),'Unknown') \
+             FROM top_ips t LEFT JOIN countries cn ON cn.country_code=t.country_code \
+             WHERE t.period {op} GROUP BY t.host_kind,t.host_hi,t.host_lo \
+             ORDER BY {order_col} DESC,hits DESC LIMIT ?2"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        for row in stmt.query_map(params![param, top_n as i64], |r| {
+            Ok((r.get::<_,i64>(0)? as u8, r.get::<_,i64>(1)? as u64, r.get::<_,i64>(2)? as u64,
+                r.get::<_,i64>(3)? as u64, r.get::<_,i64>(4)? as u64,
+                r.get::<_,String>(5)?, r.get::<_,String>(6)?))
+        })? {
+            let r = row?;
+            seen.entry((r.0, r.1, r.2)).or_insert(r);
+        }
+    }
+
+    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
+    let mut raw: Vec<Raw> = seen.into_values().collect();
+    raw.sort_unstable_by(|a, b| b.3.cmp(&a.3).then_with(|| b.4.cmp(&a.4)));
+    Ok(raw.into_iter().map(|(hk, hh, hl, hits, bw, cc, cn)| TopHostRow {
+        host: decode_host(hk, hh, hl, anonymise_ips),
+        hits, bandwidth: bw,
+        country_flag: flag_emoji(&cc),
+        country_code: cc, country_name: cn,
+        hits_fmt: count_fmt(hits, compact_counts),
+        hits_exact_fmt: super::number_fmt(hits),
+        bandwidth_fmt: format_bytes(bw),
+        pct_fmt: percent_str(hits as f64, hits_total),
+        bandwidth_pct_fmt: percent_str(bw as f64, bw_total),
+    }).collect())
+}
+
+fn top_agents_union(
+    conn: &Connection,
+    period: &str,
+    top_n: usize,
+    compact_counts: bool,
+) -> Result<Vec<TopAgentRow>> {
+    if top_n == 0 { return Ok(Vec::new()); }
+    let (op, param) = period_clause(period);
+    let mut seen: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
+
+    for order_col in ["hits", "bandwidth"] {
+        let sql = format!(
+            "SELECT agent_family,SUM(hits),SUM(bandwidth) FROM top_agents \
+             WHERE period {op} GROUP BY agent_family ORDER BY {order_col} DESC LIMIT ?2"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        for row in stmt.query_map(params![param, top_n as i64], |r| {
+            Ok((r.get::<_,String>(0)?, r.get::<_,i64>(1)? as u64, r.get::<_,i64>(2)? as u64))
+        })? {
+            let (agent, hits, bw) = row?;
+            seen.entry(agent).or_insert((hits, bw));
+        }
+    }
+
+    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
+    let mut raw: Vec<(String, u64, u64)> = seen.into_iter().map(|(k,(h,b))| (k,h,b)).collect();
+    raw.sort_unstable_by(|a, b| b.1.cmp(&a.1).then_with(|| b.2.cmp(&a.2)));
+    Ok(build_agent_rows(raw, compact_counts, hits_total, bw_total))
+}
+
+fn top_agents_union_all(
+    conn: &Connection,
+    top_n: usize,
+    compact_counts: bool,
+) -> Result<Vec<TopAgentRow>> {
+    if top_n == 0 { return Ok(Vec::new()); }
+    let mut seen: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
+
+    for order_col in ["hits", "bandwidth"] {
+        let sql = format!(
+            "SELECT agent_family,SUM(hits),SUM(bandwidth) FROM top_agents \
+             GROUP BY agent_family ORDER BY {order_col} DESC LIMIT ?1"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        for row in stmt.query_map(params![top_n as i64], |r| {
+            Ok((r.get::<_,String>(0)?, r.get::<_,i64>(1)? as u64, r.get::<_,i64>(2)? as u64))
+        })? {
+            let (agent, hits, bw) = row?;
+            seen.entry(agent).or_insert((hits, bw));
+        }
+    }
+
+    let (hits_total, bw_total) = all_time_hits_bw_totals(conn)?;
+    let mut raw: Vec<(String, u64, u64)> = seen.into_iter().map(|(k,(h,b))| (k,h,b)).collect();
+    raw.sort_unstable_by(|a, b| b.1.cmp(&a.1).then_with(|| b.2.cmp(&a.2)));
+    Ok(build_agent_rows(raw, compact_counts, hits_total, bw_total))
+}
+
+fn top_countries_union(
+    conn: &Connection,
+    period: &str,
+    top_n: usize,
+    compact_counts: bool,
+) -> Result<Vec<TopCountryRow>> {
+    if top_n == 0 { return Ok(Vec::new()); }
+    let (op, param) = period_clause(period);
+    let mut seen: ahash::AHashMap<String, (String, u64, u64)> = ahash::AHashMap::new();
+
+    for order_col in ["hits", "bandwidth"] {
+        let sql = format!(
+            "SELECT c.country_code,COALESCE(n.country_name,'Unknown'),SUM(c.hits),SUM(c.bandwidth) \
+             FROM top_countries c LEFT JOIN countries n ON n.country_code=c.country_code \
+             WHERE c.period {op} GROUP BY c.country_code ORDER BY {order_col} DESC LIMIT ?2"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        for row in stmt.query_map(params![param, top_n as i64], |r| {
+            Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,i64>(2)? as u64, r.get::<_,i64>(3)? as u64))
+        })? {
+            let (cc, cn, hits, bw) = row?;
+            seen.entry(cc).or_insert((cn, hits, bw));
+        }
+    }
+
+    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
+    let mut raw: Vec<(String, String, u64, u64)> = seen.into_iter().map(|(cc,(cn,h,b))| (cc,cn,h,b)).collect();
+    raw.sort_unstable_by(|a, b| b.2.cmp(&a.2).then_with(|| b.3.cmp(&a.3)));
+    Ok(build_country_rows(raw, compact_counts, hits_total, bw_total))
+}
+
+fn top_countries_union_all(
+    conn: &Connection,
+    top_n: usize,
+    compact_counts: bool,
+) -> Result<Vec<TopCountryRow>> {
+    if top_n == 0 { return Ok(Vec::new()); }
+    let mut seen: ahash::AHashMap<String, (String, u64, u64)> = ahash::AHashMap::new();
+
+    for order_col in ["hits", "bandwidth"] {
+        let sql = format!(
+            "WITH agg AS (SELECT country_code,SUM(hits) AS hits,SUM(bandwidth) AS bandwidth \
+             FROM top_countries GROUP BY country_code) \
+             SELECT a.country_code,COALESCE(n.country_name,'Unknown'),a.hits,a.bandwidth \
+             FROM agg a LEFT JOIN countries n ON n.country_code=a.country_code \
+             ORDER BY {order_col} DESC LIMIT ?1"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        for row in stmt.query_map(params![top_n as i64], |r| {
+            Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,i64>(2)? as u64, r.get::<_,i64>(3)? as u64))
+        })? {
+            let (cc, cn, hits, bw) = row?;
+            seen.entry(cc).or_insert((cn, hits, bw));
+        }
+    }
+
+    let (hits_total, bw_total) = all_time_hits_bw_totals(conn)?;
+    let mut raw: Vec<(String, String, u64, u64)> = seen.into_iter().map(|(cc,(cn,h,b))| (cc,cn,h,b)).collect();
+    raw.sort_unstable_by(|a, b| b.2.cmp(&a.2).then_with(|| b.3.cmp(&a.3)));
+    Ok(build_country_rows(raw, compact_counts, hits_total, bw_total))
+}
+
+fn bucket_top_urls_union(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+    top_n: usize,
+    compact_counts: bool,
+    hits_total: f64,
+    bw_total: f64,
+) -> Result<Vec<TopUrlRow>> {
+    if top_n == 0 { return Ok(Vec::new()); }
+    let is_monthly = period.len() == 7;
+    let (op, param) = period_clause(period);
+    type Raw = (String, u64, u64, u64, u64, u32);
+    let mut seen: ahash::AHashMap<String, Raw> = ahash::AHashMap::new();
+
+    for order_col in ["hits", "bandwidth"] {
+        let sql = if is_monthly {
+            format!("SELECT url,hits,bandwidth,rt_sum,rt_count,rt_max \
+                     FROM bucket_urls WHERE period {op} AND bucket=?2 \
+                     ORDER BY {order_col} DESC LIMIT ?3")
+        } else {
+            format!("SELECT url,SUM(hits),SUM(bandwidth),SUM(rt_sum),SUM(rt_count),MAX(rt_max) \
+                     FROM bucket_urls WHERE period {op} AND bucket=?2 GROUP BY url \
+                     ORDER BY SUM({order_col}) DESC LIMIT ?3")
+        };
+        let mut stmt = conn.prepare(&sql)?;
+        for row in stmt.query_map(params![param, bucket, top_n as i64], |r| {
+            Ok((r.get::<_,String>(0)?, r.get::<_,i64>(1)? as u64, r.get::<_,i64>(2)? as u64,
+                r.get::<_,i64>(3)? as u64, r.get::<_,i64>(4)? as u64, r.get::<_,i64>(5)? as u32))
+        })? {
+            let r = row?;
+            seen.entry(r.0.clone()).or_insert(r);
+        }
+    }
+    let rt_sql = if is_monthly {
+        format!("SELECT url,hits,bandwidth,rt_sum,rt_count,rt_max \
+                 FROM bucket_urls WHERE period {op} AND bucket=?2 AND rt_count>0 \
+                 ORDER BY rt_sum*1.0/rt_count DESC LIMIT ?3")
+    } else {
+        format!("SELECT url,SUM(hits),SUM(bandwidth),SUM(rt_sum),SUM(rt_count),MAX(rt_max) \
+                 FROM bucket_urls WHERE period {op} AND bucket=?2 GROUP BY url \
+                 HAVING SUM(rt_count)>0 ORDER BY SUM(rt_sum)*1.0/SUM(rt_count) DESC LIMIT ?3")
+    };
+    let mut stmt = conn.prepare(&rt_sql)?;
+    for row in stmt.query_map(params![param, bucket, top_n as i64], |r| {
+        Ok((r.get::<_,String>(0)?, r.get::<_,i64>(1)? as u64, r.get::<_,i64>(2)? as u64,
+            r.get::<_,i64>(3)? as u64, r.get::<_,i64>(4)? as u64, r.get::<_,i64>(5)? as u32))
+    })? {
+        let r = row?;
+        seen.entry(r.0.clone()).or_insert(r);
+    }
+
+    let mut raw: Vec<Raw> = seen.into_values().collect();
+    raw.sort_unstable_by(|a, b| b.1.cmp(&a.1).then_with(|| b.2.cmp(&a.2)));
+    Ok(raw.into_iter()
+        .map(|(url, hits, bw, rt_sum, rt_count, rt_max)|
+            build_url_row(url, hits, bw, rt_sum, rt_count, rt_max, compact_counts, hits_total, bw_total))
+        .collect())
+}
+
+fn bucket_agents_union(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+    top_n: usize,
+    compact_counts: bool,
+    hits_total: f64,
+    bw_total: f64,
+) -> Result<Vec<TopAgentRow>> {
+    if top_n == 0 { return Ok(Vec::new()); }
+    let (op, param) = period_clause(period);
+    let mut seen: ahash::AHashMap<String, (u64, u64)> = ahash::AHashMap::new();
+
+    for order_col in ["hits", "bandwidth"] {
+        let sql = format!(
+            "SELECT agent_family,SUM(hits),SUM(bandwidth) FROM bucket_agents \
+             WHERE period {op} AND bucket=?2 GROUP BY agent_family \
+             ORDER BY SUM({order_col}) DESC LIMIT ?3"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        for row in stmt.query_map(params![param, bucket, top_n as i64], |r| {
+            Ok((r.get::<_,String>(0)?, r.get::<_,i64>(1)? as u64, r.get::<_,i64>(2)? as u64))
+        })? {
+            let (agent, hits, bw) = row?;
+            seen.entry(agent).or_insert((hits, bw));
+        }
+    }
+
+    let mut raw: Vec<(String, u64, u64)> = seen.into_iter().map(|(k,(h,b))| (k,h,b)).collect();
+    raw.sort_unstable_by(|a, b| b.1.cmp(&a.1).then_with(|| b.2.cmp(&a.2)));
+    Ok(build_agent_rows(raw, compact_counts, hits_total, bw_total))
+}
+
+fn bucket_countries_union(
+    conn: &Connection,
+    period: &str,
+    bucket: &str,
+    top_n: usize,
+    compact_counts: bool,
+    hits_total: f64,
+    bw_total: f64,
+) -> Result<Vec<TopCountryRow>> {
+    if top_n == 0 { return Ok(Vec::new()); }
+    let (op, param) = period_clause(period);
+    let mut seen: ahash::AHashMap<String, (String, u64, u64)> = ahash::AHashMap::new();
+
+    for order_col in ["hits", "bandwidth"] {
+        let sql = format!(
+            "SELECT bc.country_code,COALESCE(n.country_name,'Unknown'),SUM(bc.hits),SUM(bc.bandwidth) \
+             FROM bucket_countries bc LEFT JOIN countries n ON n.country_code=bc.country_code \
+             WHERE bc.period {op} AND bc.bucket=?2 GROUP BY bc.country_code \
+             ORDER BY SUM(bc.{order_col}) DESC LIMIT ?3"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        for row in stmt.query_map(params![param, bucket, top_n as i64], |r| {
+            Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,i64>(2)? as u64, r.get::<_,i64>(3)? as u64))
+        })? {
+            let (cc, cn, hits, bw) = row?;
+            seen.entry(cc).or_insert((cn, hits, bw));
+        }
+    }
+
+    let mut raw: Vec<(String, String, u64, u64)> = seen.into_iter().map(|(cc,(cn,h,b))| (cc,cn,h,b)).collect();
+    raw.sort_unstable_by(|a, b| b.2.cmp(&a.2).then_with(|| b.3.cmp(&a.3)));
+    Ok(build_country_rows(raw, compact_counts, hits_total, bw_total))
+}
+
+/// SQL ORDER BY expression for the error-URL sort `key`, for monthly (raw rows)
+const ERR_SORT_KEYS: &[&str] = &[
+    "c400", "c401", "c403", "c404", "c422", "c429", "c4xx",
+    "c500", "c502", "c503", "c5xx", "bandwidth",
+];
+
+struct RawErrRow {
+    url: String,
+    c400: u64,
+    c401: u64,
+    c403: u64,
+    c404: u64,
+    c422: u64,
+    c429: u64,
+    c4xx: u64,
+    c500: u64,
+    c502: u64,
+    c503: u64,
+    c5xx: u64,
+    bandwidth: u64,
+}
+
+impl RawErrRow {
+    fn total_errors(&self) -> u64 {
+        self.c400
+            + self.c401
+            + self.c403
+            + self.c404
+            + self.c422
+            + self.c429
+            + self.c4xx
+            + self.c500
+            + self.c502
+            + self.c503
+            + self.c5xx
+    }
+}
+
+fn parse_raw_err_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawErrRow> {
+    Ok(RawErrRow {
+        url:       row.get::<_, String>(0)?,
+        c400:      row.get::<_, i64>(1)? as u64,
+        c401:      row.get::<_, i64>(2)? as u64,
+        c403:      row.get::<_, i64>(3)? as u64,
+        c404:      row.get::<_, i64>(4)? as u64,
+        c422:      row.get::<_, i64>(5)? as u64,
+        c429:      row.get::<_, i64>(6)? as u64,
+        c4xx:      row.get::<_, i64>(7)? as u64,
+        c500:      row.get::<_, i64>(8)? as u64,
+        c502:      row.get::<_, i64>(9)? as u64,
+        c503:      row.get::<_, i64>(10)? as u64,
+        c5xx:      row.get::<_, i64>(11)? as u64,
+        bandwidth: row.get::<_, i64>(12)? as u64,
+    })
+}
+
+fn build_error_url_row(r: RawErrRow, compact_counts: bool) -> ErrorUrlRow {
+    ErrorUrlRow {
+        c400_fmt: count_fmt(r.c400, compact_counts),
+        c401_fmt: count_fmt(r.c401, compact_counts),
+        c403_fmt: count_fmt(r.c403, compact_counts),
+        c404_fmt: count_fmt(r.c404, compact_counts),
+        c422_fmt: count_fmt(r.c422, compact_counts),
+        c429_fmt: count_fmt(r.c429, compact_counts),
+        c4xx_fmt: count_fmt(r.c4xx, compact_counts),
+        c500_fmt: count_fmt(r.c500, compact_counts),
+        c502_fmt: count_fmt(r.c502, compact_counts),
+        c503_fmt: count_fmt(r.c503, compact_counts),
+        c5xx_fmt: count_fmt(r.c5xx, compact_counts),
+        bandwidth_fmt: format_bytes(r.bandwidth),
+        url: r.url,
+        c400: r.c400,
+        c401: r.c401,
+        c403: r.c403,
+        c404: r.c404,
+        c422: r.c422,
+        c429: r.c429,
+        c4xx: r.c4xx,
+        c500: r.c500,
+        c502: r.c502,
+        c503: r.c503,
+        c5xx: r.c5xx,
+        bandwidth: r.bandwidth,
+    }
+}
+
+fn finish_error_url_union(
+    seen: ahash::AHashMap<String, RawErrRow>,
+    compact_counts: bool,
+) -> Vec<ErrorUrlRow> {
+    let mut rows: Vec<RawErrRow> = seen.into_values().collect();
+    rows.sort_unstable_by(|a, b| {
+        b.c404.cmp(&a.c404).then_with(|| b.total_errors().cmp(&a.total_errors()))
+    });
+    rows.into_iter()
+        .map(|r| build_error_url_row(r, compact_counts))
+        .collect()
+}
+
+/// Top erroring URLs for a monthly ("YYYY-MM") or yearly ("YYYY") period.
+/// Returns the union of top-N for every sort key so any column can be sorted client-side.
+fn top_error_urls_period(
+    conn: &Connection,
+    period: &str,
+    top_n: usize,
+    compact_counts: bool,
 ) -> Result<Vec<ErrorUrlRow>> {
     if top_n == 0 {
         return Ok(Vec::new());
     }
     let is_monthly = period.len() == 7;
     let (op, param) = period_clause(period);
-    let order = error_url_order(key, !is_monthly);
-    let sql = if is_monthly {
-        format!(
-            "SELECT url, c4xx, c5xx, bandwidth \
-             FROM top_error_urls WHERE period {op} \
-             ORDER BY {order} DESC LIMIT ?2"
-        )
-    } else {
-        format!(
-            "SELECT url, SUM(c4xx), SUM(c5xx), SUM(bandwidth) \
-             FROM top_error_urls WHERE period {op} \
-             GROUP BY url ORDER BY {order} DESC LIMIT ?2"
-        )
-    };
-    let mut stmt = conn.prepare(&sql)?;
-    let raw: Vec<(String, u64, u64, u64)> = stmt
-        .query_map(params![param, top_n as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)? as u64,
-                row.get::<_, i64>(2)? as u64,
-                row.get::<_, i64>(3)? as u64,
-            ))
-        })?
-        .collect::<rusqlite::Result<_>>()?;
-    Ok(build_error_url_rows(raw, compact_counts))
+    let mut seen: ahash::AHashMap<String, RawErrRow> = ahash::AHashMap::new();
+
+    for key in ERR_SORT_KEYS {
+        let sql = if is_monthly {
+            format!(
+                "SELECT url,c400,c401,c403,c404,c422,c429,c4xx,\
+                 c500,c502,c503,c5xx,bandwidth \
+                 FROM top_error_urls WHERE period {op} \
+                 ORDER BY {key} DESC LIMIT ?2"
+            )
+        } else {
+            format!(
+                "SELECT url,SUM(c400),SUM(c401),SUM(c403),SUM(c404),\
+                 SUM(c422),SUM(c429),SUM(c4xx),\
+                 SUM(c500),SUM(c502),SUM(c503),SUM(c5xx),SUM(bandwidth) \
+                 FROM top_error_urls WHERE period {op} \
+                 GROUP BY url ORDER BY SUM({key}) DESC LIMIT ?2"
+            )
+        };
+        let mut stmt = conn.prepare(&sql)?;
+        for row in stmt.query_map(params![param, top_n as i64], parse_raw_err_row)? {
+            let r = row?;
+            seen.entry(r.url.clone()).or_insert(r);
+        }
+    }
+    Ok(finish_error_url_union(seen, compact_counts))
 }
 
-/// All-time top erroring URLs (summed across every period), sorted by `key`.
+/// All-time top erroring URLs (summed across every period).
+/// Returns the union of top-N for every sort key so any column can be sorted client-side.
 fn top_error_urls_all(
     conn: &Connection,
     top_n: usize,
     compact_counts: bool,
-    key: &str,
 ) -> Result<Vec<ErrorUrlRow>> {
     if top_n == 0 {
         return Ok(Vec::new());
     }
-    let order = error_url_order(key, true);
-    let sql = format!(
-        "SELECT url, SUM(c4xx), SUM(c5xx), SUM(bandwidth) \
-         FROM top_error_urls \
-         GROUP BY url ORDER BY {order} DESC LIMIT ?1"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let raw: Vec<(String, u64, u64, u64)> = stmt
-        .query_map(params![top_n as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)? as u64,
-                row.get::<_, i64>(2)? as u64,
-                row.get::<_, i64>(3)? as u64,
-            ))
-        })?
-        .collect::<rusqlite::Result<_>>()?;
-    Ok(build_error_url_rows(raw, compact_counts))
-}
+    let mut seen: ahash::AHashMap<String, RawErrRow> = ahash::AHashMap::new();
 
-fn top_ips_hits(
-    conn: &Connection,
-    period: &str,
-    top_n: usize,
-    compact_counts: bool,
-    anonymise_ips: bool,
-) -> Result<Vec<TopHostRow>> {
-    top_ips_sorted(conn, period, top_n, compact_counts, "hits", anonymise_ips)
-}
-
-fn top_ips_bandwidth(
-    conn: &Connection,
-    period: &str,
-    top_n: usize,
-    compact_counts: bool,
-    anonymise_ips: bool,
-) -> Result<Vec<TopHostRow>> {
-    top_ips_sorted(conn, period, top_n, compact_counts, "bandwidth", anonymise_ips)
-}
-
-fn top_ips_sorted(
-    conn: &Connection,
-    period: &str,
-    top_n: usize,
-    compact_counts: bool,
-    order_col: &str,
-    anonymise_ips: bool,
-) -> Result<Vec<TopHostRow>> {
-    let (op, param) = period_clause(period);
-    let sql = format!(
-        "SELECT t.host_kind, t.host_hi, t.host_lo,
-                SUM(t.hits) AS hits, SUM(t.bandwidth) AS bandwidth,
-                COALESCE(MAX(t.country_code), '--'),
-                COALESCE(MAX(cn.country_name), 'Unknown')
-         FROM top_ips t
-         LEFT JOIN countries cn ON cn.country_code = t.country_code
-         WHERE t.period {op}
-         GROUP BY t.host_kind, t.host_hi, t.host_lo
-         ORDER BY {order_col} DESC, hits DESC
-         LIMIT ?2"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-
-    let raw: Vec<(u8, u64, u64, u64, u64, String, String)> = stmt
-        .query_map(params![param, top_n as i64], |row| {
-            Ok((
-                row.get::<_, i64>(0)? as u8,
-                row.get::<_, i64>(1)? as u64,
-                row.get::<_, i64>(2)? as u64,
-                row.get::<_, i64>(3)? as u64,
-                row.get::<_, i64>(4)? as u64,
-                row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<_>>()?;
-
-    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
-
-    let out = raw
-        .into_iter()
-        .map(|(host_kind, host_hi, host_lo, hits, bandwidth, country_code, country_name)| {
-            TopHostRow {
-                host: decode_host(host_kind, host_hi, host_lo, anonymise_ips),
-                hits,
-                bandwidth,
-                country_flag: flag_emoji(&country_code),
-                country_code,
-                country_name,
-                hits_fmt: count_fmt(hits, compact_counts),
-                hits_exact_fmt: super::number_fmt(hits),
-                bandwidth_fmt: format_bytes(bandwidth),
-                pct_fmt: percent_str(hits as f64, hits_total),
-                bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
-            }
-        })
-        .collect();
-
-    Ok(out)
+    for key in ERR_SORT_KEYS {
+        let sql = format!(
+            "SELECT url,SUM(c400),SUM(c401),SUM(c403),SUM(c404),\
+             SUM(c422),SUM(c429),SUM(c4xx),\
+             SUM(c500),SUM(c502),SUM(c503),SUM(c5xx),SUM(bandwidth) \
+             FROM top_error_urls \
+             GROUP BY url ORDER BY SUM({key}) DESC LIMIT ?1"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        for row in stmt.query_map(params![top_n as i64], parse_raw_err_row)? {
+            let r = row?;
+            seen.entry(r.url.clone()).or_insert(r);
+        }
+    }
+    Ok(finish_error_url_union(seen, compact_counts))
 }
 
 fn decode_host(kind: u8, hi: u64, lo: u64, anonymise: bool) -> String {
@@ -1198,69 +1442,6 @@ fn top_refs(
     Ok(out)
 }
 
-fn top_agents_sorted(
-    conn: &Connection,
-    period: &str,
-    top_n: usize,
-    compact_counts: bool,
-    order_col: &str,
-) -> Result<Vec<TopAgentRow>> {
-    if top_n == 0 {
-        return Ok(Vec::new());
-    }
-    let (op, param) = period_clause(period);
-    let sql = format!(
-        "SELECT agent_family, SUM(hits) AS hits, SUM(bandwidth) AS bandwidth
-         FROM top_agents
-         WHERE period {op}
-         GROUP BY agent_family
-         ORDER BY {order_col} DESC
-         LIMIT ?2"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let raw: Vec<(String, u64, u64)> = stmt
-        .query_map(params![param, top_n as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)? as u64,
-                row.get::<_, i64>(2)? as u64,
-            ))
-        })?
-        .collect::<rusqlite::Result<_>>()?;
-    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
-    Ok(build_agent_rows(raw, compact_counts, hits_total, bw_total))
-}
-
-fn top_agents_sorted_all(
-    conn: &Connection,
-    top_n: usize,
-    compact_counts: bool,
-    order_col: &str,
-) -> Result<Vec<TopAgentRow>> {
-    if top_n == 0 {
-        return Ok(Vec::new());
-    }
-    let sql = format!(
-        "SELECT agent_family, SUM(hits) AS hits, SUM(bandwidth) AS bandwidth
-         FROM top_agents
-         GROUP BY agent_family
-         ORDER BY {order_col} DESC
-         LIMIT ?1"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let raw: Vec<(String, u64, u64)> = stmt
-        .query_map(params![top_n as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)? as u64,
-                row.get::<_, i64>(2)? as u64,
-            ))
-        })?
-        .collect::<rusqlite::Result<_>>()?;
-    let (hits_total, bw_total) = all_time_hits_bw_totals(conn)?;
-    Ok(build_agent_rows(raw, compact_counts, hits_total, bw_total))
-}
-
 fn build_agent_rows(raw: Vec<(String, u64, u64)>, compact_counts: bool, hits_total: f64, bw_total: f64) -> Vec<TopAgentRow> {
     raw.into_iter()
         .map(|(agent, hits, bandwidth)| TopAgentRow {
@@ -1274,83 +1455,6 @@ fn build_agent_rows(raw: Vec<(String, u64, u64)>, compact_counts: bool, hits_tot
             bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
         })
         .collect()
-}
-
-fn top_countries_sorted(
-    conn: &Connection,
-    period: &str,
-    top_n: usize,
-    compact_counts: bool,
-    order_col: &str,
-) -> Result<Vec<TopCountryRow>> {
-    if top_n == 0 {
-        return Ok(Vec::new());
-    }
-    let (op, param) = period_clause(period);
-    let sql = format!(
-        "SELECT c.country_code,
-                COALESCE(n.country_name, 'Unknown') AS country_name,
-                SUM(c.hits) AS hits,
-                SUM(c.bandwidth) AS bandwidth
-         FROM top_countries c
-         LEFT JOIN countries n ON n.country_code = c.country_code
-         WHERE c.period {op}
-         GROUP BY c.country_code
-         ORDER BY {order_col} DESC
-         LIMIT ?2"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let raw: Vec<(String, String, u64, u64)> = stmt
-        .query_map(params![param, top_n as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)? as u64,
-                row.get::<_, i64>(3)? as u64,
-            ))
-        })?
-        .collect::<rusqlite::Result<_>>()?;
-    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
-    Ok(build_country_rows(raw, compact_counts, hits_total, bw_total))
-}
-
-fn top_countries_sorted_all(
-    conn: &Connection,
-    top_n: usize,
-    compact_counts: bool,
-    order_col: &str,
-) -> Result<Vec<TopCountryRow>> {
-    if top_n == 0 {
-        return Ok(Vec::new());
-    }
-    let sql = format!(
-        "WITH agg AS (
-             SELECT country_code, SUM(hits) AS hits, SUM(bandwidth) AS bandwidth
-             FROM top_countries
-             GROUP BY country_code
-         )
-         SELECT a.country_code,
-                COALESCE(n.country_name, 'Unknown') AS country_name,
-                a.hits,
-                a.bandwidth
-         FROM agg a
-         LEFT JOIN countries n ON n.country_code = a.country_code
-         ORDER BY {order_col} DESC
-         LIMIT ?1"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let raw: Vec<(String, String, u64, u64)> = stmt
-        .query_map(params![top_n as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)? as u64,
-                row.get::<_, i64>(3)? as u64,
-            ))
-        })?
-        .collect::<rusqlite::Result<_>>()?;
-    let (hits_total, bw_total) = all_time_hits_bw_totals(conn)?;
-    Ok(build_country_rows(raw, compact_counts, hits_total, bw_total))
 }
 
 fn build_country_rows(raw: Vec<(String, String, u64, u64)>, compact_counts: bool, hits_total: f64, bw_total: f64) -> Vec<TopCountryRow> {
@@ -1751,64 +1855,6 @@ fn monthly_rt_histogram_buckets(conn: &Connection, period: &str) -> Result<Vec<(
     Ok(out)
 }
 
-fn top_urls_avg_rt(
-    conn: &Connection,
-    period: &str,
-    top_n: usize,
-    compact_counts: bool,
-) -> Result<Vec<TopUrlRow>> {
-    if top_n == 0 {
-        return Ok(Vec::new());
-    }
-    let (op, param) = period_clause(period);
-    let sql = if period.len() == 7 {
-        format!(
-            "SELECT url, hits, bandwidth, rt_sum, rt_count, rt_max \
-             FROM top_urls WHERE period {op} AND rt_count>0 \
-             ORDER BY rt_sum*1.0/rt_count DESC LIMIT ?2"
-        )
-    } else {
-        format!(
-            "SELECT url, SUM(hits), SUM(bandwidth), SUM(rt_sum), SUM(rt_count), MAX(rt_max) \
-             FROM top_urls WHERE period {op} \
-             GROUP BY url HAVING SUM(rt_count)>0 \
-             ORDER BY SUM(rt_sum)*1.0/SUM(rt_count) DESC LIMIT ?2"
-        )
-    };
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt
-        .query_map(params![param, top_n as i64], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, i64>(1)? as u64,
-                r.get::<_, i64>(2)? as u64,
-                r.get::<_, i64>(3)? as u64,
-                r.get::<_, i64>(4)? as u64,
-                r.get::<_, i64>(5)? as u32,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-
-    let (hits_total, bw_total) = period_hits_bw_totals(conn, period)?;
-    rows.into_iter()
-        .map(|(url, hits, bandwidth, rt_sum, rt_count, rt_max)| {
-            let (avg_ms_fmt, max_ms_fmt) = rt_display(rt_sum, rt_count, rt_max);
-            Ok(TopUrlRow {
-                url,
-                hits,
-                bandwidth,
-                hits_fmt: count_fmt(hits, compact_counts),
-                hits_exact_fmt: super::number_fmt(hits),
-                bandwidth_fmt: format_bytes(bandwidth),
-                pct_fmt: percent_str(hits as f64, hits_total),
-                bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
-                avg_ms_fmt,
-                max_ms_fmt,
-            })
-        })
-        .collect()
-}
-
 // ── Bucket aggregation ────────────────────────────────────────────────────────
 
 /// Return (hits, bandwidth) totals for a specific bucket+period.
@@ -1913,20 +1959,14 @@ pub(super) fn bucket_page_data(
     let p95_rt_ms = bucket_p95(conn, period, bucket_name)?;
 
     // Top URLs
-    let top_urls_hits = bucket_top_urls_sorted(conn, period, bucket_name, top_n, compact_counts, "hits", hits_total, bw_total)?;
-    let top_urls_bandwidth = bucket_top_urls_sorted(conn, period, bucket_name, top_n, compact_counts, "bandwidth", hits_total, bw_total)?;
-    let top_slow_urls = bucket_top_urls_avg_rt(conn, period, bucket_name, top_n, compact_counts, hits_total, bw_total)?;
+    let top_urls = bucket_top_urls_union(conn, period, bucket_name, top_n, compact_counts, hits_total, bw_total)?;
 
     // Status codes (percent of bucket hits)
     let status_codes = bucket_status_rows(conn, period, bucket_name, compact_counts, hits_total)?;
 
-    // Agents (two sorts)
-    let agents_hits = bucket_agent_rows(conn, period, bucket_name, top_n, compact_counts, hits_total, bw_total, "hits")?;
-    let agents_bandwidth = bucket_agent_rows(conn, period, bucket_name, top_n, compact_counts, hits_total, bw_total, "bandwidth")?;
-
-    // Countries
-    let countries_hits = bucket_country_rows(conn, period, bucket_name, top_n, compact_counts, hits_total, bw_total, "hits")?;
-    let countries_bandwidth = bucket_country_rows(conn, period, bucket_name, top_n, compact_counts, hits_total, bw_total, "bandwidth")?;
+    // Agents and countries
+    let agents = bucket_agents_union(conn, period, bucket_name, top_n, compact_counts, hits_total, bw_total)?;
+    let countries = bucket_countries_union(conn, period, bucket_name, top_n, compact_counts, hits_total, bw_total)?;
 
     // Methods and protocols
     let method_codes = bucket_method_rows(conn, period, bucket_name, compact_counts, hits_total)?;
@@ -1969,14 +2009,10 @@ pub(super) fn bucket_page_data(
         hourly,
         monthly_rows,
         daily_rt_stats,
-        top_urls_hits,
-        top_urls_bandwidth,
-        top_slow_urls,
+        top_urls,
         status_codes,
-        agents_hits,
-        agents_bandwidth,
-        countries_hits,
-        countries_bandwidth,
+        agents,
+        countries,
         method_codes,
         proto_codes,
         rt_distribution_buckets,
@@ -2021,128 +2057,6 @@ fn bucket_p95(conn: &Connection, period: &str, bucket: &str) -> Result<Option<St
     Ok(merged.avg().map(|_| format_ms(merged.percentile(95.0) as f64)))
 }
 
-fn bucket_top_urls_sorted(
-    conn: &Connection,
-    period: &str,
-    bucket: &str,
-    top_n: usize,
-    compact_counts: bool,
-    order_col: &str,
-    hits_total: f64,
-    bw_total: f64,
-) -> Result<Vec<TopUrlRow>> {
-    if top_n == 0 {
-        return Ok(Vec::new());
-    }
-    let is_monthly = period.len() == 7;
-    let (op, param) = period_clause(period);
-    let sql = if is_monthly {
-        format!(
-            "SELECT url, hits, bandwidth, rt_sum, rt_count, rt_max \
-             FROM bucket_urls WHERE period {op} AND bucket = ?2 \
-             ORDER BY {order_col} DESC LIMIT ?3"
-        )
-    } else {
-        format!(
-            "SELECT url, SUM(hits), SUM(bandwidth), SUM(rt_sum), SUM(rt_count), MAX(rt_max) \
-             FROM bucket_urls WHERE period {op} AND bucket = ?2 \
-             GROUP BY url ORDER BY SUM({order_col}) DESC LIMIT ?3"
-        )
-    };
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt
-        .query_map(params![param, bucket, top_n as i64], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, i64>(1)? as u64,
-                r.get::<_, i64>(2)? as u64,
-                r.get::<_, i64>(3)? as u64,
-                r.get::<_, i64>(4)? as u64,
-                r.get::<_, i64>(5)? as u32,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-
-    rows.into_iter()
-        .map(|(url, hits, bandwidth, rt_sum, rt_count, rt_max)| {
-            let (avg_ms_fmt, max_ms_fmt) = rt_display(rt_sum, rt_count, rt_max);
-            Ok(TopUrlRow {
-                url,
-                hits,
-                bandwidth,
-                hits_fmt: count_fmt(hits, compact_counts),
-                hits_exact_fmt: super::number_fmt(hits),
-                bandwidth_fmt: format_bytes(bandwidth),
-                pct_fmt: percent_str(hits as f64, hits_total),
-                bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
-                avg_ms_fmt,
-                max_ms_fmt,
-            })
-        })
-        .collect()
-}
-
-fn bucket_top_urls_avg_rt(
-    conn: &Connection,
-    period: &str,
-    bucket: &str,
-    top_n: usize,
-    compact_counts: bool,
-    hits_total: f64,
-    bw_total: f64,
-) -> Result<Vec<TopUrlRow>> {
-    if top_n == 0 {
-        return Ok(Vec::new());
-    }
-    let is_monthly = period.len() == 7;
-    let (op, param) = period_clause(period);
-    let sql = if is_monthly {
-        format!(
-            "SELECT url, hits, bandwidth, rt_sum, rt_count, rt_max \
-             FROM bucket_urls WHERE period {op} AND bucket = ?2 AND rt_count > 0 \
-             ORDER BY rt_sum * 1.0 / rt_count DESC LIMIT ?3"
-        )
-    } else {
-        format!(
-            "SELECT url, SUM(hits), SUM(bandwidth), SUM(rt_sum), SUM(rt_count), MAX(rt_max) \
-             FROM bucket_urls WHERE period {op} AND bucket = ?2 \
-             GROUP BY url HAVING SUM(rt_count) > 0 \
-             ORDER BY SUM(rt_sum) * 1.0 / SUM(rt_count) DESC LIMIT ?3"
-        )
-    };
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt
-        .query_map(params![param, bucket, top_n as i64], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, i64>(1)? as u64,
-                r.get::<_, i64>(2)? as u64,
-                r.get::<_, i64>(3)? as u64,
-                r.get::<_, i64>(4)? as u64,
-                r.get::<_, i64>(5)? as u32,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-
-    rows.into_iter()
-        .map(|(url, hits, bandwidth, rt_sum, rt_count, rt_max)| {
-            let (avg_ms_fmt, max_ms_fmt) = rt_display(rt_sum, rt_count, rt_max);
-            Ok(TopUrlRow {
-                url,
-                hits,
-                bandwidth,
-                hits_fmt: count_fmt(hits, compact_counts),
-                hits_exact_fmt: super::number_fmt(hits),
-                bandwidth_fmt: format_bytes(bandwidth),
-                pct_fmt: percent_str(hits as f64, hits_total),
-                bandwidth_pct_fmt: percent_str(bandwidth as f64, bw_total),
-                avg_ms_fmt,
-                max_ms_fmt,
-            })
-        })
-        .collect()
-}
-
 fn bucket_status_rows(
     conn: &Connection,
     period: &str,
@@ -2162,73 +2076,6 @@ fn bucket_status_rows(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(build_status_rows(raw, compact_counts, hits_total))
-}
-
-fn bucket_agent_rows(
-    conn: &Connection,
-    period: &str,
-    bucket: &str,
-    top_n: usize,
-    compact_counts: bool,
-    hits_total: f64,
-    bw_total: f64,
-    order_col: &str,
-) -> Result<Vec<TopAgentRow>> {
-    if top_n == 0 {
-        return Ok(Vec::new());
-    }
-    let (op, param) = period_clause(period);
-    let sql = format!(
-        "SELECT agent_family, SUM(hits), SUM(bandwidth) \
-         FROM bucket_agents WHERE period {op} AND bucket = ?2 \
-         GROUP BY agent_family ORDER BY SUM({order_col}) DESC LIMIT ?3"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let raw = stmt
-        .query_map(params![param, bucket, top_n as i64], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, i64>(1)? as u64,
-                r.get::<_, i64>(2)? as u64,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(build_agent_rows(raw, compact_counts, hits_total, bw_total))
-}
-
-fn bucket_country_rows(
-    conn: &Connection,
-    period: &str,
-    bucket: &str,
-    top_n: usize,
-    compact_counts: bool,
-    hits_total: f64,
-    bw_total: f64,
-    order_col: &str,
-) -> Result<Vec<TopCountryRow>> {
-    if top_n == 0 {
-        return Ok(Vec::new());
-    }
-    let (op, param) = period_clause(period);
-    let sql = format!(
-        "SELECT bc.country_code, COALESCE(n.country_name, 'Unknown'), SUM(bc.hits), SUM(bc.bandwidth) \
-         FROM bucket_countries bc \
-         LEFT JOIN countries n ON n.country_code = bc.country_code \
-         WHERE bc.period {op} AND bc.bucket = ?2 \
-         GROUP BY bc.country_code ORDER BY SUM(bc.{order_col}) DESC LIMIT ?3"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let raw = stmt
-        .query_map(params![param, bucket, top_n as i64], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, i64>(2)? as u64,
-                r.get::<_, i64>(3)? as u64,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(build_country_rows(raw, compact_counts, hits_total, bw_total))
 }
 
 fn bucket_method_rows(

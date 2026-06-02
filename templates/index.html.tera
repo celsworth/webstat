@@ -35,7 +35,7 @@
   </div>
 </section>
 
-{% if status_codes | length > 0 or top_countries_hits | length > 0 or top_countries_bandwidth | length > 0 or top_agents_hits | length > 0 or top_agents_bandwidth | length > 0 %}
+{% if status_codes | length > 0 or top_countries | length > 0 or top_agents | length > 0 %}
 <section class="charts-col">
   <div class="charts-triple">
     {% if status_codes | length > 0 %}
@@ -43,12 +43,12 @@
       <canvas id="statusChart"></canvas>
     </div>
     {% endif %}
-    {% if top_countries_hits | length > 0 or top_countries_bandwidth | length > 0 %}
+    {% if top_countries | length > 0 %}
     <div class="chart-box">
       <canvas id="countriesChart"></canvas>
     </div>
     {% endif %}
-    {% if top_agents_hits | length > 0 or top_agents_bandwidth | length > 0 %}
+    {% if top_agents | length > 0 %}
     <div class="chart-box">
       <canvas id="agentsChart"></canvas>
     </div>

@@ -143,7 +143,7 @@ fn pretrim_url_stats(
     map.retain(|k, _| keep.contains(k.as_str()));
 }
 
-/// Keep the union of top_n by total errors (c4xx+c5xx) and top_n by bandwidth.
+/// Keep the union of top_n by each individual error code and top_n by bandwidth.
 fn pretrim_error_urls(
     map: &mut ahash::AHashMap<String, crate::run_accumulators::ErrUrlStats>,
     top_n: usize,
@@ -151,16 +151,28 @@ fn pretrim_error_urls(
     if map.len() <= top_n {
         return;
     }
-    let mut keep = ahash::AHashSet::with_capacity(top_n * 2);
+    let mut keep = ahash::AHashSet::with_capacity(top_n * 13);
 
-    let mut by_err: Vec<(&String, u64)> =
-        map.iter().map(|(k, v)| (k, v.c4xx + v.c5xx)).collect();
-    by_err.sort_unstable_by(|a, b| b.1.cmp(&a.1));
-    keep.extend(by_err.into_iter().take(top_n).map(|(k, _)| k.clone()));
-
-    let mut by_bw: Vec<(&String, u64)> = map.iter().map(|(k, v)| (k, v.bandwidth)).collect();
-    by_bw.sort_unstable_by(|a, b| b.1.cmp(&a.1));
-    keep.extend(by_bw.into_iter().take(top_n).map(|(k, _)| k.clone()));
+    macro_rules! keep_top {
+        ($field:ident) => {
+            let mut by: Vec<(&String, u64)> =
+                map.iter().map(|(k, v)| (k, v.$field)).collect();
+            by.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+            keep.extend(by.into_iter().take(top_n).map(|(k, _)| k.clone()));
+        };
+    }
+    keep_top!(c400);
+    keep_top!(c401);
+    keep_top!(c403);
+    keep_top!(c404);
+    keep_top!(c422);
+    keep_top!(c429);
+    keep_top!(c4xx);
+    keep_top!(c500);
+    keep_top!(c502);
+    keep_top!(c503);
+    keep_top!(c5xx);
+    keep_top!(bandwidth);
 
     map.retain(|k, _| keep.contains(k.as_str()));
 }

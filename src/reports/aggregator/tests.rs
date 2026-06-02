@@ -344,7 +344,7 @@ mod pct_tests {
         )
         .unwrap();
 
-        let rows = top_urls_hits(&conn, "2026-05", 10, false).unwrap();
+        let rows = top_urls_union(&conn, "2026-05", 10, false).unwrap();
         assert_eq!(rows.len(), 2);
         // /a: 300/1000 = 30 %, /b: 200/1000 = 20 %
         assert_eq!(rows[0].pct_fmt, "30.0%", "/a hits pct");
@@ -366,7 +366,7 @@ mod pct_tests {
         )
         .unwrap();
 
-        let rows = top_agents_sorted(&conn, "2026-05", 10, false, "hits").unwrap();
+        let rows = top_agents_union(&conn, "2026-05", 10, false).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].pct_fmt, "30.0%", "Chrome hits pct");
         assert_eq!(rows[0].bandwidth_pct_fmt, "30.0%", "Chrome bw pct");
@@ -387,7 +387,7 @@ mod pct_tests {
         )
         .unwrap();
 
-        let rows = top_agents_sorted_all(&conn, 10, false, "hits").unwrap();
+        let rows = top_agents_union_all(&conn, 10, false).unwrap();
         assert_eq!(rows.len(), 2);
         // 300/1000 = 30 % each
         assert_eq!(rows[0].pct_fmt, "30.0%");
@@ -409,7 +409,7 @@ mod pct_tests {
         )
         .unwrap();
 
-        let rows = top_countries_sorted(&conn, "2026-05", 10, false, "hits").unwrap();
+        let rows = top_countries_union(&conn, "2026-05", 10, false).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].pct_fmt, "30.0%", "GB hits pct");
         assert_eq!(rows[0].bandwidth_pct_fmt, "30.0%", "GB bw pct");
@@ -430,7 +430,7 @@ mod pct_tests {
         )
         .unwrap();
 
-        let rows = top_countries_sorted_all(&conn, 10, false, "hits").unwrap();
+        let rows = top_countries_union_all(&conn, 10, false).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].pct_fmt, "30.0%");
         assert_eq!(rows[1].pct_fmt, "30.0%");
@@ -513,7 +513,7 @@ mod pct_tests {
         )
         .unwrap();
 
-        let rows = top_urls_hits(&conn, "2026", 10, false).unwrap();
+        let rows = top_urls_union(&conn, "2026", 10, false).unwrap();
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].url, "/a", "/a (1100 total) should be #1");
         assert_eq!(rows[1].url, "/b", "/b (900 total) should be #2");
@@ -536,7 +536,7 @@ mod pct_tests {
         )
         .unwrap();
 
-        let rows = top_urls_bandwidth(&conn, "2026", 10, false).unwrap();
+        let rows = top_urls_union(&conn, "2026", 10, false).unwrap();
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].url, "/a", "/a (1100 bw) should be #1");
         assert_eq!(rows[1].url, "/b", "/b (900 bw) should be #2");
@@ -561,7 +561,7 @@ mod pct_tests {
         )
         .unwrap();
 
-        let rows = top_urls_hits(&conn, "2026", 10, false).unwrap();
+        let rows = top_urls_union(&conn, "2026", 10, false).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].pct_fmt, "30.0%", "yearly /a hits pct");
         assert_eq!(rows[1].pct_fmt, "20.0%", "yearly /b hits pct");
@@ -578,7 +578,7 @@ mod pct_tests {
         )
         .unwrap();
 
-        let rows = top_agents_sorted(&conn, "2026", 10, false, "hits").unwrap();
+        let rows = top_agents_union(&conn, "2026", 10, false).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].pct_fmt, "30.0%");
         assert_eq!(rows[1].pct_fmt, "20.0%");
@@ -597,7 +597,7 @@ mod pct_tests {
         )
         .unwrap();
 
-        let rows = top_countries_sorted(&conn, "2026", 10, false, "hits").unwrap();
+        let rows = top_countries_union(&conn, "2026", 10, false).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].pct_fmt, "30.0%");
         assert_eq!(rows[1].pct_fmt, "20.0%");
