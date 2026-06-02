@@ -35,6 +35,12 @@ enable_top_refs: true
 enable_top_agents: true
 enable_top_error_urls: true
 
+# Status codes shown as their own columns in the Top Erroring URLs report.
+# Every 4xx/5xx code is always recorded per URL; this only chooses which appear as
+# dedicated columns. Unlisted 4xx codes fold into a "4xx" column and unlisted 5xx into
+# "5xx". Changing this only affects report generation — no reprocessing needed.
+error_url_codes: [400, 401, 403, 404, 422, 429, 500, 502, 503]
+
 # HTML report colour overrides.
 # Any key omitted uses the built-in default. Overrides apply to both light and dark mode.
 

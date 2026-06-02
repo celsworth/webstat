@@ -602,4 +602,57 @@ mod pct_tests {
         assert_eq!(rows[0].pct_fmt, "30.0%");
         assert_eq!(rows[1].pct_fmt, "20.0%");
     }
+
+    fn setup_err_url_conn() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory sqlite");
+        conn.execute_batch(
+            "CREATE TABLE urls (id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE);
+             CREATE TABLE top_error_urls (
+                 period    TEXT    NOT NULL,
+                 url_id    INTEGER NOT NULL,
+                 status    INTEGER NOT NULL,
+                 hits      INTEGER NOT NULL DEFAULT 0,
+                 bandwidth INTEGER NOT NULL DEFAULT 0,
+                 PRIMARY KEY (period, url_id, status)
+             );
+             INSERT INTO urls VALUES (1, '/a');
+             INSERT INTO top_error_urls VALUES
+                 ('2026-05', 1, 404, 5, 50),
+                 ('2026-05', 1, 500, 2, 20),
+                 ('2026-05', 1, 418, 1, 10),
+                 ('2026-05', 1, 503, 3, 30);",
+        )
+        .expect("create error-url schema");
+        conn
+    }
+
+    #[test]
+    fn error_url_columns_fold_unlisted_codes_into_catch_alls() {
+        let conn = setup_err_url_conn();
+        // 404 and 500 are configured; 418 folds into "4xx", 503 into "5xx".
+        let (rows, columns) =
+            top_error_urls_period(&conn, "2026-05", 10, &[404, 500], false).unwrap();
+
+        let labels: Vec<&str> = columns.iter().map(|c| c.label.as_str()).collect();
+        assert_eq!(labels, vec!["404", "500", "4xx", "5xx"]);
+
+        assert_eq!(rows.len(), 1);
+        let cells: Vec<u64> = rows[0].cells.iter().map(|c| c.value).collect();
+        assert_eq!(cells, vec![5, 2, 1, 3]);
+        assert_eq!(rows[0].bandwidth, 110);
+    }
+
+    #[test]
+    fn error_url_columns_promote_code_and_omit_empty_catch_all() {
+        let conn = setup_err_url_conn();
+        // Promote 503 to its own column: no other 5xx remains, so "5xx" is omitted.
+        let (rows, columns) =
+            top_error_urls_period(&conn, "2026-05", 10, &[404, 500, 503], false).unwrap();
+
+        let labels: Vec<&str> = columns.iter().map(|c| c.label.as_str()).collect();
+        assert_eq!(labels, vec!["404", "500", "503", "4xx"]);
+
+        let cells: Vec<u64> = rows[0].cells.iter().map(|c| c.value).collect();
+        assert_eq!(cells, vec![5, 2, 3, 1]);
+    }
 }

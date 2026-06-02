@@ -166,43 +166,31 @@ impl Database {
             }
         }
 
-        // top_error_urls — per-code counters keyed by URL
+        // top_error_urls — per-status rows keyed by interned url_id
         if !data.error_urls.is_empty() {
-            let sql = "INSERT INTO top_error_urls \
-                       (period,url,c400,c401,c403,c404,c422,c429,c4xx,\
-                        c500,c502,c503,c5xx,bandwidth) \
-                       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14) \
-                       ON CONFLICT (period,url) DO UPDATE SET \
-                         c400=c400+excluded.c400, \
-                         c401=c401+excluded.c401, \
-                         c403=c403+excluded.c403, \
-                         c404=c404+excluded.c404, \
-                         c422=c422+excluded.c422, \
-                         c429=c429+excluded.c429, \
-                         c4xx=c4xx+excluded.c4xx, \
-                         c500=c500+excluded.c500, \
-                         c502=c502+excluded.c502, \
-                         c503=c503+excluded.c503, \
-                         c5xx=c5xx+excluded.c5xx, \
+            // URL interning: get-or-create url_id. Each URL is unique within a flush,
+            // so no per-flush cache is needed.
+            let mut ins_url =
+                tx.prepare_cached("INSERT INTO urls(url) VALUES (?1) ON CONFLICT(url) DO NOTHING")?;
+            let mut sel_url = tx.prepare_cached("SELECT id FROM urls WHERE url=?1")?;
+            let sql = "INSERT INTO top_error_urls (period,url_id,status,hits,bandwidth) \
+                       VALUES (?1,?2,?3,?4,?5) \
+                       ON CONFLICT (period,url_id,status) DO UPDATE SET \
+                         hits=hits+excluded.hits, \
                          bandwidth=bandwidth+excluded.bandwidth";
             let mut stmt = tx.prepare_cached(sql)?;
             for (url, stats) in data.error_urls {
-                stmt.execute(params![
-                    data.period,
-                    url,
-                    stats.c400 as i64,
-                    stats.c401 as i64,
-                    stats.c403 as i64,
-                    stats.c404 as i64,
-                    stats.c422 as i64,
-                    stats.c429 as i64,
-                    stats.c4xx as i64,
-                    stats.c500 as i64,
-                    stats.c502 as i64,
-                    stats.c503 as i64,
-                    stats.c5xx as i64,
-                    stats.bandwidth as i64,
-                ])?;
+                ins_url.execute(params![url])?;
+                let url_id: i64 = sel_url.query_row(params![url], |r| r.get(0))?;
+                for (status, (hits, bandwidth)) in &stats.codes {
+                    stmt.execute(params![
+                        data.period,
+                        url_id,
+                        *status as i64,
+                        *hits as i64,
+                        *bandwidth as i64,
+                    ])?;
+                }
             }
         }
 
@@ -963,22 +951,21 @@ impl Database {
         }
 
         if top_n > 0 {
+            // Trim to the union of top-N URLs by total error hits and by total bandwidth,
+            // keeping all per-status rows of surviving URLs.
             tx.execute(
                 "DELETE FROM top_error_urls \
                  WHERE period=?1 \
-                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY c400 DESC LIMIT ?2) \
-                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY c401 DESC LIMIT ?2) \
-                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY c403 DESC LIMIT ?2) \
-                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY c404 DESC LIMIT ?2) \
-                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY c422 DESC LIMIT ?2) \
-                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY c429 DESC LIMIT ?2) \
-                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY c4xx DESC LIMIT ?2) \
-                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY c500 DESC LIMIT ?2) \
-                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY c502 DESC LIMIT ?2) \
-                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY c503 DESC LIMIT ?2) \
-                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY c5xx DESC LIMIT ?2) \
-                 AND url NOT IN (SELECT url FROM top_error_urls WHERE period=?1 ORDER BY bandwidth DESC LIMIT ?2)",
+                 AND url_id NOT IN (SELECT url_id FROM top_error_urls WHERE period=?1 \
+                                    GROUP BY url_id ORDER BY SUM(hits) DESC LIMIT ?2) \
+                 AND url_id NOT IN (SELECT url_id FROM top_error_urls WHERE period=?1 \
+                                    GROUP BY url_id ORDER BY SUM(bandwidth) DESC LIMIT ?2)",
                 params![period, top_n as i64],
+            )?;
+            // Prune URL strings no longer referenced by any error-URL row.
+            tx.execute(
+                "DELETE FROM urls WHERE id NOT IN (SELECT DISTINCT url_id FROM top_error_urls)",
+                [],
             )?;
         }
 
@@ -1186,13 +1173,11 @@ impl Database {
                 |r| r.get(0),
             )?;
             if count > threshold {
-                let err_total = "c400+c401+c403+c404+c422+c429+c4xx+c500+c502+c503+c5xx";
+                // Metrics are per-URL totals (summed across status codes).
                 let err_nth: i64 = tx
                     .query_row(
-                        &format!(
-                            "SELECT {err_total} FROM top_error_urls WHERE period=?1 \
-                             ORDER BY ({err_total}) DESC LIMIT 1 OFFSET ?2"
-                        ),
+                        "SELECT SUM(hits) AS t FROM top_error_urls WHERE period=?1 \
+                         GROUP BY url_id ORDER BY t DESC LIMIT 1 OFFSET ?2",
                         params![period, offset],
                         |r| r.get(0),
                     )
@@ -1200,18 +1185,18 @@ impl Database {
                     .unwrap_or(0);
                 let bw_nth: i64 = tx
                     .query_row(
-                        "SELECT bandwidth FROM top_error_urls WHERE period=?1 \
-                         ORDER BY bandwidth DESC LIMIT 1 OFFSET ?2",
+                        "SELECT SUM(bandwidth) AS t FROM top_error_urls WHERE period=?1 \
+                         GROUP BY url_id ORDER BY t DESC LIMIT 1 OFFSET ?2",
                         params![period, offset],
                         |r| r.get(0),
                     )
                     .optional()?
                     .unwrap_or(0);
+                // Delete every row of URLs whose totals fall below 1/10 of both nth-best.
                 tx.execute(
-                    &format!(
-                        "DELETE FROM top_error_urls WHERE period=?1 \
-                         AND ({err_total}) < ?2 AND bandwidth < ?3"
-                    ),
+                    "DELETE FROM top_error_urls WHERE period=?1 AND url_id IN (\
+                         SELECT url_id FROM top_error_urls WHERE period=?1 \
+                         GROUP BY url_id HAVING SUM(hits) < ?2 AND SUM(bandwidth) < ?3)",
                     params![period, err_nth / CULL_FRACTION, bw_nth / CULL_FRACTION],
                 )?;
             }

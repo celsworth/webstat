@@ -173,21 +173,27 @@ pub(crate) struct TopUrlRow {
     max_ms_raw: u32,
 }
 
+/// One status-code column header in the Top Erroring URLs table.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ErrUrlColumn {
+    /// Column label, e.g. "404" for a configured code or "4xx"/"5xx" for a catch-all.
+    label: String,
+}
+
+/// One cell in an error-URL row, aligned positionally with `ErrUrlColumn`s.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ErrUrlCell {
+    value: u64,
+    fmt: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ErrorUrlRow {
     url: String,
-    c400: u64, c400_fmt: String,
-    c401: u64, c401_fmt: String,
-    c403: u64, c403_fmt: String,
-    c404: u64, c404_fmt: String,
-    c422: u64, c422_fmt: String,
-    c429: u64, c429_fmt: String,
-    c4xx: u64, c4xx_fmt: String,
-    c500: u64, c500_fmt: String,
-    c502: u64, c502_fmt: String,
-    c503: u64, c503_fmt: String,
-    c5xx: u64, c5xx_fmt: String,
-    bandwidth: u64, bandwidth_fmt: String,
+    /// Per-column counts in the same order as the page's `error_url_columns`.
+    cells: Vec<ErrUrlCell>,
+    bandwidth: u64,
+    bandwidth_fmt: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -361,6 +367,7 @@ struct MonthlySummary {
     totals: TotalsView,
     top_urls: Vec<TopUrlRow>,
     top_error_urls: Vec<ErrorUrlRow>,
+    error_url_columns: Vec<ErrUrlColumn>,
     top_ips: Vec<TopHostRow>,
     top_refs: Vec<TopRefRow>,
     top_agents: Vec<TopAgentRow>,
@@ -382,6 +389,7 @@ struct YearlySummary {
     monthly_rows: Vec<MonthRow>,
     top_urls: Vec<TopUrlRow>,
     top_error_urls: Vec<ErrorUrlRow>,
+    error_url_columns: Vec<ErrUrlColumn>,
     top_ips: Vec<TopHostRow>,
     top_refs: Vec<TopRefRow>,
     top_agents: Vec<TopAgentRow>,
@@ -415,6 +423,7 @@ struct YearAggregateRow {
 struct OverallSummary {
     yearly_rows: Vec<YearAggregateRow>,
     top_error_urls: Vec<ErrorUrlRow>,
+    error_url_columns: Vec<ErrUrlColumn>,
     top_agents: Vec<TopAgentRow>,
     top_countries: Vec<TopCountryRow>,
     status_codes: Vec<StatusRow>,
@@ -515,6 +524,7 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
                 cfg.top_n,
                 compact_counts,
                 cfg.anonymise_ips,
+                &cfg.error_url_codes,
             )?;
             render_month_page(&tera, cfg, output_dir, &summary)?;
             pages_written += 1;
@@ -545,6 +555,7 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
                 cfg.top_n,
                 compact_counts,
                 cfg.anonymise_ips,
+                &cfg.error_url_codes,
             )?;
             render_year_page(&tera, cfg, output_dir, &yearly)?;
             pages_written += 1;
@@ -577,7 +588,8 @@ pub fn generate_html(cfg: &Config) -> Result<()> {
         }
     }
 
-    let overall = aggregator::overall_summary(&conn, cfg.top_n, compact_counts)?;
+    let overall =
+        aggregator::overall_summary(&conn, cfg.top_n, compact_counts, &cfg.error_url_codes)?;
     render_index_page(&tera, cfg, output_dir, &years, &months, &overall)?;
     pages_written += 1;
     logging::log_debug_at(2, &format!("Wrote {}/index.html", cfg.output_dir));
@@ -660,6 +672,7 @@ fn render_index_page(
     page_ctx.insert("top_countries", &overall.top_countries);
     page_ctx.insert("top_agents", &overall.top_agents);
     page_ctx.insert("top_error_urls", &overall.top_error_urls);
+    page_ctx.insert("error_url_columns", &overall.error_url_columns);
     page_ctx.insert(
         "overview_chart",
         &charts::yearly_overview_chart(&overall.yearly_rows, &cfg.style)?,
@@ -703,6 +716,7 @@ fn render_year_page(
     page_ctx.insert("monthly_rows", &summary.monthly_rows);
     page_ctx.insert("top_urls", &summary.top_urls);
     page_ctx.insert("top_error_urls", &summary.top_error_urls);
+    page_ctx.insert("error_url_columns", &summary.error_url_columns);
     page_ctx.insert("top_ips", &summary.top_ips);
     page_ctx.insert("top_refs", &summary.top_refs);
     page_ctx.insert("top_agents", &summary.top_agents);
@@ -779,6 +793,7 @@ fn render_month_page(
     page_ctx.insert("totals", &summary.totals);
     page_ctx.insert("top_urls", &summary.top_urls);
     page_ctx.insert("top_error_urls", &summary.top_error_urls);
+    page_ctx.insert("error_url_columns", &summary.error_url_columns);
     page_ctx.insert("top_ips", &summary.top_ips);
     page_ctx.insert("top_refs", &summary.top_refs);
     page_ctx.insert("top_agents", &summary.top_agents);

@@ -24,18 +24,21 @@ pub(crate) struct UrlStats {
 /// c4xx/c5xx are overflow buckets for codes not individually tracked.
 #[derive(Default)]
 pub(crate) struct ErrUrlStats {
-    pub(crate) c400: u64,
-    pub(crate) c401: u64,
-    pub(crate) c403: u64,
-    pub(crate) c404: u64,
-    pub(crate) c422: u64,
-    pub(crate) c429: u64,
-    pub(crate) c4xx: u64,
-    pub(crate) c500: u64,
-    pub(crate) c502: u64,
-    pub(crate) c503: u64,
-    pub(crate) c5xx: u64,
-    pub(crate) bandwidth: u64,
+    /// status code -> (hits, bandwidth). Every 4xx/5xx code is recorded individually;
+    /// folding into report columns happens at report time.
+    pub(crate) codes: AHashMap<u16, (u64, u64)>,
+}
+
+impl ErrUrlStats {
+    /// Total error hits across all recorded codes for this URL.
+    pub(crate) fn total_hits(&self) -> u64 {
+        self.codes.values().map(|(h, _)| *h).sum()
+    }
+
+    /// Total bandwidth across all recorded codes for this URL.
+    pub(crate) fn total_bandwidth(&self) -> u64 {
+        self.codes.values().map(|(_, b)| *b).sum()
+    }
 }
 
 

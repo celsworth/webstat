@@ -1,7 +1,8 @@
 {# Top erroring URLs. Single table with client-side column-header sort.
-   On the overview page (err_collapsible=true) the outer element is a <details>
-   with the panel styling. On monthly/yearly the panel wraps an inner <details>
-   matching the Daily/Hourly Statistics pattern. #}
+   Columns are driven by `error_url_columns` (configured codes plus "4xx"/"5xx"
+   catch-alls). On the overview page (err_collapsible=true) the outer element is a
+   <details> with the panel styling. On monthly/yearly the panel wraps an inner
+   <details> matching the Daily/Hourly Statistics pattern. #}
 {% if top_error_urls | length > 0 %}
 {% if err_collapsible | default(value=false) %}
 <details class="stats-panel collapsible-section">
@@ -18,18 +19,10 @@
       <tr>
         <th>#</th>
         <th>URL</th>
-        <th class="num-col" data-col="2" title="Sort by 400">400</th>
-        <th class="num-col" data-col="3" title="Sort by 401">401</th>
-        <th class="num-col" data-col="4" title="Sort by 403">403</th>
-        <th class="num-col" data-col="5" title="Sort by 404">404</th>
-        <th class="num-col" data-col="6" title="Sort by 422">422</th>
-        <th class="num-col" data-col="7" title="Sort by 429">429</th>
-        <th class="num-col" data-col="8" title="Sort by other 4xx">4xx</th>
-        <th class="num-col" data-col="9" title="Sort by 500">500</th>
-        <th class="num-col" data-col="10" title="Sort by 502">502</th>
-        <th class="num-col" data-col="11" title="Sort by 503">503</th>
-        <th class="num-col" data-col="12" title="Sort by other 5xx">5xx</th>
-        <th class="num-col" data-col="13" title="Sort by bandwidth">BW</th>
+        {% for col in error_url_columns %}
+        <th class="num-col" data-col="{{ loop.index0 + 2 }}" title="Sort by {{ col.label }}">{{ col.label }}</th>
+        {% endfor %}
+        <th class="num-col" data-col="{{ error_url_columns | length + 2 }}" title="Sort by bandwidth">BW</th>
       </tr>
     </thead>
     <tbody>
@@ -37,24 +30,16 @@
       <tr>
         <td>{{ loop.index }}</td>
         <td class="url-cell">{{ row.url }}</td>
-        <td class="num-col" data-value="{{ row.c400 }}">{{ row.c400_fmt }}</td>
-        <td class="num-col" data-value="{{ row.c401 }}">{{ row.c401_fmt }}</td>
-        <td class="num-col" data-value="{{ row.c403 }}">{{ row.c403_fmt }}</td>
-        <td class="num-col" data-value="{{ row.c404 }}">{{ row.c404_fmt }}</td>
-        <td class="num-col" data-value="{{ row.c422 }}">{{ row.c422_fmt }}</td>
-        <td class="num-col" data-value="{{ row.c429 }}">{{ row.c429_fmt }}</td>
-        <td class="num-col" data-value="{{ row.c4xx }}">{{ row.c4xx_fmt }}</td>
-        <td class="num-col" data-value="{{ row.c500 }}">{{ row.c500_fmt }}</td>
-        <td class="num-col" data-value="{{ row.c502 }}">{{ row.c502_fmt }}</td>
-        <td class="num-col" data-value="{{ row.c503 }}">{{ row.c503_fmt }}</td>
-        <td class="num-col" data-value="{{ row.c5xx }}">{{ row.c5xx_fmt }}</td>
+        {% for cell in row.cells %}
+        <td class="num-col" data-value="{{ cell.value }}">{{ cell.fmt }}</td>
+        {% endfor %}
         <td class="num-col" data-value="{{ row.bandwidth }}">{{ row.bandwidth_fmt }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   </div>
-  <script>makeSortable('err-url-table', 5, {{ top_n }});</script>
+  <script>makeSortable('err-url-table', -1, {{ top_n }});</script>
 {% if err_collapsible | default(value=false) %}
 </details>
 {% else %}

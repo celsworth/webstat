@@ -13,7 +13,8 @@ use crate::response_time::ResponseTimeHistogram;
 
 use super::{
     count_fmt, flag_emoji, format_bytes, format_ms, format_totals, month_name, percent_str,
-    status_label, BucketIndexRow, BucketPageData, DailyAvgMax, DailyRow, DailyRtStat, ErrorUrlRow,
+    status_label, BucketIndexRow, BucketPageData, DailyAvgMax, DailyRow, DailyRtStat, ErrUrlCell,
+    ErrUrlColumn, ErrorUrlRow,
     HeatCell, HourlyAvgMax, HourlyRow, MethodRow, MonthRow, MonthlyRtStat, MonthlySummary,
     OverallSummary, PeriodMonth, ProtoRow, StatusRow, TopAgentRow, TopCountryRow, TopHostRow,
     TopRefRow, TopUrlRow, TotalsView, WeekdayRow, YearAggregateRow, YearlySummary,
@@ -145,6 +146,7 @@ pub(super) fn monthly_summary(
     top_n: usize,
     compact_counts: bool,
     anonymise_ips: bool,
+    error_url_codes: &[u16],
 ) -> Result<MonthlySummary> {
     let period = format!("{year:04}-{month:02}");
 
@@ -157,7 +159,8 @@ pub(super) fn monthly_summary(
     }
 
     let top_urls = top_urls_union(conn, &period, top_n, compact_counts)?;
-    let top_error_urls = top_error_urls_period(conn, &period, top_n, compact_counts)?;
+    let (top_error_urls, error_url_columns) =
+        top_error_urls_period(conn, &period, top_n, error_url_codes, compact_counts)?;
     let top_ips = top_ips_union(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_refs = top_refs(conn, &period, top_n, compact_counts)?;
     let top_agents = top_agents_union(conn, &period, top_n, compact_counts)?;
@@ -182,6 +185,7 @@ pub(super) fn monthly_summary(
         totals,
         top_urls,
         top_error_urls,
+        error_url_columns,
         top_ips,
         top_refs,
         top_agents,
@@ -204,6 +208,7 @@ pub(super) fn yearly_summary(
     top_n: usize,
     compact_counts: bool,
     anonymise_ips: bool,
+    error_url_codes: &[u16],
 ) -> Result<YearlySummary> {
     let period = year.to_string();
     let monthly_rows = monthly_rows(conn, year, compact_counts)?;
@@ -214,7 +219,8 @@ pub(super) fn yearly_summary(
     }
 
     let top_urls = top_urls_union(conn, &period, top_n, compact_counts)?;
-    let top_error_urls = top_error_urls_period(conn, &period, top_n, compact_counts)?;
+    let (top_error_urls, error_url_columns) =
+        top_error_urls_period(conn, &period, top_n, error_url_codes, compact_counts)?;
     let top_ips = top_ips_union(conn, &period, top_n, compact_counts, anonymise_ips)?;
     let top_refs = top_refs(conn, &period, top_n, compact_counts)?;
     let top_agents = top_agents_union(conn, &period, top_n, compact_counts)?;
@@ -232,6 +238,7 @@ pub(super) fn yearly_summary(
         monthly_rows,
         top_urls,
         top_error_urls,
+        error_url_columns,
         top_ips,
         top_refs,
         top_agents,
@@ -250,11 +257,13 @@ pub(super) fn overall_summary(
     conn: &Connection,
     top_n: usize,
     compact_counts: bool,
+    error_url_codes: &[u16],
 ) -> Result<OverallSummary> {
     let yearly_rows = yearly_rows(conn, compact_counts)?;
     let totals = overall_totals(conn, compact_counts)?;
 
-    let top_error_urls = top_error_urls_all(conn, top_n, compact_counts)?;
+    let (top_error_urls, error_url_columns) =
+        top_error_urls_all(conn, top_n, error_url_codes, compact_counts)?;
     let top_agents = top_agents_union_all(conn, top_n, compact_counts)?;
     let top_countries = top_countries_union_all(conn, top_n, compact_counts)?;
 
@@ -266,6 +275,7 @@ pub(super) fn overall_summary(
     Ok(OverallSummary {
         yearly_rows,
         top_error_urls,
+        error_url_columns,
         top_agents,
         top_countries,
         status_codes,
@@ -1216,173 +1226,196 @@ fn bucket_countries_union(
     Ok(build_country_rows(raw, compact_counts, hits_total, bw_total))
 }
 
-/// SQL ORDER BY expression for the error-URL sort `key`, for monthly (raw rows)
-const ERR_SORT_KEYS: &[&str] = &[
-    "c400", "c401", "c403", "c404", "c422", "c429", "c4xx",
-    "c500", "c502", "c503", "c5xx", "bandwidth",
-];
+/// Per-URL status breakdown: url -> (status -> (hits, bandwidth)).
+type ErrUrlData = ahash::AHashMap<String, ahash::AHashMap<u16, (u64, u64)>>;
 
-struct RawErrRow {
-    url: String,
-    c400: u64,
-    c401: u64,
-    c403: u64,
-    c404: u64,
-    c422: u64,
-    c429: u64,
-    c4xx: u64,
-    c500: u64,
-    c502: u64,
-    c503: u64,
-    c5xx: u64,
-    bandwidth: u64,
-}
+/// Fetch per-URL status breakdowns for the surviving top-N error URLs (by total hits ∪
+/// total bandwidth). `period` is `Some` for a monthly/yearly page or `None` for all-time.
+fn fetch_error_url_data(
+    conn: &Connection,
+    period: Option<&str>,
+    top_n: usize,
+) -> Result<ErrUrlData> {
+    let mut out: ErrUrlData = ahash::AHashMap::new();
+    let mut accumulate = |row: &rusqlite::Row<'_>| -> rusqlite::Result<()> {
+        let url: String = row.get(0)?;
+        let status: u16 = row.get::<_, i64>(1)? as u16;
+        let hits: u64 = row.get::<_, i64>(2)? as u64;
+        let bandwidth: u64 = row.get::<_, i64>(3)? as u64;
+        let e = out.entry(url).or_default().entry(status).or_default();
+        e.0 += hits;
+        e.1 += bandwidth;
+        Ok(())
+    };
 
-impl RawErrRow {
-    fn total_errors(&self) -> u64 {
-        self.c400
-            + self.c401
-            + self.c403
-            + self.c404
-            + self.c422
-            + self.c429
-            + self.c4xx
-            + self.c500
-            + self.c502
-            + self.c503
-            + self.c5xx
+    match period {
+        Some(p) => {
+            let (op, param) = period_clause(p);
+            let sql = format!(
+                "SELECT u.url, e.status, SUM(e.hits), SUM(e.bandwidth) \
+                 FROM top_error_urls e JOIN urls u ON u.id = e.url_id \
+                 WHERE e.period {op} AND e.url_id IN ( \
+                   SELECT url_id FROM (SELECT url_id FROM top_error_urls WHERE period {op} \
+                     GROUP BY url_id ORDER BY SUM(hits) DESC LIMIT ?2) \
+                   UNION \
+                   SELECT url_id FROM (SELECT url_id FROM top_error_urls WHERE period {op} \
+                     GROUP BY url_id ORDER BY SUM(bandwidth) DESC LIMIT ?2)) \
+                 GROUP BY u.url, e.status"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let mut rows = stmt.query(params![param, top_n as i64])?;
+            while let Some(row) = rows.next()? {
+                accumulate(row)?;
+            }
+        }
+        None => {
+            let sql = "SELECT u.url, e.status, SUM(e.hits), SUM(e.bandwidth) \
+                 FROM top_error_urls e JOIN urls u ON u.id = e.url_id \
+                 WHERE e.url_id IN ( \
+                   SELECT url_id FROM (SELECT url_id FROM top_error_urls \
+                     GROUP BY url_id ORDER BY SUM(hits) DESC LIMIT ?1) \
+                   UNION \
+                   SELECT url_id FROM (SELECT url_id FROM top_error_urls \
+                     GROUP BY url_id ORDER BY SUM(bandwidth) DESC LIMIT ?1)) \
+                 GROUP BY u.url, e.status";
+            let mut stmt = conn.prepare(sql)?;
+            let mut rows = stmt.query(params![top_n as i64])?;
+            while let Some(row) = rows.next()? {
+                accumulate(row)?;
+            }
+        }
     }
+    Ok(out)
 }
 
-fn parse_raw_err_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawErrRow> {
-    Ok(RawErrRow {
-        url:       row.get::<_, String>(0)?,
-        c400:      row.get::<_, i64>(1)? as u64,
-        c401:      row.get::<_, i64>(2)? as u64,
-        c403:      row.get::<_, i64>(3)? as u64,
-        c404:      row.get::<_, i64>(4)? as u64,
-        c422:      row.get::<_, i64>(5)? as u64,
-        c429:      row.get::<_, i64>(6)? as u64,
-        c4xx:      row.get::<_, i64>(7)? as u64,
-        c500:      row.get::<_, i64>(8)? as u64,
-        c502:      row.get::<_, i64>(9)? as u64,
-        c503:      row.get::<_, i64>(10)? as u64,
-        c5xx:      row.get::<_, i64>(11)? as u64,
-        bandwidth: row.get::<_, i64>(12)? as u64,
-    })
-}
-
-fn build_error_url_row(r: RawErrRow, compact_counts: bool) -> ErrorUrlRow {
-    ErrorUrlRow {
-        c400_fmt: count_fmt(r.c400, compact_counts),
-        c401_fmt: count_fmt(r.c401, compact_counts),
-        c403_fmt: count_fmt(r.c403, compact_counts),
-        c404_fmt: count_fmt(r.c404, compact_counts),
-        c422_fmt: count_fmt(r.c422, compact_counts),
-        c429_fmt: count_fmt(r.c429, compact_counts),
-        c4xx_fmt: count_fmt(r.c4xx, compact_counts),
-        c500_fmt: count_fmt(r.c500, compact_counts),
-        c502_fmt: count_fmt(r.c502, compact_counts),
-        c503_fmt: count_fmt(r.c503, compact_counts),
-        c5xx_fmt: count_fmt(r.c5xx, compact_counts),
-        bandwidth_fmt: format_bytes(r.bandwidth),
-        url: r.url,
-        c400: r.c400,
-        c401: r.c401,
-        c403: r.c403,
-        c404: r.c404,
-        c422: r.c422,
-        c429: r.c429,
-        c4xx: r.c4xx,
-        c500: r.c500,
-        c502: r.c502,
-        c503: r.c503,
-        c5xx: r.c5xx,
-        bandwidth: r.bandwidth,
-    }
-}
-
-fn finish_error_url_union(
-    seen: ahash::AHashMap<String, RawErrRow>,
+/// Build report rows + column headers from per-URL status data. `codes` are the
+/// configured status codes to surface as columns, in order; every other 4xx folds into
+/// a "4xx" column and every other 5xx into a "5xx" column (each omitted if empty).
+fn build_error_url_rows(
+    data: ErrUrlData,
+    codes: &[u16],
     compact_counts: bool,
-) -> Vec<ErrorUrlRow> {
-    let mut rows: Vec<RawErrRow> = seen.into_values().collect();
-    rows.sort_unstable_by(|a, b| {
-        b.c404.cmp(&a.c404).then_with(|| b.total_errors().cmp(&a.total_errors()))
-    });
-    rows.into_iter()
-        .map(|r| build_error_url_row(r, compact_counts))
-        .collect()
+) -> (Vec<ErrorUrlRow>, Vec<ErrUrlColumn>) {
+    let configured: ahash::AHashSet<u16> = codes.iter().copied().collect();
+
+    struct Tmp {
+        url: String,
+        configured: Vec<u64>,
+        other_4xx: u64,
+        other_5xx: u64,
+        bandwidth: u64,
+        total: u64,
+    }
+
+    let mut tmp: Vec<Tmp> = Vec::with_capacity(data.len());
+    let mut any_4xx = false;
+    let mut any_5xx = false;
+
+    for (url, map) in data {
+        let configured_cells: Vec<u64> = codes
+            .iter()
+            .map(|c| map.get(c).map(|(h, _)| *h).unwrap_or(0))
+            .collect();
+        let mut other_4xx = 0u64;
+        let mut other_5xx = 0u64;
+        let mut bandwidth = 0u64;
+        let mut total = 0u64;
+        for (status, (hits, bw)) in &map {
+            bandwidth += bw;
+            total += hits;
+            if !configured.contains(status) {
+                if (400..500).contains(status) {
+                    other_4xx += hits;
+                } else if (500..600).contains(status) {
+                    other_5xx += hits;
+                }
+            }
+        }
+        any_4xx |= other_4xx > 0;
+        any_5xx |= other_5xx > 0;
+        tmp.push(Tmp {
+            url,
+            configured: configured_cells,
+            other_4xx,
+            other_5xx,
+            bandwidth,
+            total,
+        });
+    }
+
+    let mut columns: Vec<ErrUrlColumn> = codes
+        .iter()
+        .map(|c| ErrUrlColumn { label: c.to_string() })
+        .collect();
+    if any_4xx {
+        columns.push(ErrUrlColumn { label: "4xx".into() });
+    }
+    if any_5xx {
+        columns.push(ErrUrlColumn { label: "5xx".into() });
+    }
+
+    // Order rows by total errors desc, breaking ties on URL for determinism.
+    tmp.sort_unstable_by(|a, b| b.total.cmp(&a.total).then_with(|| a.url.cmp(&b.url)));
+
+    let rows = tmp
+        .into_iter()
+        .map(|t| {
+            let mut cells: Vec<ErrUrlCell> = t
+                .configured
+                .iter()
+                .map(|&v| ErrUrlCell { value: v, fmt: count_fmt(v, compact_counts) })
+                .collect();
+            if any_4xx {
+                cells.push(ErrUrlCell {
+                    value: t.other_4xx,
+                    fmt: count_fmt(t.other_4xx, compact_counts),
+                });
+            }
+            if any_5xx {
+                cells.push(ErrUrlCell {
+                    value: t.other_5xx,
+                    fmt: count_fmt(t.other_5xx, compact_counts),
+                });
+            }
+            ErrorUrlRow {
+                url: t.url,
+                cells,
+                bandwidth: t.bandwidth,
+                bandwidth_fmt: format_bytes(t.bandwidth),
+            }
+        })
+        .collect();
+
+    (rows, columns)
 }
 
 /// Top erroring URLs for a monthly ("YYYY-MM") or yearly ("YYYY") period.
-/// Returns the union of top-N for every sort key so any column can be sorted client-side.
 fn top_error_urls_period(
     conn: &Connection,
     period: &str,
     top_n: usize,
+    codes: &[u16],
     compact_counts: bool,
-) -> Result<Vec<ErrorUrlRow>> {
+) -> Result<(Vec<ErrorUrlRow>, Vec<ErrUrlColumn>)> {
     if top_n == 0 {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
-    let is_monthly = period.len() == 7;
-    let (op, param) = period_clause(period);
-    let mut seen: ahash::AHashMap<String, RawErrRow> = ahash::AHashMap::new();
-
-    for key in ERR_SORT_KEYS {
-        let sql = if is_monthly {
-            format!(
-                "SELECT url,c400,c401,c403,c404,c422,c429,c4xx,\
-                 c500,c502,c503,c5xx,bandwidth \
-                 FROM top_error_urls WHERE period {op} \
-                 ORDER BY {key} DESC LIMIT ?2"
-            )
-        } else {
-            format!(
-                "SELECT url,SUM(c400),SUM(c401),SUM(c403),SUM(c404),\
-                 SUM(c422),SUM(c429),SUM(c4xx),\
-                 SUM(c500),SUM(c502),SUM(c503),SUM(c5xx),SUM(bandwidth) \
-                 FROM top_error_urls WHERE period {op} \
-                 GROUP BY url ORDER BY SUM({key}) DESC LIMIT ?2"
-            )
-        };
-        let mut stmt = conn.prepare(&sql)?;
-        for row in stmt.query_map(params![param, top_n as i64], parse_raw_err_row)? {
-            let r = row?;
-            seen.entry(r.url.clone()).or_insert(r);
-        }
-    }
-    Ok(finish_error_url_union(seen, compact_counts))
+    let data = fetch_error_url_data(conn, Some(period), top_n)?;
+    Ok(build_error_url_rows(data, codes, compact_counts))
 }
 
 /// All-time top erroring URLs (summed across every period).
-/// Returns the union of top-N for every sort key so any column can be sorted client-side.
 fn top_error_urls_all(
     conn: &Connection,
     top_n: usize,
+    codes: &[u16],
     compact_counts: bool,
-) -> Result<Vec<ErrorUrlRow>> {
+) -> Result<(Vec<ErrorUrlRow>, Vec<ErrUrlColumn>)> {
     if top_n == 0 {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
-    let mut seen: ahash::AHashMap<String, RawErrRow> = ahash::AHashMap::new();
-
-    for key in ERR_SORT_KEYS {
-        let sql = format!(
-            "SELECT url,SUM(c400),SUM(c401),SUM(c403),SUM(c404),\
-             SUM(c422),SUM(c429),SUM(c4xx),\
-             SUM(c500),SUM(c502),SUM(c503),SUM(c5xx),SUM(bandwidth) \
-             FROM top_error_urls \
-             GROUP BY url ORDER BY SUM({key}) DESC LIMIT ?1"
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        for row in stmt.query_map(params![top_n as i64], parse_raw_err_row)? {
-            let r = row?;
-            seen.entry(r.url.clone()).or_insert(r);
-        }
-    }
-    Ok(finish_error_url_union(seen, compact_counts))
+    let data = fetch_error_url_data(conn, None, top_n)?;
+    Ok(build_error_url_rows(data, codes, compact_counts))
 }
 
 fn decode_host(kind: u8, hi: u64, lo: u64, anonymise: bool) -> String {

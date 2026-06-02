@@ -70,6 +70,11 @@ pub struct Config {
     pub enable_top_agents: bool,
     /// Enable Top Erroring URLs tracking (4xx/5xx).
     pub enable_top_error_urls: bool,
+    /// Status codes to surface as their own columns in the Top Erroring URLs report.
+    /// Every 4xx/5xx code is always recorded per-URL; this only controls which appear
+    /// as dedicated columns. Unlisted 4xx fold into a "4xx" column, unlisted 5xx into
+    /// "5xx". Changing this only affects report generation — no reprocessing needed.
+    pub error_url_codes: Vec<u16>,
     pub bot_filter: bool,
     /// Periodic database checkpoint interval in minutes.
     /// `0` disables checkpointing (flush only at end of run/file).
@@ -98,6 +103,7 @@ impl Default for Config {
             enable_top_refs: true,
             enable_top_agents: true,
             enable_top_error_urls: true,
+            error_url_codes: vec![400, 401, 403, 404, 422, 429, 500, 502, 503],
             bot_filter: true,
             checkpoint_minutes: 0,
             anonymise_ips: false,

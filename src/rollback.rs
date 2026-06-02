@@ -77,6 +77,12 @@ pub fn rollback(db: &mut Database, target_month: &str, dry_run: bool) -> Result<
         )?;
     }
 
+    // Prune URL strings no longer referenced by any surviving error-URL row.
+    tx.execute(
+        "DELETE FROM urls WHERE id NOT IN (SELECT DISTINCT url_id FROM top_error_urls)",
+        [],
+    )?;
+
     // bucket_unique_visitor_counts has both monthly ("YYYY-MM") and yearly ("YYYY")
     // entries that need separate handling.
     tx.execute(

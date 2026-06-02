@@ -82,6 +82,7 @@ cp webstat.yml.example webstat.yml
 | `enable_top_refs` | `true` | |
 | `enable_top_agents` | `true` | |
 | `enable_top_error_urls` | `true` | Track top erroring URLs (4xx/5xx) per period |
+| `error_url_codes` | `[400, 401, 403, 404, 422, 429, 500, 502, 503]` | Status codes shown as their own columns in the Top Erroring URLs report. Every code is always recorded per URL; unlisted 4xx/5xx fold into "4xx"/"5xx" catch-all columns. Report-time only — no reprocessing needed |
 
 ### Style
 
